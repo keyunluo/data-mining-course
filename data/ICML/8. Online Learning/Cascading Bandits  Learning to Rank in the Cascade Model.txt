@@ -1,0 +1,1271 @@
+Cascading Bandits: Learning to Rank in the Cascade Model
+Branislav Kveton
+Adobe Research, San Jose, CA
+Csaba Szepesvári
+Department of Computing Science, University of Alberta
+Zheng Wen
+Yahoo Labs, Sunnyvale, CA
+Azin Ashkan
+Technicolor Research, Los Altos, CA
+
+Abstract
+A search engine usually outputs a list of K web
+pages. The user examines this list, from the first
+web page to the last, and chooses the first attractive page. This model of user behavior is known
+as the cascade model. In this paper, we propose
+cascading bandits, a learning variant of the cascade model where the objective is to identify K
+most attractive items. We formulate our problem
+as a stochastic combinatorial partial monitoring
+problem. We propose two algorithms for solving
+it, CascadeUCB1 and CascadeKL-UCB. We also
+prove gap-dependent upper bounds on the regret
+of these algorithms and derive a lower bound on
+the regret in cascading bandits. The lower bound
+matches the upper bound of CascadeKL-UCB up
+to a logarithmic factor. We experiment with our
+algorithms on several problems. The algorithms
+perform surprisingly well even when our modeling assumptions are violated.
+
+1. Introduction
+The cascade model is a popular model of user behavior in
+web search (Craswell et al., 2008). In this model, the user
+is recommended a list of K items, such as web pages. The
+user examines the recommended list from the first item to
+the last, and selects the first attractive item. In web search,
+this is manifested as a click. The items before the first attractive item are not attractive, because the user examines
+these items but does not click on them. The items after the
+Proceedings of the 32 nd International Conference on Machine
+Learning, Lille, France, 2015. JMLR: W&CP volume 37. Copyright 2015 by the author(s).
+
+KVETON @ ADOBE . COM
+
+SZEPESVA @ CS . UALBERTA . CA
+
+ZHENGWEN @ YAHOO - INC . COM
+
+AZIN . ASHKAN @ TECHNICOLOR . COM
+
+first attractive item are unobserved, because the user never
+examines these items. The optimal list, the list of K items
+that maximizes the probability that the user finds an attractive item, are K most attractive items. The cascade model
+is simple but effective in explaining the so-called position
+bias in historical click data (Craswell et al., 2008). Therefore, it is a reasonable model of user behavior.
+In this paper, we propose an online learning variant of the
+cascade model, which we refer to as cascading bandits. In
+this model, the learning agent does not know the attraction
+probabilities of items. At time t, the agent recommends to
+the user a list of K items out of L items and then observes
+the index of the item that the user clicks. If the user clicks
+on an item, the agent receives a reward of one. The goal of
+the agent is to maximize its total reward, or equivalently to
+minimize its cumulative regret with respect to the list of K
+most attractive items. Our learning problem can be viewed
+as a bandit problem where the reward of the agent is a part
+of its feedback. But the feedback is richer than the reward.
+Specifically, the agent knows that the items before the first
+attractive item are not attractive.
+We make five contributions. First, we formulate a learning
+variant of the cascade model as a stochastic combinatorial
+partial monitoring problem. Second, we propose two algorithms for solving it, CascadeUCB1 and CascadeKL-UCB.
+CascadeUCB1 is motivated by CombUCB1, a computationally and sample efficient algorithm for stochastic combinatorial semi-bandits (Gai et al., 2012; Kveton et al., 2015).
+CascadeKL-UCB is motivated by KL-UCB and we expect it
+to perform better when the attraction probabilities of items
+are low (Garivier & Cappe, 2011). This setting is common
+in the problems of our interest, such as web search. Third,
+we prove gap-dependent upper bounds on the regret of our
+algorithms. Fourth, we derive a lower bound on the regret
+
+Cascading Bandits: Learning to Rank in the Cascade Model
+
+in cascading bandits. This bound matches the upper bound
+of CascadeKL-UCB up to a logarithmic factor. Finally, we
+experiment with our algorithms on several problems. They
+perform well even when our modeling assumptions are not
+satisfied.
+Our paper is organized as follows. In Section 2, we review
+the cascade model. In Section 3, we introduce our learning
+problem and propose two UCB-like algorithms for solving
+it. In Section 4, we derive gap-dependent upper bounds on
+the regret of CascadeUCB1 and CascadeKL-UCB. In addition, we prove a lower bound and discuss how it relates to
+our upper bounds. We experiment with our learning algorithms in Section 5. In Section 6, we review related work.
+We conclude in Section 7.
+
+2. Background
+Web pages in a search engine can be ranked automatically
+by fitting a model of user behavior in web search from historical click data (Radlinski & Joachims, 2005; Agichtein
+et al., 2006). The user is typically assumed to scan a list of
+K web pages A = (a1 , . . . , aK ), which we call items. The
+items belong to some ground set E = {1, . . . , L}, such as
+the set of all web pages. Many models of user behavior in
+web search exist (Becker et al., 2007; Craswell et al., 2008;
+Richardson et al., 2007). Each of them explains the clicks
+of the user differently. We focus on the cascade model.
+The cascade model is a popular model of user behavior in
+web search (Craswell et al., 2008). In this model, the user
+scans a list of K items A = (a1 , . . . , aK ) 2 ⇧K (E) from
+the first item a1 to the last aK , where ⇧K (E) is the set of
+all K-permutations of set E. The model is parameterized
+by attraction probabilities w̄ 2 [0, 1]E . After the user examines item ak , the item attracts the user with probability
+w̄(ak ), independently of the other items. If the user is attracted by item ak , the user clicks on it and does not examine the remaining items. If the user is not attracted by item
+ak , the user examines item ak+1 . It is easy to see that the
+Qk 1
+probability that item ak is examined is i=1 (1 w̄(ai )),
+and that the probability that at least one item in A is attracQK
+tive is 1
+w̄(ai )). This objective is maximized
+i=1 (1
+by K most attractive items.
+The cascade model assumes that the user clicks on at most
+one item. In practice, the user may click on multiple items.
+The cascade model cannot explain this pattern. Therefore,
+the model was extended in several directions, for instance
+to take into account multiple clicks and the persistence of
+users (Chapelle & Zhang, 2009; Guo et al., 2009a;b). The
+extended models explain click data better than the cascade
+model. Nevertheless, the cascade model is still very attractive, because it is simpler and can be reasonably fit to click
+data. Therefore, as a first step towards understanding more
+complex models, we study an online variant of the cascade
+
+model in this work.
+
+3. Cascading Bandits
+We propose a learning variant of the cascade model (Section 3.1) and two computationally-efficient algorithms for
+solving it (Section 3.2). To simplify exposition, all random
+variables are written in bold.
+3.1. Setting
+We refer to our learning problem as a generalized cascading bandit. Formally, we represent the problem by a tuple
+B = (E, P, K), where E = {1, . . . , L} is a ground set of
+L items, P is a probability distribution over a unit hyperE
+cube {0, 1} , and K  L is the number of recommended
+items. We call the bandit generalized because the form of
+the distribution P has not been specified yet.
+Let (wt )nt=1 be an i.i.d. sequence of n weights drawn from
+E
+P , where wt 2 {0, 1} and wt (e) is the preference of the
+user for item e at time t. That is, wt (e) = 1 if and only if
+item e attracts the user at time t. The learning agent interacts with our problem as follows. At time t, the agent recommends a list of K items At = (at1 , . . . , atK ) 2 ⇧K (E).
+The list is computed from the observations of the agent up
+to time t. The user examines the list, from the first item at1
+to the last atK , and clicks on the first attractive item. If the
+user is not attracted by any item, the user does not click on
+any item. Then time increases to t + 1.
+The reward of the agent at time t can be written in several
+forms. For instance, as maxk wt (atk ), at least one item in
+list At is attractive; or as f (At , wt ), where:
+f (A, w) = 1
+
+K
+Y
+
+(1
+
+w(ak )) ,
+
+k=1
+E
+
+A = (a1 , . . . , aK ) 2 ⇧K (E), and w 2 {0, 1} . This later
+algebraic form is particularly useful in our proofs.
+The agent at time t receives feedback:
+Ct = arg min 1  k  K : wt (atk ) = 1 ,
+where we assume that arg min ; = 1. The feedback Ct
+is the click of the user. If Ct  K, the user clicks on item
+Ct . If Ct = 1, the user does not click on any item. Since
+the user clicks on the first attractive item in the list, we can
+determine the observed weights of all recommended items
+at time t from Ct . In particular, note that:
+wt (atk ) = 1{Ct = k}
+
+k = 1, . . . , min {Ct , K} . (1)
+
+We say that item e is observed at time t if e = atk for some
+1  k  min {Ct , K}.
+
+Cascading Bandits: Learning to Rank in the Cascade Model
+
+In the cascade model (Section 2), the weights of the items
+in the ground set E are distributed independently. We also
+make this assumption.
+Assumption 1. The weights w are distributed as:
+Y
+P (w) =
+Pe (w(e)) ,
+
+Algorithm 1 UCB-like algorithm for cascading bandits.
+// Initialization
+Observe w0 ⇠ P
+8e 2 E : T0 (e)
+1
+8e 2 E : ŵ1 (e)
+w0 (e)
+for all t = 1, . . . , n do
+Compute UCBs Ut (e) (Section 3.2)
+
+e2E
+
+where Pe is a Bernoulli distribution with mean w̄(e).
+Under this assumption, we refer to our learning problem as
+a cascading bandit. In this new problem, the weight of any
+item at time t is drawn independently of the weights of the
+other items at that, or any other, time. This assumption has
+profound consequences and leads to a particularly efficient
+learning algorithm in Section 3.2. More specifically, under
+our assumption, the expected reward for list A 2 ⇧K (E),
+the probability that at least one item in A is attractive, can
+be expressed as E [f (A, w)] = f (A, w̄), and depends only
+on the attraction probabilities of individual items in A.
+The agent’s policy is evaluated by its expected cumulative
+regret:
+" n
+#
+X
+R(n) = E
+R(At , wt ) ,
+t=1
+
+where R(At , wt ) = f (A⇤ , wt ) f (At , wt ) is the instantaneous stochastic regret of the agent at time t and:
+⇤
+
+A = arg max f (A, w̄)
+
+// Recommend a list of K items and get feedback
+Let at1 , . . . , atK be K items with largest UCBs
+At
+(at1 , . . . , atK )
+Observe click Ct 2 {1, . . . , K, 1}
+// Update statistics
+8e 2 E : Tt (e)
+Tt 1 (e)
+for all k = 1, . . . , min {Ct , K} do
+e
+atk
+Tt (e)
+Tt (e) + 1
+Tt 1 (e)ŵTt 1 (e) (e) + 1{Ct = k}
+ŵTt (e) (e)
+Tt (e)
+unspecified and return to it later in our discussions. After
+the user provides feedback Ct , the algorithms update their
+estimates of the attraction probabilities w̄(e) based on (1),
+for all e = atk where k  Ct .
+The UCBs are computed as follows. In CascadeUCB1, the
+UCB on the attraction probability of item e at time t is:
+
+A2⇧K (E)
+
+is the optimal list of items, the list that maximized the reward at any time t. Since f is invariant to the permutation
+of A, there exist at least K! optimal lists. For simplicity of
+exposition, we assume that the optimal solution, as a set, is
+unique.
+3.2. Algorithms
+We propose two algorithms for solving cascading bandits,
+CascadeUCB1 and CascadeKL-UCB. CascadeUCB1 is motivated by UCB1 (Auer et al., 2002) and CascadeKL-UCB is
+motivated by KL-UCB (Garivier & Cappe, 2011).
+The pseudocode of both algorithms is in Algorithm 1. The
+algorithms are similar and differ only in how they estimate
+the upper confidence bound (UCB) Ut (e) on the attraction
+probability of item e at time t. After that, they recommend
+a list of K items with largest UCBs:
+At = arg max f (A, Ut ) .
+
+(2)
+
+A2⇧K (E)
+
+Note that At is determined only up to a permutation of the
+items in it. The payoff is not affected by this ordering. But
+the observations are. For now, we leave the order of items
+
+Ut (e) = ŵTt
+
+1 (e)
+
+(e) + ct
+
+1,Tt
+
+1 (e)
+
+,
+
+where ŵs (e) is the average of s observed weights of item
+e, Tt (e) is the number of times that item e is observed in t
+steps, and:
+p
+ct,s = (1.5 log t)/s
+is the radius of a confidence interval around ŵs (e) after t
+steps such that w̄(e) 2 [ŵs (e) ct,s , ŵs (e) + ct,s ] holds
+with high probability. In CascadeKL-UCB, the UCB on the
+attraction probability of item e at time t is:
+Ut (e) = max{q 2 [ŵTt
+Tt
+
+1 (e)DKL (ŵTt
+
+1 (e)
+
+1 (e)
+
+(e), 1] :
+
+(e) k q)  log t + 3 log log t} ,
+
+where DKL (p k q) is the Kullback-Leibler (KL) divergence
+between two Bernoulli random variables with means p and
+q. Since DKL (p k q) is an increasing function of q for q
+p, the above UCB can be computed efficiently.
+3.3. Initialization
+Both algorithms are initialized by one sample w0 from P .
+Such a sample can be generated in O(L) steps, by recommending each item once as the first item in the list.
+
+Cascading Bandits: Learning to Rank in the Cascade Model
+
+4. Analysis
+Our analysis exploits the fact that our reward and feedback
+models are closely connected. More specifically, we show
+in Section 4.1 that the learning algorithm can suffer regret
+only if it recommends suboptimal items that are observed.
+Based on this result, we prove upper bounds on the n-step
+regret of CascadeUCB1 and CascadeKL-UCB (Section 4.2).
+We prove a lower bound on the regret in cascading bandits
+in Section 4.3. We discuss our results in Section 4.4.
+4.1. Regret Decomposition
+
+= w̄(e⇤ )
+
+(3)
+
+w̄(e)
+
+measures the hardness of discriminating the items. Whenever convenient, we view an ordered list of items as the set
+of items on that list.
+Our main technical lemma is below. The lemma says that
+the expected value of the difference of the products of random variables can be written in a particularly useful form.
+Lemma 1. Let A = (a1 , . . . , aK ) and B = (b1 , . . . , bK )
+be any two lists of K items from ⇧K (E) such that ai = bj
+only if i = j. Let w ⇠ P in Assumption 1. Then:
+"K
+#
+"k 1
+#
+K
+K
+Y
+Y
+X
+Y
+E
+w(ak )
+w(bk ) =
+E
+w(ai ) ⇥
+k=1
+
+k=1
+
+E [w(ak )
+
+0
+
+w(bk )] @
+
+k=1
+
+K
+Y
+
+j=k+1
+
+i=1
+
+1
+
+E [w(bj )]A .
+
+L
+K
+X
+X
+
+e,e⇤ Et
+
+e=K+1 e⇤ =1
+
+↵
+
+L
+K
+X
+X
+
+e,e⇤
+
+Ht = (A1 , C1 , . . . , At
+
+1 , Ct 1 , At )
+
+Ge,e⇤ ,t = {91  k  K s.t. atk = e, ⇡t (k) = e⇤ ,
+wt (atk 1 )
+
+= 0}
+
+The permutation ⇡t reorders the optimal items in a convenient way. Since time t is fixed, let a⇤k = ⇡t (k). Then:
+Et [R(At , wt )] =
+"K
+Y
+Et
+(1 wt (atk ))
+k=1
+
+(5)
+
+K
+Y
+
+(1
+
+#
+
+wt (a⇤k )) .
+
+k=1
+
+Now we exploit the fact that the entries of wt are independent of each other given Ht . By Lemma 1, we can rewrite
+the right-hand side of the above equation as:
+K
+X
+
+Et
+
+"k 1
+Y
+
+(1
+
+i=1
+
+K
+Y
+
+⇥
+
+Et 1
+
+j=k+1
+
+be the history of the learning agent up to choosing At , the
+first t 1 observations and t actions. Let Et [·] = E [· | Ht ]
+be the conditional expectation given history Ht . We bound
+Et [R(At , wt )], the expected regret conditioned on history
+Ht , as follows.
+Theorem 1. For any item e and optimal item e⇤ , let:
+
+Et [1{Ge,e⇤ ,t }] ,
+
+Proof. We define ⇡t as follows. For any k, if the k-th item
+in At is optimal, we place this item at position k, ⇡t (k) =
+atk . The remaining optimal items are positioned arbitrarily.
+Since A⇤ is optimal with respect to w̄, w̄(atk )  w̄(⇡t (k))
+for all k. Similarly, since At is optimal with respect to Ut ,
+Ut (atk ) Ut (⇡t (k)) for all k. Therefore, ⇡t is the desired
+permutation.
+
+@
+
+(4)
+
+[1{Ge,e⇤ ,t }]
+
+where ↵ = (1 w̄(1))K 1 and w̄(1) is the attraction probability of the most attractive item.
+
+0
+
+Let:
+
+= ... =
+
+Et [R(At , wt )]
+
+k=1
+
+Proof. The claim is proved in Appendix B.
+
+wt (at1 )
+
+Et [R(At , wt )] 
+
+e=K+1 e⇤ =1
+
+Without loss of generality, we assume that the items in the
+ground set E are sorted in decreasing order of their attraction probabilities, w̄(1) . . . w̄(L). In this setting, the
+optimal solution is A⇤ = (1, . . . , K), and contains the first
+K items in E. We say that item e is optimal if 1  e  K.
+Similarly, we say that item e is suboptimal if K < e  L.
+The gap between the attraction probabilities of suboptimal
+item e and optimal item e⇤ :
+e,e⇤
+
+be the event that item e is chosen instead of item e⇤ at time
+t, and that item e is observed. Then there exists a permutation ⇡t of optimal items {1, . . . , K}, which is a deterministic function of Ht , such that Ut (atk ) Ut (⇡t (k)) for all
+k. Moreover:
+
+#
+
+⇥
+wt (ati )) Et wt (a⇤k )
+⇤
+
+1
+
+⇤
+wt (atk ) ⇥
+
+wt (a⇤j ) A .
+
+Note that Et [wt (a⇤k ) wt (atk )] = atk ,a⇤k . Furthermore,
+n
+o
+Qk 1
+t
+t
+⇤
+(1
+w
+(a
+))
+=
+1
+G
+t i
+ak ,ak ,t by conditioning on Ht .
+i=1
+Therefore, we get that Et [R(At , wt )] is equal to:
+K
+X
+
+k=1
+
+atk ,a⇤
+k
+
+K
+h n
+oi Y
+⇥
+Et 1 Gatk ,a⇤k ,t
+Et 1
+j=k+1
+
+⇤
+wt (a⇤j ) .
+
+By definition of ⇡t , atk ,a⇤k = 0 when item atk is optimal.
+⇥
+⇤
+In addition, 1 w̄(1)  Et 1 wt (a⇤j )  1 for any optimal a⇤j . Our upper and lower bounds on Et [R(At , wt )]
+follow from these observations.
+
+Cascading Bandits: Learning to Rank in the Cascade Model
+
+4.2. Upper Bounds
+In this section, we derive two upper bounds on the n-step
+regret of CascadeUCB1 and CascadeKL-UCB.
+Theorem 2. The expected n-step regret of CascadeUCB1
+is bounded as:
+R(n) 
+
+L
+X
+
+e=K+1
+
+12
+e,K
+
+log n +
+
+⇡2
+L.
+3
+
+Proof. The complete proof is in Appendix A.1. The proof
+has four main steps. First, we bound the regret of the event
+that w̄(e) is outside of the high-probability confidence interval around ŵTt 1 (e) (e) for at least one item e. Second,
+we decompose the regret at time t and apply Theorem 1 to
+bound it from above. Third, we bound the number of times
+that each suboptimal item is chosen in n steps. Fourth, we
+peel off an extra factor of K in our upper bound based on
+Kveton et al. (2014a). Finally, we sum up the regret of all
+suboptimal items.
+Theorem 3. For any " > 0, the expected n-step regret of
+CascadeKL-UCB is bounded as:
+R(n) 
+
+L
+X
+(1 + ") e,K (1 + log(1/
+DKL (w̄(e) k w̄(K))
+
+e=K+1
+
+e,K ))
+
+⇥
+
+(log n + 3 log log n) + C ,
+
+2 (")
+where C = KL C
++ 7K log log n, and the constants
+n (")
+C2 (") and (") are defined in Garivier & Cappe (2011).
+
+Proof. The complete proof is in Appendix A.2. The proof
+has four main steps. First, we bound the regret of the event
+that w̄(e) > Ut (e) for at least one optimal item e. Second,
+we decompose the regret at time t and apply Theorem 1 to
+bound it from above. Third, we bound the number of times
+that each suboptimal item is chosen in n steps. Fourth, we
+derive a new peeling argument for KL-UCB (Lemma 2) and
+eliminate an extra factor of K in our upper bound. Finally,
+we sum up the regret of all suboptimal items.
+4.3. Lower Bound
+Our lower bound is derived on the following problem. The
+ground set contains L items E = {1, . . . , L}. The distribution P is a product of L Bernoulli distributions Pe , each of
+which is parameterized by:
+(
+p
+eK
+w̄(e) =
+(6)
+p
+otherwise ,
+where 2 (0, p) is the gap between any optimal and suboptimal items. We refer to the resulting bandit problem as
+BLB (L, K, p, ); and parameterize it by L, K, p, and .
+
+Our lower bound holds for consistent algorithms. We say
+that the algorithm is consistent if for any cascading bandit,
+any suboptimal list A, and any ↵ > 0, E [Tn (A)] = o(n↵ ),
+where Tn (A) is the number of times that list A is recommended in n steps. Note that the restriction to the consistent algorithms is without loss of generality. The reason is
+that any inconsistent algorithm must suffer polynomial regret on some instance of cascading bandits, and therefore
+cannot achieve logarithmic regret on every instance of our
+problem, similarly to CascadeUCB1 and CascadeKL-UCB.
+Theorem 4. For any cascading bandit BLB , the regret of
+any consistent algorithm is bounded from below as:
+lim inf
+n!1
+
+R(n)
+log n
+
+(L
+
+K) (1
+DKL (p
+
+p)K
+k p)
+
+1
+
+.
+
+Proof. By Theorem 1, the expected regret at time t conditioned on history Ht is bounded from below as:
+Et [R(At , wt )]
+
+p)K
+
+(1
+
+1
+
+L
+K
+X
+X
+
+e=K+1 e⇤ =1
+
+E [1{Ge,e⇤ ,t }] .
+
+Based on this result, the n-step regret is bounded as:
+" n K
+#
+L
+X
+XX
+K 1
+R(n)
+(1 p)
+E
+1{Ge,e⇤ ,t }
+e=K+1
+
+=
+
+p)K
+
+(1
+
+L
+X
+
+1
+
+t=1 e⇤ =1
+
+E [Tn (e)] ,
+
+e=K+1
+
+where the last step is based on the fact that the observation
+counter of item e increases if and only if event Ge,e⇤ ,t happens. By the work of Lai & Robbins (1985), we have that
+for any suboptimal item e:
+lim inf
+n!1
+
+E [Tn (e)]
+log n
+
+1
+DKL (p
+
+k p)
+
+.
+
+Otherwise, the learning algorithm is unable to distinguish
+instances of our problem where item e is optimal, and thus
+is not consistent. Finally, we chain all inequalities and get:
+lim inf
+n!1
+
+R(n)
+log n
+
+(L
+
+This concludes our proof.
+
+K) (1
+DKL (p
+
+p)K
+k p)
+
+1
+
+.
+
+Our lower bound is practical when no optimal item is very
+attractive, p < 1/K. In this case, the learning agent must
+learn K sufficiently attractive items to identify the optimal
+solution. This lower bound is not practical when p is close
+to 1, because it becomes exponentially small. In this case,
+other lower bounds would be more practical. For instance,
+consider a problem with L items where item 1 is attractive
+with probability one and all other items are attractive with
+probability zero. The optimal list of K items in this problem can be found in L/(2K) steps in expectation.
+
+Cascading Bandits: Learning to Rank in the Cascade Model
+
+4.4. Discussion
+We prove two gap-dependent upper bounds on the n-step
+regret of CascadeUCB1 (Theorem 2) and CascadeKL-UCB
+(Theorem 3). The bounds are O(log n), linear in the number of items L, and they improve as the number of recommended items K increases. The bounds do not depend on
+the order of recommended items. This is due to the nature
+of our proofs, where we count events that ignore the positions of the items. We would like to extend our analysis in
+this direction in future work.
+We discuss the tightness of our upper bounds on problem
+BLB (L, K, p, ) in Section 4.3 where we set p = 1/K. In
+this problem, Theorem 4 yields an asymptotic lower bound
+of:
+⇣
+⌘
+⌦ (L K) DKL (p k p) log n
+(7)
+since (1 1/K)K 1 1/e for K > 1. The n-step regret
+of CascadeUCB1 is bounded by Theorem 2 as:
+O (L
+
+K) 1 log n
+
+= O (L K) 2 log n
+⇣
+⌘
+= O (L K) p(1 p)DKL (p k p) log n
+⇣
+⌘
+= O K(L K) DKL (p k p) log n ,
+
+L
+16
+16
+16
+32
+32
+32
+16
+16
+16
+
+K
+2
+4
+8
+2
+4
+8
+2
+4
+8
+
+0.15
+0.15
+0.15
+0.15
+0.15
+0.15
+0.075
+0.075
+0.075
+
+CascadeUCB1
+1290.1 ± 11.3
+986.8 ± 10.8
+574.8 ± 7.9
+2695.9 ± 19.8
+2256.8 ± 12.8
+1581.0 ± 20.3
+2077.0 ± 32.9
+1520.4 ± 23.4
+725.4 ± 12.0
+
+CascadeKL-UCB
+357.9 ± 5.5
+275.1 ± 5.8
+149.1 ± 3.2
+761.2 ± 10.4
+633.2 ± 7.0
+435.4 ± 5.7
+766.0 ± 18.0
+538.5 ± 12.5
+321.0 ± 16.3
+
+Table 1. The n-step regret of CascadeUCB1 and CascadeKL-UCB
+in n = 105 steps. The list At is ordered from the largest UCB to
+the smallest. All results are averaged over 20 runs.
+L
+16
+16
+16
+32
+32
+32
+16
+16
+16
+
+K
+2
+4
+8
+2
+4
+8
+2
+4
+8
+
+0.15
+0.15
+0.15
+0.15
+0.15
+0.15
+0.075
+0.075
+0.075
+
+CascadeUCB1
+1160.2 ± 11.7
+660.0 ± 8.3
+181.4 ± 3.9
+2471.6 ± 14.1
+1615.3 ± 14.5
+595.0 ± 7.8
+1989.8 ± 31.4
+1239.5 ± 16.2
+336.4 ± 10.3
+
+CascadeKL-UCB
+333.3 ± 6.1
+209.4 ± 4.4
+60.4 ± 2.0
+716.0 ± 7.5
+482.3 ± 6.7
+201.9 ± 5.8
+785.8 ± 12.2
+484.2 ± 12.5
+139.7 ± 6.6
+
+Table 2. The n-step regret of CascadeUCB1 and CascadeKL-UCB
+in n = 105 steps. The list At is ordered from the smallest UCB
+to the largest. All results are averaged over 20 runs.
+
+(8)
+2
+
+where the second equality is by DKL (p
+k p)  p(1 p) .
+The n-step regret of CascadeKL-UCB is bounded by Theorem 3 as:
+⇣
+⌘
+))
+O (L K) D(1+log(1/
+log
+n
+(9)
+k p)
+KL (p
+
+and matches the lower bound in (7) up to log(1/ ). Note
+that the upper bound of CascadeKL-UCB (9) is below that
+of CascadeUCB1 (8) when log(1/ ) = O(K), or equivalently when = ⌦(e K ). It is an open problem whether
+the factor of log(1/ ) in (9) can be eliminated.
+
+5. Experiments
+We conduct four experiments. In Section 5.1, we validate
+that the regret of our algorithms scales as suggested by our
+upper bounds (Section 4.2). In Section 5.2, we experiment
+with recommending items At in the opposite order, in increasing order of their UCBs. In Section 5.3, we show that
+CascadeKL-UCB performs robustly even when our modeling assumptions are violated. In Section 5.4, we compare
+CascadeKL-UCB to ranked bandits.
+5.1. Regret Bounds
+In the first experiment, we validate the qualitative behavior
+of our upper bounds (Section 4.2). We experiment with the
+
+class of problems BLB (L, K, p, ) in Section 4.3. We set
+p = 0.2; and vary L, K, and . The attraction probability
+p is set such that it is close to 1/K for the maximum value
+of K in our experiments. Our upper bounds are reasonably
+tight in this setting (Section 4.4), and we expect the regret
+of our methods to scale accordingly. We recommend items
+At in decreasing order of their UCBs. This order is motivated by the problem of web search, where higher ranked
+items are typically more attractive. We run CascadeUCB1
+and CascadeKL-UCB for n = 105 steps.
+Our results are reported in Table 1. We observe four major
+trends. First, the regret doubles when the number of items
+L doubles. Second, the regret decreases when the number
+of recommended items K increases. These trends are consistent with the fact that our upper bounds are O(L K).
+Third, the regret increases when decreases. Finally, note
+that CascadeKL-UCB outperforms CascadeUCB1. This result is not particularly surprising. KL-UCB is known to outperform UCB1 when the expected payoffs of arms are low
+(Garivier & Cappe, 2011), because its confidence intervals
+get tighter as the Bernoulli parameters get closer to 0 or 1.
+5.2. Worst-of-Best First Item Ordering
+In the second experiment, we recommend items At in increasing order of their UCBs. This choice is not very natural and may be even dangerous. In practice, the user could
+get annoyed if highly ranked items were not attractive. On
+
+Cascading Bandits: Learning to Rank in the Cascade Model
+
+The experimental setup is the same as in Section 5.1. Our
+results are reported in Table 2. When compared to Table 1,
+the regret of CascadeUCB1 and CascadeKL-UCB decreases
+for all settings of K, L, and ; most prominently at large
+values of K. Our current analysis cannot explain this phenomenon and we leave it for future work.
+
+1200
+1000
+
+= 1, (e) = 1
+= 1, (e) = 0.7
+= 0.7, (e) = 1
+= 0.7, (e) = 0.7
+
+800
+Regret
+
+the other hand, the user would provide a lot of feedback on
+low quality items, which could speed up learning. We note
+that the reward in our model does not depend on the order
+of recommended items (Section 3.2). Therefore, the items
+can be ordered arbitrarily, perhaps to maximize feedback.
+In any case, we find it important to study the effect of this
+counterintuitive ordering, at least to demonstrate the effect
+of our modeling assumptions.
+
+600
+400
+200
+0
+
+20k
+
+40k
+
+60k
+
+80k
+
+100k
+
+Step n
+
+Figure 1. The n-step regret of CascadeKL-UCB (solid lines) and
+RankedKL-UCB (dotted lines) in the DBN model in Section 5.3.
+
+5.3. Imperfect Model
+The goal of this experiment is to evaluate CascadeKL-UCB
+in the setting where our modeling assumptions are not satisfied, to test its potential beyond our model. We generate
+data from the dynamic Bayesian network (DBN) model of
+Chapelle & Zhang (2009), a popular extension of the cascade model which is parameterized by attraction probabilities ⇢ 2 [0, 1]E , satisfaction probabilities ⌫ 2 [0, 1]E , and
+the persistence of users 2 (0, 1]. In the DBN model, the
+user is recommended a list of K items A = (a1 , . . . , aK )
+and examines it from the first recommended item a1 to the
+last aK . After the user examines item ak , the item attracts
+the user with probability ⇢(ak ). When the user is attracted
+by the item, the user clicks on it and is satisfied with probability ⌫(ak ). If the user is satisfied, the user does not examine the remaining items. In any other case, the user examines item ak+1 with probability . The reward is one if
+the user is satisfied with the list, and zero otherwise. Note
+that this is not observed. The regret is defined accordingly.
+The feedback are clicks of the user. Note that the user can
+click on multiple items.
+The probability that at least one item in A = (a1 , . . . , aK )
+is satisfactory is:
+K
+X
+
+k=1
+
+k 1
+
+w̄(ak )
+
+kY1
+
+user clicks on multiple items. Then only the last click can
+be satisfactory. But it does not have to be. For instance, it
+could have happened that the user was unsatisfied with the
+last click, and then scanned the recommended list until the
+end and left.
+We experiment on the class of problems BLB (L, K, p, )
+in Section 4.3 and modify it as follows. The ground set E
+has L = 16 items and K = 4. The attraction probability of
+item e is ⇢(e) = w̄(e), where w̄(e) is given in (6). We set
+= 0.15. The satisfaction probabilities ⌫(e) of all items
+are the same. We experiment with two settings of ⌫(e), 1
+and 0.7; and with two settings of persistence , 1 and 0.7.
+We run CascadeKL-UCB for n = 105 steps and use the last
+click as an indicator that the user is satisfied with the item.
+Our results are reported in Figure 1. We observe in all experiments that the regret of CascadeKL-UCB flattens. This
+indicates that CascadeKL-UCB learns the optimal solution
+to the DBN model. An intuitive explanation for this result
+is that the exact values of w̄(e) are not needed to perform
+well. Our current theory does not explain this phenomenon
+and we leave it for future work.
+5.4. Ranked Bandits
+
+(1
+
+w̄(ai )) ,
+
+i=1
+
+where w̄(e) = ⇢(e)⌫(e) is the probability that item e satisfies the user after being examined. This objective is maximized by the list of K items with largest weights w̄(e) that
+are ordered in decreasing order of their weights. Note that
+the order matters.
+The above objective is similar to that in cascading bandits
+(Section 3). Therefore, it may seem that our learning algorithms (Section 3.2) can also learn the optimal solution to
+the DBN model. Unfortunately, this is not guaranteed. The
+reason is that not all clicks of the user are satisfactory. We
+illustrate this issue on a simple problem. Suppose that the
+
+In our final experiment, we compare CascadeKL-UCB to a
+ranked bandit (Section 6) where the base bandit algorithm
+is KL-UCB. We refer to this method as RankedKL-UCB. The
+choice of the base algorithm is motivated by the following
+reasons. First, KL-UCB is the best performing oracle in our
+experiments. Second, since both compared approaches use
+the same oracle, the difference in their regrets is likely due
+to their statistical efficiency, and not the oracle itself.
+The experimental setup is the same as in Section 5.3. Our
+results are reported in Figure 1. We observe that the regret
+of RankedKL-UCB is significantly larger than the regret of
+CascadeKL-UCB, about three times. The reason is that the
+regret in ranked bandits is ⌦(K) (Section 6) and K = 4 in
+
+Cascading Bandits: Learning to Rank in the Cascade Model
+
+this experiment. The regret of our algorithms is O(L K)
+(Section 4.4). Note that CascadeKL-UCB is not guaranteed
+to be optimal in this experiment. Therefore, our results are
+encouraging and show that CascadeKL-UCB could be a viable alternative to more established approaches.
+
+6. Related Work
+Ranked bandits are a popular approach in learning to rank
+(Radlinski et al., 2008) and they are closely related to our
+work. The key characteristic of ranked bandits is that each
+position in the recommended list is an independent bandit
+problem, which is solved by some base bandit algorithm.
+The solutions in ranked bandits are (1 1/e) approximate
+and the regret is ⌦(K) (Radlinski et al., 2008), where K is
+the number of recommended items. Cascading bandits can
+be viewed as a form of ranked bandits where each recommended item attracts the user independently. We propose
+novel algorithms for this setting that can learn the optimal
+solution and whose regret decreases with K. We compare
+one of our algorithms to ranked bandits in Section 5.4.
+Our learning problem is of a combinatorial nature, our objective is to learn K most attractive items out of L. In this
+sense, our work is related to stochastic combinatorial bandits, which are often studied with linear rewards and semibandit feedback (Gai et al., 2012; Kveton et al., 2014a;b;
+2015). The key differences in our work are that the reward
+function is non-linear in unknown parameters; and that the
+feedback is less than semi-bandit, only a subset of the recommended items is observed.
+Our reward function is non-linear in unknown parameters.
+These types of problems have been studied before in various contexts. Filippi et al. (2010) proposed and analyzed a
+generalized linear bandit with bandit feedback. Chen et al.
+(2013) studied a variant of stochastic combinatorial semibandits whose reward function is a known monotone function of a linear function in unknown parameters. Le et al.
+(2014) studied a network optimization problem whose reward function is a non-linear function of observations.
+Bartok et al. (2012) studied finite partial monitoring problems. This is a very general class of problems with finitely
+many actions, which are chosen by the learning agent; and
+finitely many outcomes, which are determined by the environment. The outcome is unobserved and must be inferred
+from the feedback of the environment. Cascading bandits
+can be viewed as finite partial monitoring problems where
+the actions are lists of K items out of L and the outcomes
+are the corners of a L-dimensional binary hypercube. Bartok et al. (2012) proposed an algorithm that can solve such
+problems. This algorithm is computationally inefficient in
+our problem because it needs to reason over all pairs of actions and stores vectors of length 2L . Bartok et al. (2012)
+also do not prove logarithmic distribution-dependent regret
+
+bounds as in our work.
+Agrawal et al. (1989) studied a partial monitoring problem
+with non-linear rewards. In this problem, the environment
+draws a state from a distribution that depends on the action
+of the learning agent and an unknown parameter. The form
+of this dependency is known. The state of the environment
+is observed and determines reward. The reward is a known
+function of the state and action. Agrawal et al. (1989) also
+proposed an algorithm for their problem and proved a logarithmic distribution-dependent regret bound. Similarly to
+Bartok et al. (2012), this algorithm is computationally inefficient in our setting.
+Lin et al. (2014) studied partial monitoring in combinatorial bandits. The setting of this work is different from ours.
+Lin et al. (2014) assume that the feedback is a linear function of the weights of the items that is indexed by actions.
+Our feedback is a non-linear function of the weights of the
+items.
+Mannor & Shamir (2011) and Caron et al. (2012) studied an
+opposite setting to ours, where the learning agent observes
+a superset of chosen items. Chen et al. (2014) studied this
+problem in stochastic combinatorial semi-bandits.
+
+7. Conclusions
+In this paper, we propose a learning variant of the cascade
+model (Craswell et al., 2008), a popular model of user behavior in web search. We propose two algorithms for solving it, CascadeUCB1 and CascadeKL-UCB, and prove gapdependent upper bounds on their regret. Our analysis addresses two main challenges of our problem, a non-linear
+reward function and limited feedback. We evaluate our algorithms on several problems and show that they perform
+well even when our modeling assumptions are violated.
+We leave open several questions of interest. For instance,
+we show in Section 5.3 that CascadeKL-UCB can learn the
+optimal solution to the DBN model. This indicates that the
+DBN model is learnable in the bandit setting and we leave
+this for future work. Note that the regret in cascading bandits is ⌦(L) (Section 4.3). Therefore, our learning framework is not practical when the number of items L is large.
+Similarly to Slivkins et al. (2013), we plan to address this
+issue by embedding the items in some feature space, along
+the lines of Wen et al. (2015). Finally, we want to generalize our results to more complex problems, such as learning
+routing paths in computer networks where the connections
+fail with unknown probabilities.
+From the theoretical point of view, we would like to close
+the gap between our upper and lower bounds. In addition,
+we want to derive gap-free bounds. Finally, we would like
+to refine our analysis so that it explains that the reverse ordering of recommended items yields smaller regret.
+
+Cascading Bandits: Learning to Rank in the Cascade Model
+
+References
+Agichtein, Eugene, Brill, Eric, and Dumais, Susan. Improving web search ranking by incorporating user behavior information. In Proceedings of the 29th Annual
+International ACM SIGIR Conference, pp. 19–26, 2006.
+Agrawal, Rajeev, Teneketzis, Demosthenis, and Anantharam, Venkatachalam. Asymptotically efficient adaptive allocation schemes for controlled i.i.d. processes:
+Finite parameter space. IEEE Transactions on Automatic
+Control, 34(3):258–267, 1989.
+Auer, Peter, Cesa-Bianchi, Nicolo, and Fischer, Paul.
+Finite-time analysis of the multiarmed bandit problem.
+Machine Learning, 47:235–256, 2002.
+Bartok, Gabor, Zolghadr, Navid, and Szepesvari, Csaba.
+An adaptive algorithm for finite stochastic partial monitoring. In Proceedings of the 29th International Conference on Machine Learning, 2012.
+Becker, Hila, Meek, Christopher, and Chickering,
+David Maxwell. Modeling contextual factors of click
+rates. In Proceedings of the 22nd AAAI Conference on
+Artificial Intelligence, pp. 1310–1315, 2007.
+Boucheron, Stephane, Lugosi, Gabor, and Massart, Pascal.
+Concentration Inequalities: A Nonasymptotic Theory of
+Independence. Oxford University Press, 2013.
+Caron, Stephane, Kveton, Branislav, Lelarge, Marc, and
+Bhagat, Smriti. Leveraging side observations in stochastic bandits. In Proceedings of the 28th Conference on
+Uncertainty in Artificial Intelligence, pp. 142–151, 2012.
+Chapelle, Olivier and Zhang, Ya. A dynamic bayesian network click model for web search ranking. In Proceedings of the 18th International Conference on World Wide
+Web, pp. 1–10, 2009.
+Chen, Wei, Wang, Yajun, and Yuan, Yang. Combinatorial multi-armed bandit: General framework, results and
+applications. In Proceedings of the 30th International
+Conference on Machine Learning, pp. 151–159, 2013.
+Chen, Wei, Wang, Yajun, and Yuan, Yang. Combinatorial
+multi-armed bandit and its extension to probabilistically
+triggered arms. CoRR, abs/1407.8339, 2014.
+Craswell, Nick, Zoeter, Onno, Taylor, Michael, and Ramsey, Bill. An experimental comparison of click positionbias models. In Proceedings of the 1st ACM International Conference on Web Search and Data Mining, pp.
+87–94, 2008.
+Filippi, Sarah, Cappe, Olivier, Garivier, Aurelien, and
+Szepesvari, Csaba. Parametric bandits: The generalized
+linear case. In Advances in Neural Information Processing Systems 23, pp. 586–594, 2010.
+
+Gai, Yi, Krishnamachari, Bhaskar, and Jain, Rahul. Combinatorial network optimization with unknown variables:
+Multi-armed bandits with linear rewards and individual
+observations. IEEE/ACM Transactions on Networking,
+20(5):1466–1478, 2012.
+Garivier, Aurelien and Cappe, Olivier. The KL-UCB algorithm for bounded stochastic bandits and beyond. In
+Proceeding of the 24th Annual Conference on Learning
+Theory, pp. 359–376, 2011.
+Guo, Fan, Liu, Chao, Kannan, Anitha, Minka, Tom, Taylor,
+Michael, Wang, Yi Min, and Faloutsos, Christos. Click
+chain model in web search. In Proceedings of the 18th
+International Conference on World Wide Web, pp. 11–
+20, 2009a.
+Guo, Fan, Liu, Chao, and Wang, Yi Min. Efficient multipleclick models in web search. In Proceedings of the 2nd
+ACM International Conference on Web Search and Data
+Mining, pp. 124–131, 2009b.
+Kveton, Branislav, Wen, Zheng, Ashkan, Azin, Eydgahi,
+Hoda, and Eriksson, Brian. Matroid bandits: Fast combinatorial optimization with learning. In Proceedings of
+the 30th Conference on Uncertainty in Artificial Intelligence, pp. 420–429, 2014a.
+Kveton, Branislav, Wen, Zheng, Ashkan, Azin, and Valko,
+Michal. Learning to act greedily: Polymatroid semibandits. CoRR, abs/1405.7752, 2014b.
+Kveton, Branislav, Wen, Zheng, Ashkan, Azin, and
+Szepesvari, Csaba. Tight regret bounds for stochastic
+combinatorial semi-bandits. In Proceedings of the 18th
+International Conference on Artificial Intelligence and
+Statistics, 2015.
+Lai, T. L. and Robbins, Herbert. Asymptotically efficient
+adaptive allocation rules. Advances in Applied Mathematics, 6(1):4–22, 1985.
+Le, Thanh, Szepesvari, Csaba, and Zheng, Rong. Sequential learning for multi-channel wireless network monitoring with channel switching costs. IEEE Transactions on
+Signal Processing, 62(22):5919–5929, 2014.
+Lin, Tian, Abrahao, Bruno, Kleinberg, Robert, Lui, John,
+and Chen, Wei. Combinatorial partial monitoring game
+with linear feedback and its applications. In Proceedings
+of the 31st International Conference on Machine Learning, pp. 901–909, 2014.
+Mannor, Shie and Shamir, Ohad. From bandits to experts:
+On the value of side-observations. In Advances in Neural
+Information Processing Systems 24, pp. 684–692, 2011.
+
+Cascading Bandits: Learning to Rank in the Cascade Model
+
+Radlinski, Filip and Joachims, Thorsten. Query chains:
+Learning to rank from implicit feedback. In Proceedings
+of the 11th ACM SIGKDD International Conference on
+Knowledge Discovery and Data Mining, pp. 239–248,
+2005.
+Radlinski, Filip, Kleinberg, Robert, and Joachims,
+Thorsten. Learning diverse rankings with multi-armed
+bandits. In Proceedings of the 25th International Conference on Machine Learning, pp. 784–791, 2008.
+Richardson, Matthew, Dominowska, Ewa, and Ragno,
+Robert. Predicting clicks: Estimating the click-through
+rate for new ads. In Proceedings of the 16th International
+Conference on World Wide Web, pp. 521–530, 2007.
+Slivkins, Aleksandrs, Radlinski, Filip, and Gollapudi,
+Sreenivas. Ranked bandits in metric spaces: Learning diverse rankings over large document collections. Journal
+of Machine Learning Research, 14(1):399–436, 2013.
+Wen, Zheng, Kveton, Branislav, and Ashkan, Azin. Efficient learning in large-scale combinatorial semi-bandits.
+In Proceedings of the 32nd International Conference on
+Machine Learning, 2015.
+
+

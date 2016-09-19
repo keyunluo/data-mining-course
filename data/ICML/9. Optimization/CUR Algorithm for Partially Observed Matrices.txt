@@ -1,0 +1,1691 @@
+CUR Algorithm for Partially Observed Matrices
+
+Miao Xu
+XUM @ LAMDA . NJU . EDU . CN
+National Key Laboratory for Novel Software Technology, Nanjing University
+Collaborative Innovation Center of Novel Software Technology and Industrialization, Nanjing, China
+Rong Jin
+Institute of Data Science and Technologies at Alibaba Group, Seattle, USA
+
+RONGJIN @ CSE . MSU . EDU
+
+Zhi-Hua Zhou
+ZHOUZH @ LAMDA . NJU . EDU . CN
+National Key Laboratory for Novel Software Technology, Nanjing University
+Collaborative Innovation Center of Novel Software Technology and Industrialization, Nanjing, China
+
+Abstract
+CUR matrix decomposition computes the low
+rank approximation of a given matrix by using
+the actual rows and columns of the matrix. It
+has been a very useful tool for handling large
+matrices. One limitation with the existing algorithms for CUR matrix decomposition is that they
+cannot deal with entries in a partially observed
+matrix, while incomplete matrices are found in
+many real world applications. In this work, we
+alleviate this limitation by developing a CUR decomposition algorithm for partially observed matrices. In particular, the proposed algorithm computes the low rank approximation of the target
+matrix based on (i) the randomly sampled rows
+and columns, and (ii) a subset of observed entries that are randomly sampled from the matrix.
+Our analysis shows the error bound, measured by
+spectral norm, for the proposed algorithm when
+the target matrix is of full rank. We also show
+that only O(nr ln r) observed entries are needed by the proposed algorithm to perfectly recover a rank r matrix of size n × n, which improves
+the sample complexity of the existing algorithms
+for matrix completion. Empirical studies on both
+synthetic and real-world datasets verify our theoretical claims and demonstrate the effectiveness
+of the proposed algorithm.
+
+Proceedings of the 32 nd International Conference on Machine
+Learning, Lille, France, 2015. JMLR: W&CP volume 37. Copyright 2015 by the author(s).
+
+1. Introduction
+In many machine learning applications, it is convenient to represent the data by matrix.
+Examples
+include user-item rating matrix in recommender system (Srebro et al., 2004), gene expression matrix in bioinformatics (Mahoney & Drineas, 2008), kernel matrix in
+kernel learning (Williams & Seeger, 2000), documentterm matrix in document retrieval (Mahoney & Drineas,
+2008), and instance-label matrix in multi-label learning
+(Goldberg et al., 2010). An effective approach for handling big matrices is to approximate them by their low
+rank counterparts which can be computed and stored efficiently. Various methods have been developed for low
+rank matrix approximation, including truncated singular
+value decomposition, matrix factorization (Srebro et al.,
+2004), matrix regression (Koltchinskii, 2011), column subset selection (Boutsidis et al., 2011), the Nyström
+method (Williams & Seeger, 2000), and random SVD techniques (Halko et al., 2011; Woodruff, 2014).
+In this work, we will focus on the CUR algorithm for low
+rank matrix approximation (Mahoney & Drineas, 2009;
+Boutsidis & Woodruff, 2014). It is a randomized algorithm that computes the low rank approximation for a given
+rectangle matrix by randomly sampled columns and rows
+of the matrix. Compared to other low rank approximation algorithms, CUR is advantageous in that it has (i) an
+easy interpretation of the approximation result because the
+subspace is constructed by the actual columns and rows
+of the target matrix (Mahoney & Drineas, 2009), and (ii)
+a strong (near-optimal) theoretical guarantee (Bien et al.,
+2010; Drineas et al., 2006; Mahoney & Drineas, 2008;
+2009; Wang & Zhang, 2012; 2013; Boutsidis & Woodruff,
+2014). The CUR matrix decomposition algorithm has
+been successfully applied to many domains, including
+bioinformatics (Mahoney & Drineas, 2009), collaborative
+
+CUR Algorithm for Partially Observed Matrices
+
+filtering (Mackey et al., 2011), video background modeling (Mackey et al., 2011), hyperspectral medical image analysis (Mahoney et al., 2006), text data analysis (Mahoney & Drineas, 2008). In the past decade,
+many variants of the CUR algorithm have been developed and applied to various domains (Bien et al., 2010;
+Drineas et al., 2006; Mackey et al., 2011; Mahoney et al.,
+2006; Mahoney & Drineas, 2008; 2009; Wang & Zhang,
+2012; 2013; Boutsidis & Woodruff, 2014).
+Despite the success, one limitation with the existing CUR
+algorithms is that they either require an access to the full matrix (Mahoney & Drineas, 2009), or they just use the
+sampled rows and columns (Mahoney & Drineas, 2008),
+ignoring all remaining entries in the matrix. The requirement that the matrix should be fully observed can be difficult to fulfill. For instance, in bioinformatics, it is usually
+too expensive to acquire the full expression information for
+hundreds of genes and thousands of individuals; in crowdsourcing, when both the number of workers and instances
+are large, it becomes impractical to request every worker to
+label all the instances; in social network analysis, it is often the case that only part of the links between individuals
+can be accurately detected. In all the above cases, due to
+the physical or financial constraints, we only have a partial
+observation of the target matrix, making it difficult to apply
+the CUR algorithm without ignoring the incomplete part.
+One way to deal with the missing entries is to first compute an unbiased estimation of the target matrix based
+on the observed entries, and then apply the CUR algorithm to the estimated matrix. The main shortcoming
+of this simple method is that the unbiased estimate can
+be far from the target matrix when the number of observation is small, as we will show in the empirical study. Another approach is to recover the target matrix
+from the observed entries using the matrix completion
+technique (Cai et al., 2010; Candès & Recht, 2012). Since
+most matrix completion algorithms are developed only for
+matrices of exactly low rank, they usually work poorly
+for matrices of full rank (Eriksson et al., 2011). We note
+that although an adaptive sampling approach is developed
+in (Krishnamurthy & Singh, 2013) that does apply to matrices of full rank, they use a different sampling strategy, and
+their bound has a poor dependence on failure probability δ
+(i.e. O(1/δ)), which significantly limits their applications
+when both rows and columns are randomly sampled.
+In this work, we address the challenge by developing a novel CUR algorithm, named CUR+, for partially observed
+matrix. More specifically, the proposed algorithm computes a low rank approximation of matrix M based on
+(i) randomly sampled rows and columns from M , and (ii) randomly sampled entries from M . Unlike most matrix
+completion algorithms that require solving an optimiza-
+
+tion problem involving trace norm regularization (Bach,
+2008; Cai et al., 2010; Ji & Ye, 2009; Mazumder et al.,
+2010; Toh & Sangwoon, 2010), the proposed algorithm
+only needs to solve a standard regression problem and
+therefore is easy to compute. Although the matrix need
+to be observed for the worst case, we develop a error
+bound showing that under minor conditions, the proposed
+CUR+ works for both low-rank and full-rank matrices.
+In particular, to perfectly recover a rank-r matrix of size
+n × n under the incoherent condition (Candès & Recht,
+2012), only O(nr ln r) observed entries are needed, significantly lower than O(nr ln2 n) in standard matrix completion theories (Candès & Recht, 2012; Candès & Tao, 2010;
+Gross, 2011; Keshavan et al., 2010; Recht, 2011) and lower
+than O(nr3/2 ln r) for adaptive matrix recovery algorithm (Krishnamurthy & Singh, 2013). We verify our theoretical claims by empirical studies of low rank matrix approximation on both synthetic data and real data.
+The rest of the paper is organized as follows: Section 2
+briefly reviews the related work. Section 3 presents the proposed algorithm and its theoretical properties. Section 4
+gives our empirical study. Section 5 concludes our work
+with future directions.
+
+2. Related Work
+CUR matrix decomposition CUR algorithms compute
+a low rank approximation of the target matrix using
+the actual rows and columns of the matrix (Bien et al.,
+2010; Drineas et al., 2006; Goreinov et al., 1997a;b;
+Mahoney & Drineas, 2008; 2009; Stewart, 1999;
+Tyrtyshnikov, 2000; Wang & Zhang, 2012; 2013;
+Boutsidis & Woodruff, 2014).
+More specially, let
+M ∈ Rn×m be the given matrix and r be the target rank for
+approximation. A classical CUR decomposition algorithm (Mahoney & Drineas, 2008; 2009) randomly samples d1
+columns and d2 rows from M , according to their leverage
+scores, to form matrices C and R, respectively. The
+c is then computed using the full
+approximated matrix M
+c = C(C † M R† )R (Mahoney & Drineas,
+matrix M as M
+2009), or using the intersection of C and R as
+c = C(DR SR C)† R (Mahoney & Drineas, 2008),
+M
+where † is the pseudoinverse, DR and SR are rescaling
+and selection matrix, respectively. (Drineas et al., 2006)
+gives an additive error bound for the CUR decomposition,
+and an error bound, a significantly stronger result, is
+given in (Mahoney & Drineas, 2008). It is stated in
+(Mahoney & Drineas, 2008) that, with a high probability,
+c∥F ≤ (1 + ϵ)∥M − Mr ∥F
+∥M − M
+
+(1)
+
+where Mr is the best rank-r approximation to M , and ∥·∥F
+is the Frobenius norm of a matrix.
+Various improved versions of CUR have been develope-
+
+CUR Algorithm for Partially Observed Matrices
+
+d. (Mackey et al., 2011) proposes a divide-and-conquer
+method to compute the CUR decomposition in parallel. (Wang & Zhang, 2013) proposes an adaptive CUR
+algorithm with much tighter error bound and much lower time complexity. (Boutsidis & Woodruff, 2014) proposes an input-sparsity CUR algorithm with an optimal
+lower bound. In (Drineas et al., 2006), the authors suggest a simple uniform sampling of columns and rows
+for the CUR decomposition when the maximum statistical leverage scores, also referred to as incoherence measure (Candès & Recht, 2012; Candès & Tao, 2010; Recht,
+2011), is limited. In (Mahoney et al., 2012), algorithms
+have been developed to efficiently compute the approximated values of statistical leverage scores without having
+to calculate the SVD decomposition of a large matrix. As
+we claimed in the introduction section, all the existing CUR
+algorithms either require the knowledge of every entry in
+the target matrix and therefore cannot be applied directly to partially observed matrices, or they totally ignore the
+information contained in those partially observed entries,
+while our work focus on how to exploit those partially observed entries in CUR algorithm to improve approximation
+accuracy. More complete list of related work on CUR can
+be found in (Mahoney & Drineas, 2008; Wang & Zhang,
+2013; Boutsidis & Woodruff, 2014).
+CUR decomposition is closely related to column subset selection problem (Boutsidis et al., 2011;
+Deshpande & Rademacher, 2010; Mahoney & Drineas,
+2008), which has been studied extensively in theoretical
+computer science and numerical analysis communities (Mahoney & Drineas, 2008; 2009; Wang & Zhang,
+2013). It samples multiple columns from the target
+matrix M and use them as the basis to approximate
+M , and is often viewed as a special case of the CUR
+algorithm. A special case of column subset selection is
+Nyström methods, which is usually used to approximate
+Positive Semi-Definitive (PSD) matrix in kernel learning (Williams & Seeger, 2000) while we target general
+matrix. A more complete list of related Nyström methods
+can be found in (Jin et al., 2013).
+
+Matrix Completion The objective of matrix completion is to fill out the missing entries of a low-rank matrix based on the observed ones. In the standard matrix completion theory, when entries are missing uniformly at random, it requires O(nr ln2 n) observed entries to perfectly recover the target matrix under the incoherence condition (Candès & Recht, 2012; Candès & Tao,
+2010; Gross, 2011; Keshavan et al., 2010; Recht, 2011).
+Multiple improvements have been developed for matrix completion, either to deal with nonuniform missing entries or to develop tighter bounds under more
+strict coherence conditions. (Krishnamurthy & Singh,
+
+2013) developed an adaptive sensing strategy for matrix completion that removes an ln n factor from the
+sample complexity.
+In (Bhojanapalli & Jain, 2014;
+Chen et al., 2014), the authors study matrix completion when observed entries are not sampled uniformly at random.
+(Negahban & Wainwright, 2010;
+Rhode & Tsybakov, 2011) generalize matrix completion to
+matrix regression. In (Xu et al., 2013), the authors show
+that the sample complexity for perfect matrix recovery can
+be reduced dramatically with appropriate side information.
+Although it is appealing to directly combine the CUR algorithm with matrix completion to estimate a low rank approximation of a partially observed matrix, it may not work
+well in practice. One issue is that most matrix completion
+algorithms are developed for matrix of exactly low rank,
+significantly limiting its application to low rank matrix application. Although a few studies develop recovery bounds
+for matrix of full rank, most of them assume the column/row space lies in one or multiple low-rank subspaces
+even though the observation can be noisy, thus making
+the matrix full rank (Candès & Plan, 2010; Mackey et al.,
+2011). There are a few works deal with matrix of exactly full rank (Eriksson et al., 2011; Krishnamurthy & Singh,
+2013), but the recovery errors usually deteriorate dramatically when applied to a matrix with a long tail spectrum. In addition, most matrix completion algorithms are computationally expensive, especially for large matrices, since they require, at each iteration of optimization, computing the SVD decomposition of the approximate matrix (Bach, 2008; Cai et al., 2010; Ji & Ye, 2009;
+Mazumder et al., 2010; Toh & Sangwoon, 2010). In contrast, we focus on the general case where the matrix is of
+full rank, a significantly more challenging case and the proposed CUR algorithm scales to large matrix and works well
+for matrix of full rank.
+
+3. CUR+ for Partially Observed Matrices
+We describe the proposed CUR+ algorithm, and then
+present the key theoretical results for it. Due to space limitation, we postpone all the detailed analysis to the supplementary document.
+3.1. CUR+ Algorithm
+Let M ∈ Rn×m be the matrix to be approximated, where
+n ≥ m. To approximate M , we first sample uniformly at
+random d1 columns and d2 rows from M , denoted by A =
+(a1 , . . . , ad1 ) ∈ Rn×d1 , B = (b1 , . . . , bd2 ) ∈ Rm×d2 , respectively, where each ai ∈ Rn and bj ∈ Rm is one row
+and one column of M respectively. We noticed that uniform sampling of rows and columns may not be the best strategy as it does not take into account the difference between
+individual rows and columns. Other sampling strategies,
+
+CUR Algorithm for Partially Observed Matrices
+
+such as sampling rows/columns based on their statistical
+leverage scores (Mahoney & Drineas, 2008) and adaptive
+sampling (Krishnamurthy & Singh, 2013; Wang & Zhang,
+2012), can be more effective. We do not choose these
+sampling methods because they either require an access to
+the full matrix (Mahoney & Drineas, 2008), introduce serious overhead in computation (Wang & Zhang, 2012), or
+result in significantly worse bound when matrix is of full
+rank (Krishnamurthy & Singh, 2013). Finally, for simplicity of discussion, we will assume d1 = d2 = d throughout
+the draft even though our algorithm and analysis can easily
+be extended to the case when d1 ̸= d2 .
+Let r be the target rank for approximation, with r ≤ d.
+b = (b
+b r ) ∈ Rn×r , Vb = (b
+br ) ∈ Rm×r
+U
+u1 , . . . , u
+v1 , . . . , v
+⊤
+⊤
+are the first r eigenvectors of AA and BB , respectively. Besides A and B, we furthermore sample, uniformly
+at random, entries from matrix M . Let Ω include the indices of randomly sampled entries. Our goal is to estimate
+a low rank approximation of matrix M using A, B, and
+randomly sampled entries in Ω. To this end, we will solve
+the following optimization
+min
+
+Z∈Rr×r
+
+1
+b Z Vb ⊤ )∥2F
+∥RΩ (M ) − RΩ (U
+2
+
+(2)
+
+where given Ω, we define a linear operator RΩ (M ) :
+Rn×m 7→ Rn×m as
+{
+Mi,j (i, j) ∈ Ω
+[RΩ (M )]i,j =
+0
+(i, j) ∈
+/Ω
+Let Z∗ be an optimal solution to (2). The estimated low
+c = U
+b Z∗ Vb ⊤ . M
+c can
+rank approximation is given by M
+also be expressed using standard C × U × R formulation
+by solving a group of linear equations. We note that (2) is
+a standard regression problem and therefore can be solved
+efficiently using the standard regression method (e.g. accelerated gradient descent (Nesterov, 2003)). We refer to
+the proposed algorithm as CUR+.
+3.2. Guarantee for CUR+
+Before presenting the theoretical results, we first describe
+the notations that will be used throughout the analysis. Let
+σi , i = 1, . . . , m be the singular values of M ranked in
+descending order, and let ui and vi be the corresponding
+left and right singular vectors. Define U = (u1 , . . . , um )
+and V = (v1 , . . . , vm ). Given r ∈ [m], partitioning the
+SVD decomposition of M as
+[
+][ ⊤ ]
+r m−r
+Σ1
+V1
+M = U ΣV ⊤ =
+(3)
+[U1
+U2 ]
+Σ2
+V2⊤
+e i , i ∈ [n] be the ith row of U1 and v
+ei , i ∈ [m] be the
+Let u
+ith row of V1 . The incoherence measurement for U1 and
+
+Table 1. Current results of sample complexity for matrix
+completion (including matrix regression).
+Comparing
+methods including Sequential Matrix Completion (SMC)
+in (Krishnamurthy & Singh, 2013), Universal Matrix Completion (UMC) in (Bhojanapalli & Jain, 2014), AltMinSense
+in (Jain et al., 2013) and all the other trace norm minimization methods (Candès & Recht, 2012; Candès & Tao, 2010;
+Chen et al., 2014; Keshavan et al., 2010; Recht, 2011).
+
+Method
+CUR+
+SMC
+UMC
+
+#Observation
+nr ln r
+nr ln2 r
+nr2
+
+Method
+AltMinSense
+Others
+
+#Observation
+nr4.5 ln n
+nr ln2 n
+
+V1 is defined as
+
+(
+)
+n
+m
+µ(r) = max max |e
+ui |2 , max |e
+vi |2
+i∈[n] r
+i∈[m] r
+
+(4)
+
+Similarly, we can have the incoherence measure for matrib and Vb that include the first r eigenvectors of AA⊤
+ces U
+b
+b ′i , i ∈ [n] be the ith row of U
+and BB ⊤ , respectively. Let u
+′
+b
+bi , i ∈ [m] be the ith row of V . Define the incoherence
+and v
+b and Vb as
+measure for U
+(
+)
+n ′2
+m ′2
+µ
+b(r) = max max |b
+(5)
+ui | , max |b
+vi |
+i∈[n] r
+i∈[m] r
+Define projection operators PU = U U ⊤ , PV = V V ⊤ ,
+bU
+b ⊤ , and P b = Vb Vb ⊤ . We will use ∥ · ∥2 and ∥ · ∥F
+PUb = U
+V
+respectively for the spectral norm and Frobenius norm.
+We first present the theoretical guarantee for the CUR+ algorithm when the rank of M is no greater than r.
+Theorem 1. (Low-Rank Matrix Approximation) Assume
+rank(M ) ≤ r, d ≥ 7µ(r)r(t + ln r), and |Ω| ≥
+7µ2 (r)r2 (t + 2 ln r). Then, with a probability at least
+c, where M
+c is a low rank ap1 − 5e−t , we have M = M
+proximation estimated by the CUR+ algorithm.
+Remark Theorem 1 shows that a rank-r matrix can be
+perfectly recovered from 2dn + |Ω| = O(nr ln r) observed
+entries with t = Ω(ln r), under the incoherent condition,
+which is a common assumption to perfectly recover an
+incomplete matrix (Candès & Recht, 2012; Candès & Tao,
+2010; Gross, 2011; Keshavan et al., 2010; Recht, 2011). In
+Table 1, we compare the sample complexity of the CUR+
+algorithm with the sample complexity of the other matrix
+completion algorithms. We observe that our result significantly improves the sample complexity from previous
+work. We should note that unlike (Krishnamurthy & Singh,
+2013) where the incoherence measure is only assumed
+for column vectors, we assume a small incoherence measure for both row and column vectors here. It is this
+
+CUR Algorithm for Partially Observed Matrices
+
+stronger assumption that allows us to sample both rows and
+columns, leading to the improvement from previous work
+(Krishnamurthy & Singh, 2013) in the sample complexity
+O(nr3/2 ln r) to O(nr ln r).
+We now consider a more general case where matrix M is
+of full rank. Theorem 2 bounds the difference between M
+c, measured in spectral norm,
+and M
+Theorem 2. Let r ≤ m be an integer that is no larger
+than m. Assume (i) d ≥ 7µ(r)r(t + ln r) , and (ii) |Ω| ≥
+7b
+µ2 (r)r2 (t + 2 ln r). Then with a probability at least 1 −
+3e−t
+(
+)
+m+n
+2
+2
+c
+∥M − M ∥2 ≤ 8σr+1 (1 + 2mn) 1 +
+.
+d
+
+define incoherence measure µ(η) as
+(
+m
+µ(η) = max max
+|Vi,∗ Σ|2 ,
+(6)
+1≤i≤m r(M, η)
+)
+n
+max
+|Ui,∗ Σ|2
+1≤i≤n r(M, η)
+It is easy to verify that µ(η) ≥ 1. Compared to the standard
+incoherence measure defined in (4), the key difference is
+that (6) introduces singular values Σ into the definition of
+incoherence measure, making it appropriate for matrix of
+full rank.
+The following two lemmas relate rµ(r) and rb
+µ(r), respectively, with r(M, η)µ(η),
+Lemma 1. If we choose η = σr2 /mn, we have
+
+As indicated by Theorem 2, when both µ(r) and µ
+b(r), the
+incoherence measure for the first r singular/eigen vectors
+of M and the sampled columns/rows, are small, we have
+(√
+c∥2 ≤ O
+∥M − M
+
+mn2
+∥M − Mr ∥2
+d
+
+)
+
+provided that d ≥ O(r ln r) and |Ω| ≥ O(r2 ln r).
+One limitation with Theorem 2 is that µ
+b(r) is a random
+variable depending on the sampled columns and rows. Since µ
+b(r) can be as high as n/r, |Ω|, the number of observed entries required by Theorem 2, can be as large as
+O(n2 ), making it practically meaningless. Below, we develop a result that explicitly bounds µ
+b with a high probability. Using the high probability bound for µ
+b, we are
+able to show that under appropriate conditions, we need
+at most O(n2 /d2 ) observed entries in order to establish a
+c∥.
+error bound for ∥M − M
+To make our analysis simple, we focus on the case when
+M is of full rank but with skewed singular value
+√ distribution. In particular, we assume σr ≥
+2σr+1 .
+In order to effectively capture the skewed singular value distribution, we introduce the concept of numerical
+rank r(M, η) (Golub & Loan, 1996) with respect to nonnegative constant η > 0
+r(M, η) =
+
+m
+∑
+
+σ2
+i=1 i
+
+σi2
++ mnη
+
+Note that when η = 0, the numerical rank is equivalent to
+the true rank of the matrix. The larger η is , the smaller it
+compared to the true rank. In the following analysis, we
+will replace rank r with numerical rank r(M, η).
+We furthermore generalize the definition of incoherence
+measure to matrix with numerical rank, that is, we further
+
+rµ(r) ≤ 2r(M, η)µ(η)
+Lemma 2. √
+Assume that d ≥ 16(µ(η)r(M, η)+1)(t+ln n),
+and σr ≥ 2σr+1 . Set η = σr2 /mn. With a probability
+1 − 4e−t , we have
+rb
+µ(r) ≤ 2r(M, η)µ(η) + 18nδ 2 /r
+4
+where δ 2 = (µ(η)r(M, η) + 1)(t + ln n)
+d
+Using Theorem 2, Lemma 1 and 2, we have the result for
+full-rank matrix with skewed singular value distribution,
+Theorem 3. (Full Rank Matrix Approximation)
+√ Assume
+d ≥ 16(µ(η)r(M, η) + 1)(t + ln n) and σr ≥ 2σr+1 . Set
+η = σr2 /mn. We have, with a probability 1 − 7e−t ,
+(
+)
+m+n
+2
+2
+c
+∥M − M ∥2 ≤ 8σr+1 (1 + 2mn) 1 +
+if
+d
+(
+|Ω| ≥ 7F (t + 2 ln r) = O
+2
+
+n2
+d2
+
+)
+where
+
+)2
+(
+n
+F = 2µ(η)r(M, η) + 72 (µ(η)r(M, η) + 1)(t + ln n)
+d
+As indicated by Theorem 3, we will have a bound similar
+to that of Theorem 2 if |Ω| ≥ O(n2 /d2 ). The key difference between Theorem 2 and 3 is that in Theorem 2, the
+requirement for |Ω| depends on µ
+b(r), a random variable depending on the sampled rows and columns. In contrast, in
+b and bound |Ω| directly. We finalTheorem 3, we remove µ
+ly note that the result |Ω| ≥ O(n2 /d2 ) requires nearly the
+entire matrix for accurately estimating the low rank approximation of the target matrix. This is due to the challenge to
+recover a full-rank matrix even when the spectrum decays
+in a realistic way. It remains an open question whether it is
+possible to reduce the number of observed entries for CURtype low rank approximation.
+
+CUR Algorithm for Partially Observed Matrices
+
+4. Experiments
+We first verify the theoretical result in Theorem 1, i.e. the
+dependence of sample complexity on r and n, using synthetic data. We then evaluate the performance of the proposed CUR+ algorithm by comparing it to the state-of-theart algorithms for low rank matrix approximation. We implement the proposed algorithm using Matlab, and all the
+experiments were run on a Linux server with CPU 2.53GHz
+and 48GB memory.
+4.1. Experiment (I): Verifying the Dependence on r
+We will verify the sample complexity result in Theorem 1,
+i.e. d ≥ O(r ln r) and |Ω| ≥ O(r2 ln r). Note that the requirements on d and |Ω| are independent from matrix size.
+Settings Here we study square matrices of different sizes and ranks, with n varied in {1, 000; 2, 000;
+l4, 000; 8, 000; 10, 000}, and r varied in {10, 20, 30, 50}.
+For each special n and r, we search for the smallest d and
+|Ω| that can lead to almost perfect recovery of the target mac∥F /∥M ∥F ≤ 2×10−4 ) in all 10 indepentrix (i.e. ∥M − M
+dent trials. To create the rank-r matrix M ∈ Rn×n , we first
+randomly generate matrix ML ∈ Rn×r and MR ∈ Rr×n
+with each entry of ML and MR drawn independently at
+random from N (0, 1), and M is given by M = ML × MR .
+To create A and B, we sample uniformly at random d
+rows and columns. We further sample |Ω| entries from M
+to be partially observed. Under this construction scheme,
+the difference between the incoherence µ(r) for different
+sized matrices are relatively small (from minimum 1.4127
+to maximum 2.4885). Although we will plot d and |Ω|’s
+dependence on µ(r), we will ignore their impact in discussion of the results.
+Results The dependence of minimal d on r and n is given in Figure 1(a) and (b), where (a) plots d against r ln r
+and (b) shows d versus r2 ln r. We can see clearly that d
+has a linear dependence on r ln r. We also observed from
+Figure 1(a) that d is almost independent from n, the matrix size. Figure 1(c) and (d) plot the |Ω|, the minimum
+number of observed entries, against r ln r and r2 ln r. The
+result in Figure 1 (d) confirms our theoretical finding, i.e.
+|Ω| ∝ r2 ln r.
+4.2. Experiment(II): Comparison with Baseline
+Methods for Low Rank Approximation
+We evaluate the performance of the proposed CUR+ algorithm on several benchmark data sets that have been used
+in the recent studies of the CUR matrix decomposition algorithm, including Enron emails (39, 861 × 28, 102), Dexter (20, 000 × 2, 600), Farm Ads (54, 877 × 4, 143) and
+Gisette (13, 500 × 5, 000), where each row of the matrix
+
+corresponds to a document and each column corresponds
+to a term/word. Detailed information of these data sets can
+be found in (Wang & Zhang, 2013). All four matrices are
+of full rank and have skewed singular value distribution, as
+shown in Figure 2
+
+Baselines Since both the rows/columns and entries observed in the proposed algorithm are sampled uniformly
+at random, we only compare our approach to the standard CUR algorithm using uniformly sampled rows and
+columns. Although the adaptive sampling based approaches (Krishnamurthy & Singh, 2013) usually yield lower errors than the standard CUR algorithm, they do not choose
+observed entries randomly and therefore are not included
+in the comparison. Let C be a set of d1 sampled columns
+and R be the set of d2 sampled rows. The low rank approxc = CZR,
+imation by the CUR algorithm is given by M
+d1 ×d2
+where Z ∈ R
+. Two methods are adopted to estimate
+Z. We first estimated Z by Z = C † M R† . Since this estimation requires an access to the full matrix, we refer to
+it in this section as CUR-F (Mahoney & Drineas, 2009).
+In the second method, we estimate Z by the intersection
+of C and R, and then calculate M̂ = CZR. Since this
+method exploits the intersection of C and R, we refer to it
+as CUR-I (Mahoney & Drineas, 2008). Evidently, CUR-F
+is expected to work better than our proposal and will provide a lower bound for the CUR algorithm for partially observed matrices. Note that we also construct an unbiased
+estimator Me by using the randomly observed entries in Ω,
+and then estimate matrix Z by Z = C † Me R† . We call this
+algorithm CUR-E. Its performance deteriorates a lot compared to other algorithms. Due to space limitation, we will
+present the results in the supplementary document.
+
+Settings To make our result comparable to the previous studies, we adapted the same experiment strategy as
+in (Wang & Zhang, 2012; 2013). More specially, for each
+data set, we set d1 = αr and d2 = αd1 , with rank
+r varied in the range of {10, 20, 50} and α is set to be
+5. To create partial observations, we randomly sample
+|Ω| = Ω0 = nmr2 /nnz(M ) entries from the target matrix M , where nnz(M ) is the number of non-zero entries of M . We measure the performance of low rank matrix approximation by the related spectral-norm difference
+c∥/∥M − Mr ∥ which has solid theoretical
+ℓs = ∥M − M
+guarantee according to Theorem 3. To make a fair comparison with previous work measured by Frobenius norm, we
+also report the results measured by relative Frobenius norc∥F /∥M − Mr ∥F . Finally, we folm, that is ℓF = ∥M − M
+low the experimental protocol specified in (Wang & Zhang,
+2012) by repeating every experiment 10 times and reporting the mean value.
+
+CUR Algorithm for Partially Observed Matrices
+
+50
+
+3
+
+40
+
+d
+
+d
+
+40
+n=1000
+n=2000
+n=4000
+n=8000
+n=20000
+
+30
+20
+10
+0
+
+100
+
+200
+
+300
+
+n=1000
+n=2000
+n=4000
+n=8000
+n=20000
+
+30
+20
+
+400
+
+10
+0
+
+0.5
+
+1
+
+µ(r)r ln r
+
+µ(r)r 2 ln r
+
+(a)
+
+(b)
+
+1.5
+
+2
+
+1
+
+0
+100
+
+2
+
+3
+
+n=1000
+n=2000
+n=4000
+n=8000
+n=20000
+
+|Ω|/1000
+
+60
+
+50
+
+|Ω|/1000
+
+60
+
+200
+
+300
+
+400
+
+µ(r)2 r ln r
+
+4
+
+x 10
+
+2
+n=1000
+n=2000
+n=4000
+n=8000
+n=20000
+
+1
+
+0
+0
+
+500
+
+(c)
+
+1
+
+2
+
+µ(r)2 r 2 ln r
+
+3
+4
+
+x 10
+
+(d)
+
+Figure 1. Experiment results on the synthetic data. (a)(b) plot the minimum d for perfect matrix recovery against r ln r and r2 ln r
+respectively, and (c)(d) plot the minimum |Ω| for perfect matrix recovery against r ln r and r2 ln r. The results confirm the theoretical
+finding in Theorem 1, i.e. d = O(r ln r) and |Ω| = O(r2 ln r).
+5
+
+4
+
+3000
+
+2.5
+
+x 10
+
+14
+
+300
+
+2
+
+250
+
+1.5
+
+200
+
+10
+
+2000
+
+8
+
+150
+1
+
+1000
+
+0
+
+1
+
+2
+
+0
+4
+
+x 10
+
+Enron
+
+6
+
+100
+
+0.5
+0
+
+x 10
+
+12
+
+4
+
+50
+
+2
+
+0
+0
+
+1000
+
+2000
+
+Dexter
+
+0
+
+1000
+
+2000
+
+3000
+
+4000
+
+Farm Ads
+
+0
+
+0
+
+1000 2000 3000 4000 5000
+
+Gisette
+
+Figure 2. Singular values of the real data sets ranked in descending order. All these four data sets are full-rank and have skewed singular
+value distribution.
+
+Results Figure 3 shows the results of low rank matrix approximation. We observe that in most cases, with increasing number of observed entries, CUR+ shows much more
+similar performance as CUR-F that has an access to the full
+target matrix M . Note that because CUR-I do not use those
+partially observed entries, their performance do not change
+with increasing |Ω|. On the other hand, on most datasets,
+although CUR+’s performance is similar to that of CUR-I
+at the beginning when the number of observed entries is small, their performance diverges a lot with increasing number of observed entries. We observe that there are several
+exceptions, for example, Enron data when r = 10, We plan
+to examine this unusual phenomenon in the future.
+Figure 4 shows the results measured by Frobenius norm
+for r = 10, 20 and 50. We found the results are similar
+to that measured by spectral norm, that is, CUR+ yields similar performance as CUR-F with increasing number
+of observed entries, and performs significantly better than
+CUR-I when more entries are observed.
+
+5. Conclusion
+In this paper, we propose a CUR-style low rank approximation algorithm for partially observed matrix. Our analysis
+shows that the proposed algorithm only needs O(nr ln r)
+number of observed entries to perfectly recover a low-rank
+matrix, improving the results of the existing algorithms for
+matrix completion (of course under a slightly stronger condition). We also show the the spectral error bound for the
+proposed algorithm when the target matrix is of full rank.
+Empirical studies on both synthetic data and real datasets
+
+verify our theoretical claims and furthermore, demonstrate
+that the proposed algorithm is more effective in handling
+partially observed matrix than the existing CUR algorithms. Since adaptive sampling has shown promising results for
+low rank matrix approximation (Krishnamurthy & Singh,
+2013), in the future, we plan to combine the proposed algorithm with adaptive sampling strategy to further reduce
+the error bound. We also plan to exploit the recent studies on matrix approximation/completion with non-uniform
+sampling and extend the CUR algorithm to the case when
+observed entries are non-uniform sampled.
+
+Acknowledgments
+The authors want to thank all those people (especially all the reviewers) providing helpful comments and suggestions to improve the paper. This research was partially
+supported by the 973 Program (2014CB340501) and NSFC (61333014, 61305067).
+
+References
+Bach, F. Consistency of trace norm minimization. Journal
+of Machine Learning Research (JMLR), 9:1019–1048,
+2008.
+Bhojanapalli, S. and Jain, P. Universal matrix completion.
+In the International Conference on Machine Learning
+(ICML), 2014.
+Bien, J., Xu, Y., and Mahoney, M. Cur from a sparse opti-
+
+CUR Algorithm for Partially Observed Matrices
+6.5
+
+5
+4
+3.5
+
+CUR+
+CUR−I
+CUR−Full
+
+4.5
+
+Ω0
+
+2Ω0
+
+3Ω0
+
+4Ω0
+
+4
+
+5Ω0
+
+Ω0
+
+Enron, r = 10
+CUR+
+CUR−I
+CUR−Full
+
+5Ω0
+
+8
+
+4.5
+
+2Ω0
+
+3Ω0
+
+4Ω0
+
+4
+
+5Ω0
+
+CUR+
+CUR−I
+CUR−Full
+
+Ω0
+
+Enron r = 20
+12
+
+20
+
+10
+
+10
+
+2Ω0
+
+3Ω0
+
+4Ω0
+
+2Ω0
+
+3Ω0
+
+4Ω0
+
+2
+
+5Ω0
+
+ℓs
+0
+
+2Ω0
+
+3Ω0
+
+4Ω0
+
+5Ω0
+
+30
+
+6
+
+25
+
+Enron r = 50
+
+3Ω0
+
+4Ω0
+
+CUR+
+CUR−I
+CUR−Full
+
+4
+
+1
+
+5Ω0
+
+Dexter r = 50
+
+Ω0
+
+2Ω0
+
+3Ω0
+
+4Ω0
+
+5Ω0
+
+20
+
+5
+
+CUR+
+CUR−I
+CUR−Full
+
+15
+10
+5
+
+2
+
+2Ω0
+
+5Ω0
+
+Gisette r = 20
+
+7
+
+3
+
+Ω0
+
+4Ω0
+
+CUR+
+CUR−I
+CUR−Full
+
+Farm Ads r = 20
+
+4
+
+Ω0
+
+3Ω0
+
+5
+
+Ω0
+
+6
+
+5
+
+2Ω0
+
+10
+CUR+
+CUR−I
+CUR−Full
+
+2
+
+5Ω0
+
+CUR+
+CUR−I
+CUR−Full
+
+8
+
+Ω0
+
+Gisette, r = 10
+
+3
+
+ℓs
+
+ℓs
+
+CUR+
+CUR−I
+CUR−Full
+
+5Ω
+
+2.5
+
+ℓs
+
+15
+
+4Ω
+
+15
+
+3.5
+
+Dexter r = 20
+
+25
+
+3Ω
+
+4
+
+5
+
+Ω0
+
+2
+
+2Ω
+
+Farm Ads, r = 10
+5
+
+6
+
+4
+
+4
+
+Ω
+
+9
+
+CUR+
+CUR−I
+CUR−Full
+
+6
+
+2
+
+7
+
+5
+
+0
+
+4Ω0
+
+8
+
+2.5
+
+ℓs
+
+6
+
+3
+
+3Ω0
+
+ℓs
+
+ℓs
+
+7
+
+2Ω0
+
+CUR+
+CUR−I
+CUR−Full
+
+3
+
+Dexter, r = 10
+
+9
+8
+
+10
+
+3.5
+
+ℓs
+
+4.5
+
+12
+
+5.5
+
+ℓs
+
+ℓs
+
+5
+
+4
+
+6
+
+ℓs
+
+CUR+
+CUR−I
+CUR−Full
+
+ℓs
+
+5.5
+
+Ω0
+
+2Ω0
+
+3Ω0
+
+4Ω0
+
+0
+
+5Ω0
+
+Ω0
+
+2Ω0
+
+3Ω0
+
+4Ω0
+
+5Ω0
+
+Gisette r = 50
+
+Farm Ads r = 50
+
+Figure 3. Comparison of CUR algorithms with the number of sampled columns (rows) fixed as d1 = 5r (d2 = 5d1 ), where r =
+10, 20, 50. The number of observed entries |Ω| is varied from Ω0 to 5Ω0 . The results are measured by relative spectral norm.
+1.25
+
+1.4
+1.35
+
+1.25
+
+CUR+
+CUR−I
+CUR−Full
+
+1.2
+
+2
+
+CUR+
+CUR−I
+CUR−Full
+
+1.8
+1.6
+
+1.15
+
+1.4
+
+1.15
+1.25
+
+1.1
+
+Ω0
+
+2Ω0
+
+3Ω0
+
+4Ω0
+
+1.05
+
+5Ω0
+
+Enron r = 10
+
+1.2
+
+Ω0
+
+2Ω0
+
+3Ω0
+
+4Ω0
+
+1.1
+
+5Ω0
+
+Dexter r = 10
+1.25
+
+1.6
+1.5
+
+CUR+
+CUR−I
+CUR−Full
+
+ℓF
+
+ℓF
+
+ℓF
+
+ℓF
+
+1.2
+CUR+
+CUR−I
+CUR−Full
+
+1.3
+
+2Ω0
+
+3Ω0
+
+4Ω0
+
+1
+
+5Ω0
+
+1.25
+
+2Ω0
+
+3Ω0
+
+4Ω0
+
+5Ω0
+
+2.5
+
+CUR+
+CUR−I
+CUR−Full
+
+1.2
+
+Ω0
+
+Gisette r = 10
+
+Farm Ads r = 10
+
+CUR+
+CUR−I
+CUR−Full
+
+1.2
+
+Ω0
+
+1.15
+
+CUR+
+CUR−I
+CUR−Full
+
+ℓF
+
+ℓF
+
+ℓF
+
+ℓF
+
+2
+CUR+
+CUR−I
+CUR−Full
+
+1.4
+
+1.15
+
+1.5
+1.3
+
+1.1
+
+2Ω0
+
+3Ω0
+
+4Ω0
+
+1.05
+
+5Ω0
+
+Enron r = 20
+
+3Ω0
+
+1.3
+
+1.5
+
+2Ω0
+
+3Ω0
+
+4Ω0
+
+Enron r = 50
+
+5Ω0
+
+Ω0
+
+2Ω0
+
+3Ω0
+
+4Ω0
+
+1
+
+5Ω0
+
+1.4
+
+2Ω0
+
+3Ω0
+
+ℓF
+
+CUR+
+CUR−I
+CUR−Full
+
+2
+
+1.15
+
+1.05
+
+1.5
+
+1.1
+
+Ω0
+
+2Ω0
+
+3Ω0
+
+4Ω0
+
+5Ω0
+
+Dexter r = 50
+
+1
+
+5Ω0
+
+2.5
+
+1.2
+1.2
+
+4Ω0
+
+3
+
+CUR+
+CUR−I
+CUR−Full
+
+1.3
+
+Ω0
+
+Gisette r = 20
+
+Farm Ads r = 20
+
+1.1
+
+Ω0
+
+1.05
+
+5Ω0
+
+ℓF
+
+CUR+
+CUR−I
+CUR−Full
+
+2
+
+4Ω0
+
+CUR+
+CUR−I
+CUR−Full
+
+1.25
+
+2.5
+
+ℓF
+
+2Ω0
+
+Dexter r = 20
+
+3
+
+1
+
+Ω0
+
+ℓF
+
+Ω0
+
+1.1
+
+Ω0
+
+2Ω0
+
+3Ω0
+
+4Ω0
+
+5Ω0
+
+Farm Ads r = 50
+
+1
+
+Ω0
+
+2Ω0
+
+3Ω0
+
+4Ω0
+
+5Ω0
+
+Gisette r = 50
+
+Figure 4. Comparison of CUR algorithms with the number of sampled columns (rows) fixed as d1 = 5r (d2 = 5d1 ), where r =
+10, 20, 50. The number of observed entries |Ω| is varied from Ω0 to 5Ω0 . The results are measured by relative Frobenius norm.
+
+mization viewpoint. In Advances in Neural Information
+Processing Systems (NIPS), 2010.
+Boutsidis, C. and Woodruff, D. P. Optimal CUR matrix
+decompositions. In Symposium on Theory of Computing
+
+STOC, 2014.
+Boutsidis, C., Drineas, P., and Magdon-Ismail, M. Near
+optimal column-based matrix reconstruction. In IEEE
+
+CUR Algorithm for Partially Observed Matrices
+
+Annual Symposium on Foundations of Computer Science
+(FOCS), 2011.
+Cai, J.-F., Candès, E., and Shen, Z. A singular value thresholding algorithm for matrix completion. SIAM Journal
+of Optimization, 20(4):1956–1982, 2010.
+Candès, E. and Plan, Y. Matrix completion with noise. Proceedings of the IEEE (PIEEE), 98(6):925–936, 2010.
+Candès, E. and Recht, B. Exact matrix completion via convex optimization. Communication of the ACM, 2012.
+Candès, E. and Tao, T. The power of convex relaxation:
+near-optimal matrix completion. IEEE Transaction of
+Information Theory (TIT), 2010.
+Chen, Y., Bhojanapalli, S., Sanghavi, S., and Ward, R. Coherent matrix completion. In the International Conference on Machine Learning (ICML), 2014.
+Deshpande, A. and Rademacher, L. Efficient volume sampling for row/column subset selection. In IEEE Annual
+Symposium on Foundations of Computer Science (FOCS), 2010.
+
+Jain, P., Netrapalli, P., and Sanghavi, S. Low-rank matrix
+completion using alternating minimization. In Symposium on Theory of Computing STOC, 2013.
+Ji, S. and Ye, J. An accelerated gradient method for trace
+norm minimization. In the International Conference on
+Machine Learning (ICML), 2009.
+Jin, R., Yang, T., Mahdavi, M., Li, Y.-F., and Zhou, Z.-H.
+Improved bounds for the nyström method with application to kernel classification. IEEE Transaction on Information Theory (TIT), 59(10):6939–6949, 2013.
+Keshavan, R., Montanari, A., and Oh, S. Matrix completion from a few entries. IEEE Transaction on Information Theory (TIT), 2010.
+Koltchinskii, V. Low rank matrix recovery: nuclear norm
+penalization. In Oracle Inequalities in Empirical Risk
+Minimization and Sparse Recovery Problems. Springer,
+2011.
+Krishnamurthy, A. and Singh, A. Low-rank matrix and
+tensor completion via adaptive sampling. In Advances
+in Neural Information Processing Systems (NIPS), 2013.
+
+Drineas, P., Kannan, R., and Mahoney, M.W. Fast Monte
+Carlo algorithms for matrices III: Computing a compressed approximate matrix decomposition. SIAM Journal on Computation, 36:184–206, 2006.
+
+Mackey, L., Talwalkar, A., and Jordan, M. Divide-andconquer matrix factorization. In Advances in Neural Information Processing Systems (NIPS), 2011.
+
+Eriksson, B., Balzano, L., and Nowak, R. High-rank matrix
+completion and subspace clustering with missing data.
+CoRR, 2011.
+
+Mahoney, M., Maggioni, M., and Drineas, P. Tensor-cur
+decompositions for tensor-based data. In Knowledge
+Discovery and Data Mining (KDD), 2006.
+
+Goldberg, A., Zhu, X., Recht, B., Xu, J.-M., and Nowak, R.
+Transduction with matrix completion: Three birds with
+one stone. In Advances in Neural Information Processing Systems (NIPS), 2010.
+
+Mahoney, M., Drineas, P., Magdon-Ismail, M., and
+Woodruff, D. Fast approximation of matrix coherence
+and statistical leverage. In the International Conference
+on Machine Learning (ICML), 2012.
+
+Golub, G. and Loan, C. Matrix computations (3rd ed.).
+Johns Hopkins University Press, 1996.
+
+Mahoney, M. W. and Drineas, P. Relative-error CUR matrix decompositions. SIAM Journal of Matrix Analysis
+and Applications, 30:844–881, 2008.
+
+Goreinov, S., Zamarashkin, N., and Tyrtyshnikov, E.
+seudo-skeleton approximations by matrices of maximal
+volume. Mathematical Notes, 62(4):515–519, 1997a.
+Goreinov, S. A., Tyrtyshnikov, E. E., and Zamarashkin,
+N. L. A theory of pseudoskeleton approximations. Linear Algebra and Its Applications, 261(1-3):1–21, 1997b.
+
+Mahoney, M. W. and Drineas, P. CUR matrix decompositions for improved data analysis. Proceedings of the
+National Academy of Sciences of the United States of
+America, 106:697–702, 2009.
+
+Gross, D. Recovering low-rank matrices from few coefficients in any basis. IEEE Transaction on Information
+Theory (TIT), 57(3):1548–1566, 2011.
+
+Mazumder, R., Hastie, T., and Tibshirani, R. Spectral regularization algorithms for learning large incomplete matrices. Journal of Machine Learning Research (JMLR),
+11:2287–2322, 2010.
+
+Halko, N., Martinsson, P.-G., and Tropp, J. A. Finding
+structure with randomness: Probabilistic algorithms for
+constructing approximate matrix decompositions. SIAM
+Review, 53(2):217–288, 2011.
+
+Negahban, S. and Wainwright, M. Estimation of (near)
+low-rank matrices with noise and high-dimensional scaling. In the International Conference on Machine Learning(ICML), 2010.
+
+CUR Algorithm for Partially Observed Matrices
+
+Nesterov, Y. Introductory Lectures on Convex Optimization: A Basic Course. Springer, 2003.
+Recht, B. A simpler approach to matrix completion. Journal of Machine Learning Research (JMLR), 12:3413–
+3430, 2011.
+Rhode, A. and Tsybakov, A. Estimation of high dimensional low rank matrices. Annual of Statistics, 39(2):
+887–930, 2011.
+Srebro, N., Rennie, J., and Jaakkola, T. Maximum-margin
+matrix factorization. In Advances in Neural Information
+Processing Systems (NIPS), 2004.
+Stewart, G. Four algorithms for the the efficient computation of truncated pivoted qr approximations to a sparse
+matrix. Numerische Mathematik, 1999.
+Toh, K.-C. and Sangwoon, Y. An accelerated proximal gradient algorithm for nuclear norm regularized linear least
+squares problems. Pacific Journal of Optimization, 2010.
+Tyrtyshnikov, E. Incomplete cross approximation in the
+mosaic-skeleton method. Computing, 2000.
+Wang, S. and Zhang, Z. A scalable cur matrix decomposition algorithm: Lower time complexity and tighter
+bound. In Advances in Neural Information Processing
+Systems (NIPS), 2012.
+Wang, S. and Zhang, Z. Improving cur matrix decomposition and the nyström approximation via adaptive sampling. Journal of Machine Learning Research (JMLR),
+14(1):2729–2769, 2013.
+Williams, C. and Seeger, M. Using the nyström method to
+speed up kernel machines. In Advances in Neural Information Processing Systems (NIPS), 2000.
+Woodruff, D. P. Sketching as a tool for numerical linear algebra. Foundations and Trends in Theoretical Computer
+Science, 10(1-2):1–157, 2014.
+Xu, M., Jin, R., and Zhou, Z.-H. Speedup matrix completion with side information: Application to multi-label
+learning. In Advances in Neural Information Processing
+Systems (NIPS), 2013.
+
+

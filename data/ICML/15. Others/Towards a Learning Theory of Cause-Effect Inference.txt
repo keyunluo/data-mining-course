@@ -1,0 +1,1102 @@
+Towards a Learning Theory of Cause-Effect Inference
+
+David Lopez-Paz1,2
+Krikamol Muandet1
+Bernhard Schölkopf1
+Ilya Tolstikhin1
+1
+Max-Planck-Institute for Intelligent Systems
+2
+University of Cambridge
+
+Abstract
+We pose causal inference as the problem of learning to classify probability distributions. In
+particular, we assume access to a collection
+{(Si , li )}ni=1 , where each Si is a sample drawn
+from the probability distribution of Xi ×Yi , and li
+is a binary label indicating whether “Xi → Yi ” or
+“Xi ← Yi ”. Given these data, we build a causal
+inference rule in two steps. First, we featurize
+each Si using the kernel mean embedding associated with some characteristic kernel. Second,
+we train a binary classifier on such embeddings to
+distinguish between causal directions. We present
+generalization bounds showing the statistical consistency and learning rates of the proposed approach, and provide a simple implementation that
+achieves state-of-the-art cause-effect inference.
+Furthermore, we extend our ideas to infer causal
+relationships between more than two variables.
+
+1. Introduction
+The vast majority of statistical learning algorithms rely on
+the exploitation of associations between the variables under study. Given the argument that all associations arise
+from underlying causal structures (Reichenbach, 1956), and
+that different structures imply different influences between
+variables, the question of how to infer and use causal knowledge in learning acquires great importance (Pearl, 2000;
+Schölkopf et al., 2012). Traditionally, the most widely
+used strategy to infer the causal structure of a system is
+to perform interventions on some of its variables, while
+studying the response of some others. However, such interventions are in many situations unethical, expensive, or
+Proceedings of the 32 nd International Conference on Machine
+Learning, Lille, France, 2015. JMLR: W&CP volume 37. Copyright 2015 by the author(s).
+
+DAVID @ LOPEZPAZ . ORG
+KRIKAMOL @ TUEBINGEN . MPG . DE
+BS @ TUEBINGEN . MPG . DE
+ILYA @ TUEBINGEN . MPG . DE
+
+even impossible to realize. Consequently, we often face the
+need of causal inference purely from observational data.
+In these scenarios, one suffers, in the absence of strong
+assumptions, from the indistinguishability between latent
+confounding (X ← Z → Y ) and direct causation (X → Y
+or X ← Y ). Nevertheless, disregarding the impossibility
+of the task, humans continuously learn from experience to
+accurately infer causality-revealing patterns. Inspired by
+this successful learning, and in contrast to prior work, this
+paper addresses causal inference by unveiling such causal
+patterns directly from data. In particular, we assume access
+to a set {(Si , li )}ni=1 , where each Si is a sample set drawn
+from the probability distribution of Xi × Yi , and li is a
+binary label indicating whether “Xi → Yi ” or “Xi ← Yi ”.
+Using these data, we build a causal inference rule in two
+steps. First, we construct a suitable and nonparametric representation of each sample Si . Second, we train a nonlinear
+binary classifier on such features to distinguish between
+causal directions. Building upon this framework, we derive
+theoretical guarantees regarding consistency and learning
+rates, extend inference to the multivariate case, propose
+approximations to scale learning to big data, and obtain
+state-of-the-art performance with a simple implementation.
+Given the ubiquity of uncertainty in data, which may arise
+from noisy measurements or the existence of unobserved
+common causes, we adopt the probabilistic interpretation of
+causation from Pearl (2000). Under this interpretation, the
+causal structure underlying a set of random variables X =
+(X1 , . . . , Xd ), with joint distribution P , is often described
+in terms of a Directed Acyclic Graph (DAG), denoted by
+G = (V, E). In this graph, each vertex Vi ∈ V is associated
+to the random variable Xi ∈ X, and an edge Eji ∈ E
+from Vj to Vi denotes the causal relationship “Xi ← Xj ”.
+More specifically, these causal relationships are defined by
+a structural equation model: each Xi ← fi (Pa(Xi ), Ni ),
+where fi is a function, Pa(Xi ) is the parental set of Vi ∈ V ,
+and Ni is some independent noise variable. Then, causal
+inference is the task of recovering G from S ∼ P n .
+
+Towards a Learning Theory of Cause-Effect Inference
+
+1.1. Prior Art
+We now briefly review the state-of-the-art on the inference
+of causal structures G from observational data S ∼ P n . For
+a more thorough exposition, see, e.g., Mooij et al. (2014).
+One of the main strategies to recover G is through the exploration of conditional dependencies, together with some
+other technical assumptions such as the Markov and faithfulness relationships between P and G (Pearl, 2000). This
+is the case of the PC algorithm (Spirtes et al., 2000), which
+allows the recovery of the Markov equivalence class of G
+without placing any restrictions on the structural equation
+model specifying the random variables under study.
+Causal inference algorithms that exploit conditional dependencies are unsuited for inference in the bivariate case. Consequently, a large body of work has been dedicated to the
+study of this scenario. First, the linear non-Gaussian causal
+model (Shimizu et al., 2006; 2011) recovers the true causal
+direction between two variables whenever their relationship
+is linear and polluted with additive and non-Gaussian noise.
+This model was later extended into nonlinear additive noise
+models (Hoyer et al., 2009; Zhang & Hyvärinen, 2009; Stegle et al., 2010; Kpotufe et al., 2013; Peters et al., 2014),
+which prefer the causal direction under which the alleged
+cause is independent from the additive residuals of some
+nonlinear fit to the alleged effect. Third, the information geometric causal inference framework (Daniusis et al., 2012;
+Janzing et al., 2014) assumes that the cause random variable is independently generated from some invertible and
+deterministic mapping to its effect; thus, it is unlikely to
+find dependencies between the density of the former and the
+slope of the latter, under the correct causal direction.
+As it may be inferred from the previous exposition, there
+exists a large and heterogeneous array of causal inference
+algorithms, each of them working under a very specialized
+set of assumptions, which are sometimes difficult to test in
+practice. Therefore, there exists the need for a more flexible
+causal inference rule, capable of learning the relevant causal
+footprints, later used for inference, directly from data. Such
+a “data driven” approach would allow to deal with complex
+data-generating processes, and would greatly reduce the
+need of explicitly crafting identifiability conditions a-priori.
+A preliminary step in this direction distilled from the competitions organized by Guyon (2013; 2014), which phrased
+causal inference as a learning problem. In these competitions, the participants were provided with a large coln
+lection of cause-effect samples {(Si , li )}i=1
+, where Si =
+ni
+{(xij , yij )}j=1 is drawn from the probability distribution
+of Xi × Yi , and li is a binary label indicating whether
+“Xi → Yi ” or “Yi → Xi ”. Given these data, most participants adopted the strategy of i) crafting a vector of features
+from each Si , and ii) training a binary classifier on top of
+
+the constructed features and paired labels. Although these
+“data-driven” methods achieved state-of-the-art performance
+(Guyon, 2013), the laborious task of hand-crafting features
+renders their theoretical analysis impossible.
+In more specific terms, the approach described above is a
+learning problem with inputs being sample sets Si , where
+each Si contains samples drawn from the probability distribution Pi (Xi , Yi ). In a separate strand of research, there
+has been several attempts to learn from probability distributions in a principled manner (Jebara et al., 2004; Hein &
+Bousquet, 2004; Cuturi et al., 2005; Martins et al., 2009;
+Muandet et al., 2012). Szabó et al. (2014) presented the
+first theoretical analysis of distributional learning based on
+kernel mean embedding (Smola et al., 2007), with focus on
+kernel ridge regression. Similarly, Muandet et al. (2012)
+studied the problem of classifying distributions, but their approach is constrained to kernel machines, and no guarantees
+regarding consistency or learning rates are provided.
+1.2. Our Contribution
+Inspired by Guyon’s competitions, we pose causal inference as the problem of classifying probability measures on
+causally related pairs of random variables. Our contribution
+to this framework is the use of kernel mean embeddings
+to nonparametrically featurize each cause-effect sample Si .
+The benefits of this approach are three-fold. First, this
+avoids the need of hand-engineering features from the samples Si . Second, this enables a clean theoretical analysis,
+including provable learning rates and consistency results.
+Third, the kernel hyperparameters (that is, the data representation) can be jointly optimized with the classifier using
+cross-validation. Furthermore, we show how to extend these
+ideas to infer causal relationships between d ≥ 2 variables,
+give theoretically sustained approximations to scale learning to big data, and provide the source code of a simple
+implementation that outperforms the state-of-the-art.
+The rest of this article is organized as follows. Section 2
+reviews the concept of kernel mean embeddings, the tool
+that will facilitate learning from distributions. Section 3
+shows the consistency and learning rates of our kernel mean
+embedding classification approach to cause-effect inference.
+Section 4 extends the presented ideas to the multivariate
+causal inference case. Section 5 presents a variety of experiments displaying the state-of-the-art performance of a
+simple implementation of the proposed framework. For
+convenience, Table 1 summarizes our notations.
+
+2. Kernel Mean Embeddings of Probability
+Measures
+In order to later classify probability measures P according
+to their causal properties, we first need to featurize them into
+
+Towards a Learning Theory of Cause-Effect Inference
+E[ξ], V[ξ]
+Z
+P
+L
+M
+{(Pi , li )}n
+i=1
+i
+Si = {Zij }n
+j=1
+PSi
+k
+Hk
+µk (P )
+µk (Psi )
+µk (P)
+Mk
+Fk
+Rn (Fk )
+ϕ, Rϕ (f )
+
+Expected value and variance of r.v. ξ
+Domain of cause-effect pairs Z = (X, Y )
+Set of cause-effect measures P on Z
+Set of labels li ∈ {−1, 1}
+Mother distribution over P × L
+Sample from Mn
+Sample from Pini
+Empirical distribution of Si
+Kernel function from Z × Z to R
+RKHS induced by k
+Kernel mean embedding of measure P ∈ P
+Empirical mean embedding of Psi
+The set {µk (P ) : P ∈ P}
+Measure over µk (P) × L induced by M
+Class of functionals mapping Hk to R
+Rademacher complexity of class Fk
+Cost and surrogate ϕ-risk of sign ◦f
+
+Table 1. Table of notations
+
+a suitable representation. To this end, we will rely on the
+concept of kernel mean embeddings (Berlinet & ThomasAgnan, 2004; Smola et al., 2007).
+In particular, let P be the probability distribution of some
+random variable Z taking values in the separable topological
+space (Z, τz ). Then, the kernel mean embedding of P associated with the continuous, bounded, and positive-definite
+kernel function k : Z × Z → R is
+Z
+µk (P ) :=
+k(z, ·) dP (z),
+(1)
+
+empirical mean embedding µk (PS ) to the embedding of its
+population counterpart µk (P ), in RKHS norm:
+Theorem 1. Assume that kf k∞ ≤ 1 for all f ∈ Hk with
+kf kHk ≤ 1. Then with probability at least 1 − δ we have
+s
+r
+2 log 1δ
+E z∼P [k(z, z)]
+kµk (P ) − µk (PS )kHk ≤ 2
++
+.
+n
+n
+Proof. See Section B.1.
+
+3. A Theory of Causal Inference as
+Distribution Classification
+This section phrases the inference of cause-effect relationships from probability measures as the classification of empirical kernel mean embeddings, and analyzes the learning
+rates and consistency of such approach. Throughout our
+exposition, the setup is as follows:
+1. We assume the existence of some Mother distribution
+M, defined on P × L, where P is the set of all Borel
+probability measures on the space Z of two causally
+related random variables, and L = {−1, +1}.
+2. A set {(Pi , li )}ni=1 is sampled from Mn . Each measure
+Pi ∈ P is the joint distribution of the causally related
+random variables Zi = (Xi , Yi ), and the label li ∈ L
+indicates whether “Xi → Yi ” or “Xi ← Yi ”.
+
+Z
+
+which is an element in Hk , the Reproducing Kernel Hilbert
+Space (RKHS) associated with k (Schölkopf & Smola,
+2002). Interestingly, the mapping µk is injective if k is
+a characteristic kernel (Sriperumbudur et al., 2010), that is,
+kµk (P ) − µk (Q)kHk = 0 ⇔ P = Q. Said differently, if
+using a characteristic kernel, we do not lose any information
+when embedding distributions. An example of characteristic
+kernel is the Gaussian kernel
+
+k(z, z 0 ) = exp −γkz − z 0 k22 , γ > 0,
+(2)
+which will be used throughout this paper.
+In many practical situations, it is unrealistic to assume access to the true distribution P , and consequently to the true
+embedding µk (P ). Instead, we often have access to a sample S = {zi }ni=1 ∼ P n , which can
+P be used to construct
+the empirical distribution PS := n1 zi ∈S δ(zi ) , where δ(z)
+is the Dirac distribution centered at z. Using PS , we can
+approximate (1) by the empirical kernel mean embedding
+n
+
+µk (PS ) :=
+
+1X
+k(zi , ·) ∈ Hk .
+n i=1
+
+(3)
+
+The following result is a slight modification of Theorem 27
+from (Song, 2008). It establishes the convergence of the
+
+3. In practice, we do not have access to the measures {Pi }ni=1 . Instead, we observe samples Si =
+i
+{(xij , yij )}nj=1
+∼ Pini , for all 1 ≤ i ≤ n. Using Si ,
+n
+the data {(Si , li )}i=1
+is provided to the learner.
+4. We featurize every sample Si into the empirical kernel
+mean embedding µk (PSi ) associated with some kernel
+function k (Equation 3). If k is a characteristic kernel,
+we incur no loss of information in this step.
+Under this setup, we will use the set {(µk (PSi ), li )}ni=1 to
+train a binary classifier from Hk to L, which will later be
+used to unveil the causal directions of new, unseen probability measures drawn from M. Note that this framework can
+be straightforwardly extended to also infer the “confounding
+(X ← Z → Y )” and “independent (X ⊥
+⊥ Y )” cases by
+adding two extra labels to L.
+Given the two nested levels of sampling (being the first
+one from the Mother distribution M, and the second one
+from each of the drawn cause-effect measures Pi ), it is
+not trivial to conclude whether this learning procedure is
+consistent, or how its learning rates depend on the sample
+sizes n and {ni }ni=1 . In the following, we will study the
+generalization performance of empirical risk minimization
+over this learning setup. Specifically, we are interested in
+
+Towards a Learning Theory of Cause-Effect Inference
+
+upper bounding the excess risk between the empirical risk
+minimizer and the best classifier from our hypothesis class,
+with respect to the Mother distribution M.
+We divide our analysis in three parts. First, §3.1 reviews the
+abstract setting of statistical learning theory and surrogate
+risk minimization. Second, §3.2 adapts these standard results to the case of empirical kernel mean embedding classification. Third, §3.3 considers theoretically sustained approximations to deal with big data.
+3.1. Margin-based Risk Bounds in Learning Theory
+Let P be some unknown probability measure defined on
+Z × L, where Z is referred to as the input space, and
+L = {−1, 1} is referred to as the output space1 . One of the
+main goals of statistical learning theory (Vapnik, 1998) is to
+find a classifier h : Z → L that minimizes the expected risk
+
+
+R(h) = E ` h(z), l
+(z,l)∼P
+
+The misclassification error of sign ◦ f is always upper
+bounded by Rϕ (f ). The relationship between functions
+minimizing Rϕ (f ) and functions minimizing R(sign ◦f )
+has been intensively studied in the literature (Steinwart &
+Christmann, 2008, Chapter 3). Given the high uncertainty
+associated with causal inferences, we argue that one is interested in predicting soft probabilities rather than hard labels,
+a fact that makes the study of margin-based classifiers well
+suited for our problem.
+We now focus on the estimation of f ∗ ∈ F, the function
+minimizing (4). However, since the distribution P is unknown, we can only hope to estimate fˆn ∈ F, the function minimizing (5). Therefore, we are interested in highprobability upper bounds on the excess ϕ-risk
+EF (fˆn ) = Rϕ (fˆn ) − Rϕ (f ∗ ),
+
+w.r.t. the random training sample {(zi , li )}ni=1 ∼ Pn . The
+excess risk (6) can be upper bounded in the following way:
+EF (fˆn ) ≤ Rϕ (fˆn ) − R̂ϕ (fˆn ) + R̂ϕ (f ∗ ) − Rϕ (f ∗ )
+
++
+
+for a suitable loss function ` : L×L → R , which penalizes
+departures between predictions h(z) and true labels l. For
+classification, one common choice of loss function is the 0-1
+loss `01 (l, l0 ) = |l−l0 |, for which the expected risk measures
+the probability of misclassification. Since P is unknown in
+natural situations, one usually
+Pn resorts tothe minimization
+of the empirical risk n1 i=1 ` h(zi ), li over some fixed
+hypothesis class H, for the training set {(zi , li )}ni=1 ∼ Pn .
+It is well known that this procedure is consistent under
+mild assumptions (Boucheron et al., 2005).
+Unfortunately, the 0-1 loss function is not convex, which
+leads to empirical risk minimization being generally intractable. Instead, we will focus on the minimization of
+surrogate risk functions (Bartlett et al., 2006). In particular, we will consider the set of classifiers of the form
+H = {sign ◦f : f ∈ F} where F is some fixed set of realvalued functions f : Z → R. Introduce a nonnegative cost
+function ϕ : R → R+ which is surrogate to the 0-1 loss, that
+is, ϕ() ≥ 1>0 . For any f ∈ F we define its expected and
+empirical ϕ-risks respectively as
+
+
+Rϕ (f ) = E ϕ −f (z)l ,
+(4)
+(z,l)∼P
+n
+
+R̂ϕ (f ) =
+
+
+1X
+ϕ −f (zi )li .
+n i=1
+
+(5)
+
+Many natural choices of ϕ lead to tractable empirical risk
+minimization. Common examples of cost functions include
+the hinge loss ϕ() = max(0, 1 + ) used in SVM, the
+exponential loss ϕ() = exp() used in Adaboost, and the
+logistic loss ϕ() = log2 1 + e ) used in logistic regression.
+1
+
+(6)
+
+Refer to Section A for considerations on measurability.
+
+≤ 2 sup |Rϕ (f ) − R̂ϕ (f )|.
+
+(7)
+
+f ∈F
+
+While this upper bound leads to tight results for worst case
+analysis, it is well known (Bartlett et al., 2005; Boucheron
+et al., 2005; Koltchinskii, 2011) that tighter bounds can be
+achieved under additional assumptions on P. However, we
+leave these analyses for future research.
+The following result — in spirit of Koltchinskii &
+Panchenko (1999); Bartlett & Mendelson (2002) — can
+be found in Boucheron et al. (2005, Theorem 4.1).
+Theorem 2. Consider a class F of functions mapping Z
+to R. Let ϕ : R → R+ be a Lϕ -Lipschitz function such
+that ϕ() ≥ 1>0 . Let B be a uniform upper bound on
+ϕ −f ()l . Let {(zi , li )}ni=1 ∼ P and {σi }ni=1 be i.i.d.
+Rademacher random signs. Then, with prob. at least 1 − δ,
+sup |Rϕ (f ) − R̂ϕ (f )|
+
+#
+"
+r
+n
+
+log(1/δ)
+1 X
+
+σi f (zi ) + B
+,
+≤ 2Lϕ E sup 
+
+
+2n
+f ∈F n i=1
+
+f ∈F
+
+where the expectation is taken w.r.t. {σi , zi }ni=1 .
+The expectation in the bound of Thm. 2 is known as the
+Rademacher complexity of F, will be denoted by Rn (F),
+and has a typical order of O(n−1/2 ) (Koltchinskii, 2011).
+3.2. From Classic to Distributional Learning Theory
+Note that we can not directly apply the empirical risk minimization bounds discussed in the previous section to our
+learning setup. This is because instead of learning a classifier on the i.i.d. sample {µk (Pi ), li }ni=1 , we have to learn
+
+Towards a Learning Theory of Cause-Effect Inference
+
+over the set {µk (PSi ), li }ni=1 , where Si ∼ Pini . Said differently, our input feature vectors µk (PSi ) are “noisy”: they
+exhibit an additional source of variation as any two different
+random samples Si , Si0 ∼ Pini do. In the following, we
+study how to incorporate these nested sampling effects into
+an argument similar to Theorem 2.
+We will now frame our problem within the abstract learning
+setting considered in the previous section. Recall that our
+learning setup initially considers some Mother distribution
+M over P × L. Let µk (P) = {µk (P ) : P ∈ P} ⊆
+Hk , L = {−1, +1}, and Mk be a measure (guaranteed to
+exist by Lemma 2, Section A.1) on µk (P) × L induced
+by M. Specifically, we will consider µk (P) ⊆ Hk and L
+to be the input and
+ output spaces
+	n of our learning problem,
+respectively. Let µk (Pi ), li i=1 ∼ Mnk be our training
+set. We will now work with the set of classifiers {sign ◦
+f : f ∈ Fk } for some fixed class Fk of functionals mapping
+from the RKHS Hk to R.
+As pointed out in the description of our learning setup, we do
+not have access to the distributions {Pi }ni=1 but to samples
+Si ∼ Pini , for all 1 ≤ i ≤ n. Because of this reason, we
+define the sample-based empirical ϕ-risk
+
+distances kµk (Pi ) − µk (PSi )kHk , which are in turn upper
+bounded using Theorem 1. To this end, we will have to
+assume that the class Fk consists of functionals with uniformly bounded Lipschitz constants, such as the set of linear
+functionals with uniformly bounded operator norm.
+We now present the main result of this section, which provides a high-probability bound on the excess risk (9). Importantly, this excess risk will translate into the expected
+causal inference accuracy of our distribution classifier.
+Theorem 3. Consider the RKHS Hk associated with
+some bounded, continuous kernel function k, such that
+supz∈Z k(z, z) ≤ 1. Consider a class Fk of functionals mapping Hk to R with Lipschitz constants uniformly
+bounded by LF . Let ϕ : R → R+ be a Lϕ-Lipschitz function such that φ(z) ≥ 1z>0 . Let ϕ −f (h)l ≤ B for every
+f ∈ Fk , h ∈ Hk , and l ∈ L. Then, with probability not less
+than 1 − δ (over all sources of randomness)
+r
+log(2/δ)
+∗
+˜
+Rϕ (fn ) − Rϕ (f ) ≤ 4Lϕ Rn (Fk ) + 2B
+2n 
+s
+s
+n
+4Lϕ LF X  E z∼Pi [k(z, z)]
+log(2n/δ) 
+.
++
++
+n
+ni
+2ni
+i=1
+
+n
+
+R̃ϕ (f ) =
+
+
+1X
+ϕ −li f µk (PSi ) ,
+n i=1
+
+Proof. See Section B.2.
+
+which is the approximation to the empirical ϕ-risk R̂ϕ (f )
+that results from substituting the embeddings µk (Pi ) with
+their empirical counterparts µk (PSi ).
+Our goal is again to find the function f ∗ ∈ Fk minimizing
+expected ϕ-risk Rϕ (f ). Since Mk is unknown to us, and
+we have no access to the embeddings {µk (Pi )}ni=1 , we will
+instead use the minimizer of R̃ϕ (f ) in Fk :
+f˜n ∈ arg min R̃ϕ (f ).
+f ∈Fk
+
+(8)
+
+To sum up, the excess risk (6) can now be reformulated as
+Rϕ (f˜n ) − Rϕ (f ∗ ).
+
+(9)
+
+Note that the estimation of f ∗ drinks from two nested
+sources of error, which are i) having only n training samples
+from the distribution Mk , and ii) having only ni samples
+from each measure Pi . Using a similar technique to (7), we
+can upper bound the excess risk as
+Rϕ (f˜n ) − Rϕ (f ) ≤ 2 sup |Rϕ (f ) − R̂ϕ (f )|
+∗
+
+As mentioned in Section 3.1, the typical order of Rn (Fk )
+is O(n−1/2 ). For a particular examples of classes of functionals with small Rademacher complexity we refer to Maurer (2006). In such cases, the upper bound in Theorem 3
+converges to zero (meaning that our procedure is consistent) as both n and ni tend to infinity, in such a way that2
+log n/ni = o(1). The rate of convergence w.r.t. n can be
+improved up to O(n−1 ) if placing additional assumptions
+on M (Bartlett et al., 2005). On the contrary, the rate w.r.t.
+ni cannot be improved in general. Namely, the convergence
+rate O(n−1/2 ) presented in the upper bound of Theorem 1
+is tight, as shown in the following novel result.
+Theorem 4. Under the assumptions of Theorem 1 denote
+2
+σH
+=
+k
+
+sup
+
+Vz∼P [f (z)].
+
+kf kHk ≤1
+
+Then there exist universal constants c, C such that for every
+2
+integer n ≥ 1/σH
+, and with probability at least c
+k
+σH
+kµk (P ) − µk (PS )kHk ≥ C √ k .
+n
+
+(10)
+
+f ∈Fk
+
++ 2 sup |R̂ϕ (f ) − R̃ϕ (f )|.
+
+(11)
+
+Proof. See Section B.3.
+
+f ∈Fk
+
+The term (10) is upper bounded by Theorem 2. On the
+other hand, to deal
+ with (11),
+ we will need
+ to upper bound
+the deviations f µk (Pi ) − f µk (PSi )  in terms of the
+
+Finally, it is instructive to relate the notion of “identifiability”
+often considered in the causal inference community (Pearl,
+2
+
+We conjecture that this constraint is an artifact from our proof.
+
+Towards a Learning Theory of Cause-Effect Inference
+
+2000) to the properties of the Mother distribution. Saying
+that the model is identifiable means that the label l of P ∈ P
+is assigned deterministically by M. In this case, learning
+rates can become as fast as O(n−1 ). On the other hand, as
+M(l|P ) becomes nondeterministic, the problem becomes
+unidentifiable and learning rates slow down (for example,
+in the extreme case of cause-effect pairs related by linear
+functions polluted with additive Gaussian noise, M(l =
++1|P ) = M(l = −1|P ) almost surely). The investigation
+of these phenomena is left for future research.
+3.3. Low Dimensional Embeddings for Large Data
+For some kernel functions, the embeddings µk (PS ) ∈ Hk
+are infinite dimensional. Because of this reason, one must
+resort to the use of dual optimization problems, and in particular, kernel matrices. The construction of these matrices
+requires at least O(n2 ) computational and memory requirements, prohibitive for large n. In this section, we show
+that the infinite-dimensional embeddings µk (PS ) ∈ Hk can
+be approximated with easy to compute, low-dimensional
+representations (Rahimi & Recht, 2007; 2008). This will
+allow us to replace the infinite-dimensional minimization
+problem (8) with a low-dimensional one.
+d
+
+Assume that Z = R , and that the kernel function k is realvalued, and shift-invariant. Then, we can exploit Bochner’s
+theorem (Rudin, 1962) to show that, for any z, z 0 ∈ Z:
+k(z, z 0 ) = 2Ck E [cos(hw, zi+ b) cos(hw, z 0 i+ b)] , (12)
+w,b
+
+where w ∼ C1k pk , b ∼ U[0, 2π], pk : Z → R is the posRitive and integrable Fourier transform of k, and Ck =
+p (w)dw. For example, the squared-exponential kernel
+Z k
+(2) is shift-invariant, and its evaluations can be approximated
+by (12), if setting pk (w) = N (w|0, 2γI), and Ck = 1.
+We now show that for any probability measure Q on Z and
+z ∈ Z, the function k(z, ·) ∈ Hk ⊆ L2 (Q) can be approximated by a linear combination of randomly chosen
+elements from the Hilbert space L2 (Q). Namely, consider
+the functions parametrised by w, z ∈ Z and b ∈ [0, 2π]:
+z
+gw,b
+(·) = 2Ck cos(hw, zi + b) cos(hw, ·i + b),
+
+(13)
+
+which belong to L2 (Q), since they are bounded. If we
+sample {(wj , bj )}m
+j=1 i.i.d., as discussed above, the average
+m
+
+z
+ĝm
+(·) =
+
+1 X z
+g
+(·)
+m i=1 wi ,bi
+
+can be viewed as an L2 (Q)-valued random variable. Morez
+over, (12) shows that E w,b [ĝm
+(·)] = k(z, ·). This enables
+us to invoke concentration inequalities for Hilbert spaces
+(Ledoux & Talagrand, 1991), to show the following result,
+which is in spirit to Rahimi & Recht (2008, Lemma 1).
+
+Lemma 1. Let Z = Rd . For any shift-invariant kernel k,
+s.t. supz∈Z k(z, z) ≤ 1, any fixed S = {zi }ni=1 ⊂ Z, any
+probability distribution Q on Z, and any δ > 0, we have
+
+
+n
+
+
+p
+2Ck 
+1 X zi 
+
+
+1 + 2 log(n/δ)
+≤√
+ĝm (·)
+µk (PS ) −
+
+
+n i=1
+m
+L2 (Q)
+
+with probability larger than 1 − δ over {(wi , bi )}m
+i=1 .
+Proof. See Section B.4.
+Once sampled, the parameters {(wi , bi )}m
+ali=1
+low us to approximate the empirical kernel mean
+embeddings {µk (PSi )}ni=1 using elements from
+span({cos(hwi , ·i + bi )}m
+i=1 ), which is a finite-dimensional
+subspace of L2 (Q). Therefore, we propose to use
+n
+{(µk,m (PSi ), li )}i=1
+as the training sample for our final
+empirical risk minimization problem, where
+µk,m (PS ) =
+
+m
+2Ck X
+cos(hwj , zi + bj ) j=1∈ Rm . (14)
+|S|
+z∈S
+
+These feature vectors can be computed in O(m) time and
+stored in O(1) memory; importantly, they can be used offthe-shelf in conjunction with any learning algorithm.
+For the precise excess risk bounds that take into account the
+use of these low-dimensional approximations, please refer
+to Theorem 6 from Section B.5.
+
+4. Extensions to Multivariate Causal
+Inference
+It is possible to extend our framework to infer causal relatonships between d ≥ 2 variables X = (X1 , . . . , Xd ). To this
+end, and as introduced in Section 1, assume the existence
+of a causal directed acyclic graph G which underlies the
+dependencies present in the probability distribution P (X).
+Therefore, our task is to recover G from S ∼ P n .
+Naı̈vely, one could extend the framework presented in Section 3 from the binary classification of 2-dimensional distributions to the multiclass classification of d-dimensional
+distributions. However, the number of possible DAGs (and
+therefore, the number of labels in our multiclass classification problem) grows super-exponentially in d.
+An alternative approach is to consider the probabilities of
+the three labels “Xi → Xj ”, “Xi ← Xj “, and “Xi ⊥
+⊥ Xj “
+for each pair of variables {Xi , Xj } ⊆ X, when embedded
+along with every possible context Xk ⊆ X \ {Xi , Xj }.
+The intuition here is the same as in the PC algorithm of
+Spirtes et al. (2000): in order to decide the (absence of a)
+causal relationship between Xi and Xj , one must analyze
+the confounding effects of every Xk ⊆ X \ {Xi , Xj }.
+
+Towards a Learning Theory of Cause-Effect Inference
+
+ν(S) = (µk,m (PSx ), µk,m (PSy ), µk,m (PSxy )),
+
+(15)
+
+where the three elements forming (15) stand for the lowdimensional representations (14) of the empirical kernel
+mean embeddings of {xi }ni=1 , {yi }ni=1 , and {(xi , yi )}ni=1 ,
+respectively. The representation (15) is motivated by the
+typical conjecture in causal inference about the existence
+of asymmetries between the marginal and conditional distributions of causally-related pairs of random variables
+(Schölkopf et al., 2012). Each of these three embeddings
+has random features sampled to approximate the sum of
+three Gaussian kernels (2) with hyper-parameters 0.1γ, γ,
+and 10γ, where γ is found using the median heuristic. In
+practice, we set m = 1000, and observe no significant improvements when using larger amounts of random features.
+To classify the embeddings (15) in each of the experiments,
+we use the random forest3 implementation from Python’s
+sklearn-0.16-git. The number of trees is chosen
+from {100, 250, 500, 1000, 5000} via cross-validation.
+Our experiments can be replicated using the source code at
+https://github.com/lopezpaz/causation_learning_theory.
+
+5.1. Classification of Tübingen Cause-Effect Pairs
+The Tübingen cause-effect pairs is a collection of heterogeneous, hand-collected, real-world cause-effect samples
+(Zscheischler, 2014). Given the small size of this dataset,
+we resort to the synthesis of an artificial Mother distribution to sample our training data from. To this end, assume that sampling a synthetic cause-effect sample set
+Ŝi := {(x̂ij , ŷij )}nj=1 ∼ Pθ equals the following simple
+generative process:
+1. A cause vector (x̂ij )nj=1 is sampled from a mixture of
+Gaussians with c components. The mixture weights
+are sampled from U(0, 1), and normalized to sum to
+one. The mixture means and standard deviations are
+sampled from N (0, σ1 ), and N (0, σ2 ), respectively,
+accepting only positive standard deviations. The cause
+vector is standardized to zero mean and unit variance.
+2. A noise vector (ˆ
+ij )nj=1 is sampled from a centered
+3
+Although random forests do not comply with Lipschitzness
+assumptions from Section 3, they showed the best empirical results.
+Compliant alternatives such as SVMs exhibited a typical drop in
+classification accuracy of 5%.
+
+80
+60
+40
+20
+
+RCC
+ANM
+IGCI
+
+0
+
+We conduct an array of experiments to test the effectiveness
+of a simple implementation of the presented causal learning
+framework. Given the use of random embeddings (14) in
+our classifier, we term our method the Randomized Causation Coefficient (RCC). Throughout our simulations, we
+featurize each sample S = {(xi , yi )}ni=1 as
+
+classification accuracy
+
+100
+
+5. Numerical Simulations
+
+0
+
+20
+
+40
+
+60
+
+80
+
+100
+
+decission rate
+
+Figure 1. Accuracy of RCC, IGCI and ANM on the Tübingen
+cause-effect pairs, as a function of decision rate. The grey area
+depicts accuracies not statistically significant.
+
+Gaussian, with variance sampled from U(0, σ3 ).
+3. A mapping mechanism fˆi is conceived as a spline
+fitted using an uniform grid of df elements from
+min((x̂ij )nj=1 ) to max((x̂ij )nj=1 ) as inputs, and df
+normally distributed outputs.
+4. An effect vector is built as (ŷij := fˆi (x̂ij ) + ˆij )nj=1 ,
+and standardized to zero mean and unit variance.
+5. Return the cause-effect sample Ŝi := {(x̂ij , ŷij )}nj=1 .
+To choose a θ = (c, σ1 , σ2 , σ3 , df ) that best resembles the
+unlabeled test data, we minimize the distance between the
+embeddings of N synthetic pairs and the Tuebingen samples
+arg min
+
+X
+
+θ
+
+i
+
+min kν(Si ) − ν(Ŝj )k22 ,
+
+1≤j≤N
+
+(16)
+
+over c, df ∈ {1, . . . , 10}, and σ1 , σ2 , and σ3 ∈
+{0, 0.5, 1, . . . , 5}, where the Ŝj ∼ Pθ , the Si are the
+Tübingen cause-effect pairs, and ν is as in (15). This strategy can be thought of as transductive learning, since we
+assume to know the test inputs prior to the training of our
+inference rule. We set n = 1000, and N = 10, 000.
+Using the generative process outlined above, we construct
+the synthetic training data
+{{ν({(x̂ij , ŷij )}nj=1 ), +1)}N
+i=1 ,
+{ν({(ŷij , x̂ij )}nj=1 ), −1)}N
+i=1 },
+where {(x̂ij , ŷij )}nj=1 ∼ Pθ , and train our classifier on it.
+Figure 1 plots the classification accuracy of RCC, IGCI
+(Daniusis et al., 2012), and ANM (Mooij et al., 2014) versus
+the fraction of decissions that the algorithms are forced to
+make out of the 82 scalar Tüebingen cause-effect pairs. To
+compare these results to other lower-performing methods,
+
+Towards a Learning Theory of Cause-Effect Inference
+
+refer to Janzing et al. (2012). RCC surpasses the state-of-theart with a classification accuracy of 81.61% when inferring
+the causal directions on all pairs. The confidence of RCC
+is computed using the classifier’s output class probabilities.
+SVMs obtain a test accuracy of 77.2% in this same task.
+5.2. Inferring the Arrow of Time
+We test the effectiveness of our method to infer the arrow of
+time from causal time series. More specifically, we assume
+i
+access to a set of time series {xij }nj=1
+, and our task is to
+infer, for each series, whether Xi → Xi+1 or Xi ← Xi+1 .
+We compare our framework to the state-of-the-art of Peters
+et al. (2009), using the same electroencephalography signals
+(Blankertz, 2005) as in their original experiment. On the one
+hand, Peters et al. (2009) construct two Auto-Regressive
+Moving-Average (ARMA) models for each causal time series and time direction, and prefers the solution under which
+the model residuals are independent from the inferred cause.
+To this end, the method uses two parameters for which
+no estimation procedure is provided. On the other hand,
+our approach makes no assumptions whatsoever about the
+parametric model underlying the series, at the expense of
+requiring a disjoint set of N = 10, 000 causal time series
+for training. Our method matches the best performance of
+Peters et al. (2009), with an accuracy of 82.66%.
+5.3. ChaLearn’s Challenge Data
+The cause-effect challenges organized by Guyon (2014)
+provided N = 16, 199 training causal samples Si , each
+drawn from the distribution of Xi × Yi , and labeled either
+“Xi → Yi ”, “Xi ← Yi ”, “Xi ← Zi → Yi ”, or “Xi ⊥
+⊥ Yi ”.
+The task of the competition was to develop a causation coefficient which would predict large positive values to causal
+samples following “Xi → Yi ”, large negative values to
+samples following “Xi ← Yi ”, and zero otherwise. Using
+these data, our obtained a test bidirectional area under the
+curve score (Guyon, 2014) of 0.74 in one minute and a half,
+ranking third in the overall leaderboard. The winner of the
+competition obtained a score of 0.82 in thirty minutes, but
+resorted to several dozens of hand-crafted features.
+Partitioning these same data in different ways, we learned
+two related but different binary classification tasks. First,
+we trained our classifier to detect latent confounding, and
+obtained a test classification accuracy of 80% on the task of
+distinguishing “X → Y or X ← X” from “X ← Z → Y ”.
+Second, we trained our classifier to measure dependence,
+and obtained a test classification accuracy of 88% on the
+task of distinguishing between “X ⊥
+⊥ Y ” and “else”. We
+consider these results to be a promising direction to learn
+flexible hypothesis tests and dependence measures directly
+from data.
+
+5.4. Reconstruction of Causal DAGs
+We apply the strategy described in Section 4 to reconstruct
+the causal DAGs of two multivariate datasets: autoMPG
+and abalone (Lichman, 2013). Once again, we resort to
+synthetic training data, generated in a similar procedure to
+the one used in Section 5.1. Refer to Section C for details.
+Regarding autoMPG, in Figure 2, 1) the release date of
+the vehicle (AGE) causes the miles per gallon consumption
+(MPG), acceleration capabilities (ACC) and horse-power
+(HP), 2) the weight of the vehicle (WEI) causes the horsepower and MPG, and that 3) other characteristics such as the
+engine displacement (DIS) and number of cylinders (CYL)
+cause the MPG. For abalone, in Figure 3, 1) the age of the
+snail causes all the other variables, 2) the overall weight
+of the snail (WEI) is caused by the partial weights of its
+meat (WEA), viscera (WEB), and shell (WEC), and 3) the
+height of the snail (HEI) is responsible for other phisicaly
+attributes such as its diameter (DIA) and length (LEN).
+The target variable for each dataset is shaded in gray. Interstingly, our inference reveals that the autoMPG dataset is
+a causal prediction task (the features cause the target), and
+that the abalone dataset is an anticausal prediction task (the
+target causes the features). This distinction has implications
+when learning from these data (Schölkopf et al., 2012).
+HP
+
+WEI
+
+ACC
+
+MPG
+
+DIS
+
+AGE
+
+CYL
+
+Figure 2. Causal DAG recovered from data autoMPG.
+
+WEA
+
+WEI
+
+LEN
+
+DIA
+
+WEB
+
+WEC
+
+AGE
+
+HEI
+
+Figure 3. Causal DAG recovered from data abalone.
+
+6. Future Work
+Three research directions are in progress. First, to improve
+learning rates by using common assumptions from causal
+inference. Second, to further investigate methods to reconstruct multivariate DAGs. Third, to develop mechanisms to
+interpret the causal footprints learned by our classifiers.
+
+Towards a Learning Theory of Cause-Effect Inference
+
+References
+Bartlett, P. L. and Mendelson, S. Rademacher and Gaussian
+complexities: Risk bounds and structural results. JMLR,
+2002.
+Bartlett, P. L. and Mendelson, S. Empirical minimization.
+Probability Theory and Related Fields, 135(4), 2006.
+Bartlett, P. L., Bousquet, O., and Mendelson, S. Local
+rademacher complexities. The Annals of Statistics, 33(4),
+2005.
+Bartlett, P. L., Jordan, M. I., and McAuliffe, J. D. Convexity,
+classification, and risk bounds. Journal of the American
+Statistical Association, 101, 2006.
+Berlinet, A. and Thomas-Agnan, C. Reproducing Kernel
+Hilbert Spaces in Probability and Statistics. Kluwer
+Academic Publishers, 2004.
+Blankertz, B. BCI Competition III data, experiment 4a,
+subject 3, 1000Hz, 2005. URL http://bbci.de/
+competition/iii/download/.
+Boucheron, Stéphane, Lugosi, Gábor, and Bousquet, Olivier.
+Theory of classification: a survey of recent advances.
+ESAIM: Probability and Statistics, 2005.
+Cuturi, M., Fukumizu, K., and Vert, J. P. Semigroup kernels
+on measures. JMLR, 2005.
+Daniusis, P., Janzing, D., Mooij, J., Zscheischler, J., Steudel,
+B., Zhang, K., and Schölkopf, B. Inferring deterministic
+causal relations. UAI, 2012.
+Guyon, I.
+Cause-effect pairs kaggle competition,
+2013.
+URL https://www.kaggle.com/c/
+cause-effect-pairs/.
+
+Jebara, T., Kondor, R., and Howard, A. Probability product
+kernels. JMLR, 2004.
+Koltchinskii, V. Oracle Inequalities in Empirical Risk Minimization and Sparse Recovery Problems. Ecole d’été de
+probabilités de Saint-Flour. Springer, 2011.
+Koltchinskii, V. and Panchenko, D. Rademacher processes
+and bounding the risk of function learning. In E. Gine, D.
+and J.Wellner (eds.), High Dimensional Probability, II,
+pp. 443–457. Birkhauser, 1999.
+Kpotufe, S., Sgouritsa, E., Janzing, D., and Schölkopf, B.
+Consistency of causal inference under the additive noise
+model. ICML, 2013.
+Ledoux, M. and Talagrand, M. Probability in Banach
+Spaces: Isoperimetry and Processes. Springer, 1991.
+Lichman, M. UCI machine learning repository, 2013. URL
+http://archive.ics.uci.edu/ml.
+Martins, A. F. T., Smith, N. A., Xing, E. P., Aguiar, P. M. Q.,
+and Figueiredo, M. A. T. Nonextensive information theoretic kernels on measures. JMLR, 2009.
+Maurer, A. The rademacher complexity of linear transformation classes. COLT, 2006.
+Mooij, J. M., Peters, J., Janzing, D., Zscheischler, J., and
+Schölkopf, B. Distinguishing cause from effect using
+observational data: methods and benchmarks. arXiv
+preprint arXiv:1412.3773, 2014.
+Muandet, K., Fukumizu, K., Dinuzzo, F., and Schölkopf,
+B. Learning from distributions via support measure machines. NIPS, 2012.
+Pearl, J. Causality: models, reasoning and inference. Cambridge Univ Press, 2000.
+
+Guyon, I.
+Chalearn fast causation coefficient challenge, 2014. URL https://www.codalab.org/
+competitions/1381.
+
+Peters, J., Janzing, D., Gretton, A., and Schölkopf, B. Detecting the direction of causal time series. ICML, 2009.
+
+Hein, M. and Bousquet, O. Hilbertian metrics and positive
+definite kernels on probability measures. AISTATS, 2004.
+
+Peters, J., M., Joris M., Janzing, D., and Schölkopf, B.
+Causal discovery with continuous additive noise models.
+JMLR, 2014.
+
+Hoyer, P. O., Janzing, D., Mooij, J. M., Peters, J. R., and
+Schölkopf, B. Nonlinear causal discovery with additive
+noise models. NIPS, 2009.
+
+Rahimi, A. and Recht, B. Random features for large-scale
+kernel machines. NIPS, 2007.
+
+Janzing, D., Mooij, J., Zhang, K., Lemeire, J., Zscheischler, J., Daniušis, P., Steudel, B., and Schölkopf, B.
+Information-geometric approach to inferring causal directions. Artificial Intelligence, 2012.
+Janzing, D., Steudel, B., Shajarisales, N., and Schölkopf, B.
+Justifying information-geometric causal inference. arXiv,
+2014.
+
+Rahimi, A. and Recht, B. Weighted sums of random kitchen
+sinks: Replacing minimization with randomization in
+learning. NIPS, 2008.
+Reed, M. and Simon, B. Methods of modern mathematical
+physics. vol. 1. Functional analysis, volume 1. Academic
+press New York, 1972.
+Reichenbach, H. The Direction of Time. Dover, 1956.
+
+Towards a Learning Theory of Cause-Effect Inference
+
+Rudin, W. Fourier Analysis on Groups. Wiley, 1962.
+Schölkopf, B. and Smola, A. J. Learning with Kernels. MIT
+Press, 2002.
+Schölkopf, B., Janzing, D., Peters, J., Sgouritsa, E., Zhang,
+K., and Mooij, J. On causal and anticausal learning.
+ICML, 2012.
+Schölkopf, B., Janzing, D., Peters, J., Sgouritsa, E., Zhang,
+K., and Mooij, J. M. On causal and anticausal learning.
+In ICML, 2012.
+Shimizu, S., Hoyer, P. O., Hyvärinen, A., and Kerminen, A.
+A linear non-Gaussian acyclic model for causal discovery.
+JMLR, 2006.
+Shimizu, S., Inazumi, T., Sogawa, Y., Hyvärinen, A., Kawahara, Y., Washio, T., Hoyer, P. O., and Bollen, K. Directlingam: A direct method for learning a linear nongaussian structural equation model. JMLR, 2011.
+Smola, A. J., Gretton, A., Song, L., and Schölkopf, B.
+A Hilbert space embedding for distributions. In ALT.
+Springer-Verlag, 2007.
+Song, L. Learning via Hilbert Space Embedding of Distributions. PhD thesis, The University of Sydney, 2008.
+Spirtes, P., Glymour, C. N., and Scheines, R. Causation,
+prediction, and search. MIT Press, 2000.
+Sriperumbudur, B. K., Gretton, A., Fukumizu, K.,
+Schölkopf, B., and Lanckriet, G. Hilbert space embeddings and metrics on probability measures. JMLR, 2010.
+Stegle, O., Janzing, D., Zhang, K., Mooij, J. M., and
+Schölkopf, B. Probabilistic latent variable models for
+distinguishing between cause and effect. NIPS, 2010.
+Steinwart, I. and Christmann, A. Support vector machines.
+Springer, 2008.
+Szabó, Z., Sriperumbudur, B. Póczos, B., and Gretton, A.
+Learning theory for distribution regression. arXiv, 2014.
+Vapnik, V. N. Statistical Learning Theory. John Wiley &
+Sons, 1998.
+Zhang, K. and Hyvärinen, A. On the identifiability of the
+post-nonlinear causal model. UAI, 2009.
+Zscheischler, J. Benchmark data set for causal discovery algorithms, v0.8, 2014. URL http://webdav.
+tuebingen.mpg.de/cause-effect/.
+
+

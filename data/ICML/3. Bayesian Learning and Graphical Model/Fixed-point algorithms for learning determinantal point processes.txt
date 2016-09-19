@@ -1,0 +1,1260 @@
+Fixed-point algorithms for learning determinantal point processes
+
+Zelda Mariet
+Suvrit Sra
+Massachusetts Institute of Technology, Cambridge, MA 02139 USA
+
+Abstract
+Determinantal point processes (DPPs) offer an elegant tool for encoding probabilities over subsets
+of a ground set. Discrete DPPs are parametrized
+by a positive semidefinite matrix (called the DPP
+kernel), and estimating this kernel is key to learning DPPs from observed data. We consider the
+task of learning the DPP kernel, and develop for it
+a surprisingly simple yet effective new algorithm.
+Our algorithm offers the following benefits over
+previous approaches: (a) it is much simpler; (b) it
+yields equally good and sometimes even better local maxima; and (c) it runs an order of magnitude
+faster on large problems. We present experimental
+results on both real and simulated data to illustrate
+the numerical performance of our technique.
+
+1. Introduction
+Determinantal point processes (DPPs) arose in statistical mechanics, where they were originally used to model
+fermions (Macchi, 1975). Recently, they have witnessed
+substantial interest in a variety of machine learning applications (Kulesza, 2013; Kulesza and Taskar, 2012).
+One of the key features of DPPs is their ability to model the
+notion of diversity while respecting quality, a concern that
+underlies the broader task of subset selection where balancing quality with diversity is a well-known issue—see e.g.,
+document summarization (Lin and Bilmes, 2012), object
+retrieval (Affandi et al., 2014), recommender systems (Zhou
+et al., 2010), and sensor placement (Krause et al., 2008).
+
+ZELDA @ CSAIL . MIT. EDU
+SUVRIT @ MIT. EDU
+
+for instance (Gillenwater et al., 2014); (Kulesza and Taskar,
+2011b); (Kulesza and Taskar, 2011a); (Affandi et al., 2014);
+(Affandi et al., 2103); (Affandi et al., 2013); (Gillenwater
+et al., 2012). For additional references and material we refer
+the reader to the survey (Kulesza and Taskar, 2012).
+Our paper is motivated by the recent work of Gillenwater
+et al. (2014), who made notable progress on the task of
+learning a DPP kernel from data. This task is conjectured
+to be NP-Hard (Kulesza, 2013, Conjecture 4.1). Gillenwater et al. (2014) presented a carefully designed EM-style
+procedure, which, unlike several previous approaches (e.g.,
+(Kulesza and Taskar, 2011b;a; Affandi et al., 2014)) learns
+a full DPP kernel nonparameterically.
+One main observation of Gillenwater et al. (2014) is that
+applying projected gradient ascent to the DPP log-likelihood
+usually results in degenerate estimates (because it involves
+projection onto the set {X : 0  X  I}). Hence one may
+wonder if instead we could apply more sophisticated manifold optimization techniques (Absil et al., 2009; Boumal
+et al., 2014). While this idea is attractive, and indeed applicable, e.g., via the excellent M ANOPT toolbox (Boumal
+et al., 2014), empirically it turns out to be computationally
+too demanding; the EM strategy of Gillenwater et al. (2014)
+is more practical.
+We depart from both EM and manifold optimization to develop a new learning algorithm that (a) is simple, yet powerful; and (b) yields essentially the same log-likelihood values
+as the EM approach while running significantly faster. In
+particular, our algorithm runs an order of magnitude faster
+on larger problems.
+
+Within machine learning DPPs have found good use—see
+
+The key innovation of our approach is a derivation via a
+fixed-point view, which by construction ensures positive
+definiteness at every iteration. Its convergence analysis involves an implicit bound-optimization iteration to ensure
+monotonic ascent.1 A pleasant byproduct of the fixed-point
+approach is that it avoids any eigenvalue/vector computations, enabling a further savings in running time.
+
+Proceedings of the 32 nd International Conference on Machine
+Learning, Lille, France, 2015. JMLR: W&CP volume 37. Copyright 2015 by the author(s).
+
+1
+The convergence analysis in this version of the paper improves
+upon our original submission, in that our proof is now constructive
+and requires weaker assumptions.
+
+DPPs are also interesting in their own right: they have
+various combinatorial, probabilistic, and analytic properties,
+while involving a fascinating set of open problems (Lyons,
+2003; Hough et al., 2006; Kulesza, 2013).
+
+Fixed-point algorithms for determinantal point processes
+
+1.1. Background and problem setup
+Without loss of generality we assume that the ground set
+of N items is {1, 2, . . . , N }, which we denote by Y. A
+(discrete) DPP on Y is a probability measure P on 2Y (the
+set of all subsets of Y) such that for any Y ⊆ Y, the probability P(Y ) verifies P(Y ) ∝ det(LY ); here LY denotes
+the principal submatrix of the DPP kernel L induced by
+indices in Y . Intuitively, the diagonal entry Lii of the kernel
+matrix L captures some notion of the importance of item
+i, whereas an off-diagonal entry Lij = Lji measures similarity between items i and j. This intuitive notion provides
+further motivation for seeking DPPs with non-diagonal kernels when there is implicit interaction between the observed
+items.
+The normalization
+P constant for the measure P follows upon
+observing that Y ⊆Y det(LY ) = det(L + I). Thus,
+P(Y ) =
+
+det(LY )
+,
+det(L + I)
+
+Y ⊆ Y.
+
+(1.1)
+
+DPPs can also be given an alternative representation through
+a marginal kernel K that captures for a random Y ∼ P and
+every A ⊆ Y, the marginal probability
+P(A ⊆ Y ) = det(KA ).
+
+(1.2)
+
+It is easy to verify that K = L(L+I)−1 , which also implies
+that K and L have the same eigenvectors and differ only in
+their eigenvalues. It can also be shown (Kulesza, 2013) that
+P(Y ) = | det(K − IY c )|, where IY c is a partial N × N
+identity matrix with diagonal entries in Y zeroed out.
+Both parameterizations (1.1) and (1.2) of the DPP probability are useful: Gillenwater et al. (2014) used a formulation
+in terms of K; we prefer (1.1) as it aligns better with our
+algorithmic approach.
+1.2. Learning the DPP Kernel
+
+For instance, using projected gradient on (1.4) may seem
+tempting, but projection ends up yielding degenerate (diagonal and rank-deficient) solutions which is undesirable when
+trying to capture interaction between observations—indeed,
+this criticism motivated Gillenwater et al. (2014) to derive
+the EM algorithm.
+We approach problem (1.3) from a different viewpoint
+(which also avoids projection) and as a result obtain a new
+optimization algorithm for estimating L. This algorithm, its
+analysis, and empirical performance are the subject of the
+remainder of the paper.
+
+2. Optimization algorithm
+The method that we derive has two key components: (i)
+a fixed-point view that helps obtain an iteration that satisfies the crucial positive definiteness constraint L  0 by
+construction; and (ii) an implicit bound optimization based
+analysis that ensures monotonic ascent. The resulting algorithm is vastly simpler than the previous EM-style approach
+of Gillenwater et al. (2014).
+If |Y | = k, then for a suitable N × k indicator matrix
+U we can write LY = U ∗ LU , which is also known as
+a compression (U ∗ denotes the Hermitian transpose). We
+write Ui∗ LUi interchangeably with LYi , implicitly assuming
+suitable indicator matrices Ui such that Ui∗ Ui = I|Yi | . To
+reduce clutter, we will drop the subscript on the identity
+matrix, its dimension being clear from context.
+Denote by φ(L) the objective function in (1.3). Assume for
+simplicity that the constraint set is open, i.e., L  0. Then
+any critical point of the log-likelihood must satisfy
+∇φ(L) = 0, or equivalently
+Xn
+−1
+−1
+Ui (Ui∗ LUi ) Ui∗ − n (I + L) = 0.
+
+(2.1)
+
+i=1
+
+Any (strictly) positive definite solution to the nonlinear matrix equation (2.1) is a candidate locally optimal solution.
+
+The learning task aims to fit a DPP kernel (either L or equivalently the marginal kernel K) consistent with a collection
+of observed subsets. Suppose we obtain as training data n
+subsets (Y1 , . . . , Yn ) of the ground set Y. The task is to maximize the likelihood of these observations. Two equivalent
+formulations of this maximization task may be considered:
+Xn
+max
+log det(LYi ) − n log det(I + L), (1.3)
+i=1
+L0
+Xn
+
+max
+log | det(K − IYic )| .
+(1.4)
+
+We solve this matrix equation by developing a fixed-point
+iteration. In particular, define
+Xn
+−1
+∆ := n1
+Ui (Ui∗ LUi ) Ui∗ − (I + L)−1 ,
+
+We will use formulation (1.3) in this paper. Gillenwater
+et al. (2014) used (1.4) and exploited its structure to derive
+a somewhat intricate EM-style method for optimizing it.
+Both (1.3) and (1.4) are nonconvex and difficult optimize.
+
+A priori there is no reason for iteration (2.3) to be valid
+(i.e., converge to a stationary point). But we write it in this
+form to highlight its crucial feature: starting from an initial
+L0  0, it generates positive definite iterates (Prop. 2.1).
+
+0KI
+
+i=1
+
+i=1
+
+with which we may equivalently write (2.1) as
+∆ + L−1 = L−1 .
+
+(2.2)
+
+Equation (2.2) suggests the following iteration
+−1
+L−1
+k+1 ← Lk + ∆k ,
+
+k = 0, 1, . . . .
+
+(2.3)
+
+Fixed-point algorithms for determinantal point processes
+
+Proposition 2.1. Let L0  0. Then, the sequence {Lk }k≥1
+generated by (2.3) remains positive definite.
+Proof. The proof is by induction. It suffices to show that
+L  0 =⇒ L−1 + ∆  0.
+Since I + L  L, from the order inversion property of
+the matrix inverse map it follows that L−1  (I + L)−1 .
+P
+−1
+Now adding the matrix n1 i=1 Ui (Ui∗ LUi ) Ui∗  0 we
+obtain the desired inequality by definition of ∆.
+A quick experiment reveals that iteration (2.3) does not
+converge to a local maximizer of φ(L). To fix this defect,
+we rewrite the key equation (2.2) in a different manner:
+L = L + L∆L.
+
+(2.4)
+
+This equation is obtained by multiplying (2.2) on the left
+and right by L. Therefore, we now consider the iteration
+
+where equality follows from (Bhatia, 2007, Thm. 4.1.3), and
+the final inequality follows from (Bhatia, 2007, Thm. 4.1.5)2
+Since log det is monotonic
+on√positive definite matrices and
+√
+since det(A#B) = det A det B, it then follows that
+−1  1
+log det U ∗ X+Y
+U ≤ 2 log det(U ∗ X −1 U )
+2
++
+
+1
+2
+
+log det(U ∗ Y −1 U ),
+
+which proves the lemma.
+Now we are ready to prove Theorem 2.2.
+Proof (Thm. 2.2). The key insight is to consider S = L−1
+instead of L; this change is only for the analysis—the actual
+iteration that we implement is still (2.5).3
+Writing ψ(S) := φ(L), we see that ψ(S) equals
+X
+1
+log det(Ui∗ S −1 Ui ) − log det(S −1 + I)
+n
+i
+X
+= log det(S) + n1
+log det(Ui∗ S −1 Ui )
+i
+
+Lk+1 ← Lk + Lk ∆k Lk ,
+
+k = 0, 1, . . . .
+
+(2.5)
+
+Prop. 2.1 in combination with the fact that congruence preserves positive definiteness (i.e., if X  0, then Z ∗ XZ  0
+for any complex matrix Z), implies that if L0  0, then
+the sequence {Lk }k≥1 obtained from iteration (2.5) is also
+positive definite. What is more remarkable is that contrary
+to iteration (2.3), the sequence generated by (2.5) monotonically increases the log-likelihood.
+
+− log det(I + S).
+P
+Let h(S) = n1 i log det(Ui∗ S −1 Ui )−log det(I +S), and
+f (S) = log det(S). Clearly, f is concave in S, while h is
+convex is S; the latter from Lemma 2.3 and the fact that
+− log det(I + S) is convex. This observation allows us to
+invoke iterative bound-optimization (an idea that underlies
+EM, CCCP, and other related algorithms).
+In particular, we construct an auxiliary function ξ so that
+
+While monotonicity is not apparent from our intuitive derivation above, it becomes apparent once we recognize an implicit change of variables that seems to underlie our method.
+2.1. Convergence Analysis
+Theorem 2.2. Let Lk be generated via (2.5). Then, the
+sequence {φ(Lk )}k≥0 is monotonically increasing.
+Before proving Theorem 2.2 we need the following lemma.
+Lemma 2.3. Let U ∈ CN ×k (k ≤ N ) such that U ∗ U = I.
+The map g(S) := log det(U ∗ S −1 U ) is convex on the set of
+positive definite matrices.
+Proof. Since g is continuous it suffices to establish midpoint
+convexity. Consider therefore, X, Y  0 and let
+X#Y = X 1/2 (X −1/2 Y X −1/2 )1/2 X 1/2
+be their geometric mean. The operator inequality X#Y 
+X+Y
+is well-known (Bhatia, 2007, Thm. 4.1.3). Hence,
+2
+X+Y −1
+2
+
+X+Y −1
+U
+2
+
+
+
+U∗
+
+ (X#Y )−1 = X −1 #Y −1
+ U ∗ (X −1 #Y −1 )U
+ (U ∗ X −1 U )#(U ∗ Y −1 U ),
+
+ψ(S) ≥ ξ(S, R),
+
+∀S, R  0,
+
+ψ(S) = ξ(S, S),
+
+∀S  0.
+
+As in (Yuille and Rangarajan, 2003), we select ξ by exploiting the convexity of h: as h(S) ≥ h(R)+h∇h(R), S − Ri,
+we simply set
+ξ(S, R) := f (S) + h(R) + h∇h(R) | S − Ri .
+Given an iterate Sk , we then obtain Sk+1 by solving
+Sk+1 := argmaxS0 ξ(S, Sk ),
+
+(2.6)
+
+which clearly ensures monotonicity: ψ(Sk+1 ) ≥ ψ(Sk ).
+Since (2.6) has an open set as a constraint and ξ(S, ·) is
+strictly concave, to solve (2.6) it suffices to solve the necessary condition ∇S ξ(S, Sk ) = 0. This amounts to
+X
+S −1 = (I + Sk )−1 + n1
+Sk−1 Ui (Ui∗ Sk−1 Ui )−1 Ui∗ Sk−1 .
+i
+
+Rewriting in terms of L we immediately see that with
+Lk+1 = Lk + Lk ∆k Lk , φ(Lk+1 ) ≥ φ(Lk ) (the inequality
+is strict unless Lk+1 = Lk ).
+2
+
+For an explicit proof see (Sra and Hosseini, 2015, Thm. 8).
+Our previous proof was based on viewing iteration (2.5) as a
+scaled-gradient-like iteration. However, we find the present version
+more transparent for proving monotonicity.
+3
+
+Fixed-point algorithms for determinantal point processes
+
+Theorem 2.2 shows that iteration (2.5) is well-defined (positive definiteness was established by Prop. 2.1). The fixedpoint formulation (2.5) actually suggests a broader iteration,
+with an additional step-size a:
+Lk+1 = Lk + aLk ∆k Lk .
+
+(2.7)
+
+Above we showed that for a = 1 ascent is guaranteed. Empirically, a > 1 often works well; Prop. A.1 presents an
+easily computable upper bound on feasible a. We conjecture that for all feasible values a ≥ 1, iteration (2.5) is
+guaranteed to increase the log-likelihood.
+Moreover, all previous calculations can be redone in the
+context where L = F ∗ W F for a fixed feature matrix F in
+order to learn the weight matrix W (under the assumption
+that S ∗ S is invertible), making our approach also useful in
+the context of feature-based DPP learning.
+Pseudocode of our resulting learning method is presented in
+Algorithms 1 and 2. For simplicity, we recommend using a
+fixed value of a (which can be set at initialization).
+Algorithm 1 Picard Iteration
+Input: Matrix L, training set T , step-size a > 0.
+for i = 1 to maxIter do
+L ←− FixedPointMap(L, T , a)
+if stop(L, T , i) then
+break
+end if
+end for
+return L
+
+Algorithm 2 FixedPointMap
+Input: Matrix L, training set T , step-size a > 0
+Z ←− 0
+for Y in T do
+ZY = ZY + L−1
+Y
+end for
+return L + aL(Z/|T | − (L + I)−1 )L
+
+2.2. Iteration cost and convergence speed
+The cost of each iteration of our algorithm is dominated
+by
+Pn
+the computation of ∆, which costs a total of O( i=1 |Yi |3 +
+N 3 ) = O(nκ3 + N 3 ) arithmetic operations, where κ =
+maxi |Yi |; the O(|Yi |3 ) cost comes from the time required
+3
+to compute the inverse L−1
+Yi , while the N cost stems from
+−1
+computing (I + L) . Moreover, additional N 3 costs arise
+when computing L∆L.
+In comparison, each iteration of the method of Gillenwater
+et al. (2014) costs O(nN κ2 + N 3 ), which is comparable
+to, though slightly greater than O(nκ3 + N 3 ) as N ≥ κ. In
+applications where the sizes of the sampled subsets satisfy
+κ  N , the difference can be more substantial. Moreover, we do not need any eigenvalue/vector computations to
+implement our algorithm.
+
+Finally, our iteration also runs slightly faster than the KAscent iteration, which costs O(nN 3 ). Additionally, similarly to EM, our algorithm avoids the projection step necessary in the K-Ascent algorithm (which ensures K ∈ {X :
+0  X  I}). As shown in (Gillenwater et al., 2014),
+avoiding this step helps learn non-diagonal matrices.
+We note in passing that similar to EM, assuming a nonsingular local maximum, we can also obtain a local linear
+rate of convergence. This follows by relating iteration (2.5)
+to scaled-gradient methods (Bertsekas, 1999, §1.3) (except
+that we have an implicit PSD constraint).
+
+3. Experimental results
+We compare performance of our algorithm, referred to
+as Picard iteration4 , against the EM algorithm presented
+in Gillenwater et al. (2014). We experiment on both synthetic and real-world data.
+For real-world data, we use the baby registry test on which
+results are reported in (Gillenwater et al., 2014). This dataset
+consists in 111, 006 sub-registries describing items across
+13 different categories; this dataset was obtained by collecting baby registries from amazon.com, all containing
+between 5 and 100 products, and then splitting each registry
+into subregistries according to which of the 13 categories
+(such as “feeding”, “diapers”, “toys”, etc.) each product in
+the registry belongs to. (Gillenwater et al., 2014) provides a
+more in-depth description of this dataset.
+These sub-registries are used to learn a DPP capable of
+providing recommendations for these products: indeed, a
+DPP is well-suited for this task as it provides sets of products
+in a category that are popular yet diverse enough to all be of
+interest to a potential customer.
+3.1. Implementation details
+We measure convergence by testing the relative change
+|φ(Lk+1 )−φ(Lk )|
+≤ ε. We used a tighter convergence crite|φ(Lk )|
+rion for our algorithm (εpic = 0.5·εem ) to account for the fact
+that the distance between two subsequent log-likelihoods
+tends to be smaller for the Picard iteration than for EM.
+The parameter a for Picard was set at the beginning of
+each experiment and never modified as it remained valid
+throughout each test5 . In EM, the step size was initially
+set to 1 and halved when necessary, as per the algorithm
+described in (Gillenwater et al., 2014); we used the code
+of Gillenwater et al. (2014) for our EM implementation6 .
+4
+Our nomenclature stems from the usual name for such iterations in fixed-point theory (Granas and Dugundji, 2003).
+5
+Although it was not necessary in our experiments, if the parameter a becomes invalid, it can be halved until it reaches 1.
+6
+These experiments were run with MATLAB, on a Linux Mint
+
+Fixed-point algorithms for determinantal point processes
+
+-16.5
+Picard
+EM
+
+-17
+0
+
+20
+
+40
+
+normalized log likelihood
+
+normalized log likelihood
+
+-16
+
+-32
+
+normalized log likelihood
+
+-24
+
+-15.5
+
+-24.5
+-25
+-25.5
+
+Picard
+EM
+
+-26
+0
+
+50
+
+time (s)
+
+100
+
+150
+
+-32.5
+-33
+-33.5
+
+Picard
+EM
+
+-34
+0
+
+time (s)
+
+(a) N = 50
+
+50
+
+100
+
+150
+
+time (s)
+
+(b) N = 100
+
+(c) N = 150
+
+Figure 1. Normalized log-likelihood as a function of time for various set sizes N , with n = 5000 and a = 5 using the BASIC random
+distribution.
+
+-16
+
+-16.5
+Picard
+EM
+
+-17
+0
+
+20
+
+40
+
+-15.5
+
+-16
+
+-16.5
+Picard
+EM
+
+-17
+0
+
+20
+
+time (s)
+
+(a) n = 5000
+
+40
+
+60
+
+80
+
+normalized log likelihood
+
+-15.5
+
+normalized log likelihood
+
+normalized log likelihood
+
+-15.5
+
+-16
+
+-16.5
+Picard
+EM
+
+-17
+0
+
+50
+
+time (s)
+
+time (s)
+
+(b) n = 10, 000
+
+(c) n = 15, 000
+
+100
+
+Figure 2. Normalized log likelihood as a function of time for various numbers of training sets, with N = 50 and a = 5 using the BASIC
+random distribution.
+
+-16
+
+-16.5
+Picard
+EM
+
+-17
+0
+
+20
+
+40
+
+-16
+
+-16.5
+Picard
+EM
+
+-17
+0
+
+20
+
+time (s)
+
+(a) a = 1
+
+40
+
+time (s)
+
+(b) a = 5
+
+normalized log likelihood
+
+-15.5
+
+normalized log likelihood
+
+normalized log likelihood
+
+-15.5
+
+-15.5
+
+-16
+
+-16.5
+Picard
+EM
+
+-17
+0
+
+20
+
+40
+
+time (s)
+
+(c) a = 10
+
+Figure 3. Normalized log likelihood as a function of time for different values of a, with N = 50 and n = 5000 using the BASIC random
+distribution.
+
+3.2. Synthetic tests
+In each experiment, we sample n training sets from a base
+DPP of size N , then learn the DPP using EM and the Picard
+iteration. We initialize the learning process with a random
+positive definite matrix L0 (or K0 for EM) drawn from the
+same distribution as the true DPP kernel.
+system, using 16GB of RAM and an i7-4710HQ CPU @ 2.50GHz.
+
+Specifically, we used two matrix distributions to draw the
+true kernel and the initial matrix values from:
+• BASIC: We draw the coefficients
+ √ofa matrix M from
+the uniform distribution over 0, 2 , then return L =
+M M > conditioned on its positive definiteness.
+• WISHART: We draw L from a Wishart distribution
+with N degrees of freedom and an identity covariance
+
+Fixed-point algorithms for determinantal point processes
+
+matrix, and rescale it with a factor
+
+1
+N.
+
+Figures 1, 2 and 3 show the log-likelihood as a function of
+time for different parameter values when both the true DPP
+kernel and the initial matrix L0 were drawn from the BASIC
+distribution. Tables 1 and 2 show the final log-likelihood
+and the time necessary for each method to reach 99% of the
+optimal log likelihood for both distributions and parameters
+n = 5000, a = 5.
+As shown in Figure 1, the difference in time necessary for
+both methods to reach a good approximation of the final
+likelihood (as defined by best final likelihood) grows drastically as the size N of the set of all elements {1, 2, . . . , N }
+increases. Figure 2 illustrates the same phenomenon when
+N is kept constant and n increases.
+Finally, the influence of the parameter a on convergence
+speed is illustrated in Figure 37 . Increasing a noticeably increases Picard’s convergence speed, as long as the matrices
+remain positive definite during the Picard iteration.
+Table 1. Final log-likelihoods and time necessary for an iteration
+to reach 99% of the optimal log likelihood for both algorithms
+when using BASIC distribution for true and initialization matrices
+(training set size of 5,000, a = 5).
+
+N
+N
+N
+N
+N
+
+= 50
+= 100
+= 150
+= 200
+= 250
+
+L OG -L IKELIHOOD
+P ICARD
+EM
+-15.5
+-15.5
+-24.4
+-24.2
+-32.5
+-32.5
+-40.8
+-41.2
+-45.7
+-46.0
+
+RUNTIME TO 99%
+P ICARD
+EM
+17.3 S
+30.7 S
+143 S
+75.5 S
+40.7 S
+84.0 S
+51.1 S
+1,730 S
+99.1 S
+2,850 S
+
+Table 2. Final log-likelihoods and time necessary for an iteration to
+reach 99% of the optimal log likelihood for both algorithms when
+using WISHART distribution for true and initialization matrices
+(training set size of 5,000, a = 5).
+
+N
+N
+N
+N
+N
+
+= 50
+= 100
+= 150
+= 200
+= 250
+
+L OG -L IKELIHOOD
+P ICARD
+EM
+-33.0
+-33.1
+-66.2
+-66.2
+-99.2
+-99.3
+-132.1
+-132.4
+-165.1
+-165.7
+
+RUNTIME TO 99%
+P ICARD
+EM
+0.2 S
+2.0 S
+0.5 S
+3.6 S
+0.8 S
+5.2 S
+1.2 S
+8.9 S
+2.5 S
+11 S
+
+Overall, our algorithm converges to 99% of the optimal loglikelihood (defined as the maximum of the log-likelihoods
+returned by each algorithm) significantly faster than the EM
+algorithm for both distributions, particularly when dealing
+with large values of N .
+Thus, the Picard iteration is preferable when dealing with
+large ground sets; it is also very well-suited to cases where
+larger amounts of training data are available.
+3.3. Baby registries experiment
+We tested our implementation on all 13 product categories in
+the baby registry dataset, using two different initializations:
+• the aforementioned Wishart distribution
+• the data-dependent moment matching initialization
+(MM) described in (Gillenwater et al., 2014)
+In each case, 70% of the baby registries in the product category were used for training; 30% served as test. The results
+presented in Figures 4 and 5 are averaged over 5 learning
+trials, each with different initial matrices; the parameter a
+was set equal to 1.3 for all iterations.
+
+Table 3. Comparison of final log-likelihoods for both algorithms;
+relative closeness between Picard and EM: δ = |φem − φpic |/φem .
+C ATEGORY
+FURNITURE
+CARSEATS
+SAFETY
+STROLLERS
+MEDIA
+HEALTH
+TOYS
+BATH
+APPAREL
+BEDDING
+DIAPER
+GEAR
+FEEDING
+
+δ (W ISHART )
+4.4 E -02
+3.7 E -02
+3.3 E -02
+3.9 E -02
+2.3 E -02
+2.6 E -02
+2.0 E -02
+2.6 E -02
+9.2 E -03
+1.3 E -02
+7.2 E -03
+2.3 E -03
+4.9 E -04
+
+δ (MM)
+1.2 E -03
+7.6 E -04
+8.0 E -04
+3.0 E -03
+2.4 E -03
+7.4 E -03
+5.9 E -03
+2.9 E -03
+4.3 E -03
+7.6 E -03
+5.3 E -03
+9.0 E -03
+2.1 E -03
+
+Similarly to its behavior on synthetic datasets, the Picard iteration provides overall significantly shorter runtimes when
+dealing with large matrices and training sets. As shown in
+Table 3, the final log-likelihoods are very close (on the order
+10−2 to 10−4 ) to those attained by the EM algorithm.
+
+The greatest strength of the Picard iteration lies in its initial
+rapid convergence: the log-likelihood increases significantly
+faster for the Picard iteration than for EM. Although for
+small datasets EM sometimes performs better, our algorithm
+provides substantially better results in shorter timeframes
+when dealing with larger datasets.
+
+Using a moments-matching initialization leaves Picard’s
+runtimes overall unchanged (a notable exception being the
+‘gear’ category). However, EM’s runtime decreases drastically with this initialization, although it remains significantly longer than Picard’s in most categories.
+
+7
+In the cases where a > 1, a safeguard was added to check that
+the matrices returned by our algorithm were positive definite.
+
+The final log-likelihoods are also closer when using
+moments-matching initialization (see Table 3).
+
+Fixed-point algorithms for determinantal point processes
+
+feeding
+
+feeding
+
+gear
+
+gear
+
+diaper
+
+diaper
+
+bedding
+
+bedding
+
+apparel
+
+apparel
+
+bath
+
+bath
+
+toys
+
+toys
+
+health
+
+health
+
+media
+
+media
+
+strollers
+
+strollers
+
+safety
+
+safety
+
+carseats
+
+carseats
+Picard
+EM
+
+furniture
+0
+
+2
+
+4
+
+6
+8
+Normalized NLL
+
+10
+
+12
+
+Picard
+EM
+
+furniture
+14
+
+0
+
+10
+
+20
+
+30
+
+(a) Final negative log-likelihood
+
+40
+50
+time (seconds)
+
+60
+
+70
+
+80
+
+90
+
+(b) Runtime
+
+Figure 4. Evaluation of EM and the Picard iteration on the baby registries dataset using Wishart initialization.
+
+feeding
+
+feeding
+
+gear
+
+gear
+
+diaper
+
+diaper
+
+bedding
+
+bedding
+
+apparel
+
+apparel
+
+bath
+
+bath
+
+toys
+
+toys
+
+health
+
+health
+
+media
+
+media
+
+strollers
+
+strollers
+
+safety
+
+safety
+
+carseats
+
+carseats
+Picard
+EM
+
+furniture
+0
+
+2
+
+4
+
+6
+8
+Normalized NLL
+
+10
+
+12
+
+Picard
+EM
+
+furniture
+14
+
+(a) Final negative log-likelihood
+
+0
+
+5
+
+10
+
+15
+20
+time (seconds)
+
+25
+
+30
+
+35
+
+(b) Runtime
+
+Figure 5. Evaluation of EM and the Picard iteration on the baby registries dataset using moments-matching initialization.
+
+4. Conclusions and future work
+We approached the problem of maximum-likelihood estimation of a DPP kernel from a different angle: we analyzed the
+stationarity properties of the cost function and used them
+to obtain a novel fixed-point Picard iteration. Experiments
+on both simulated and real data showed that for a range of
+ground set sizes and number of samples, our Picard iteration runs remarkably faster that the previous best approach,
+while being extremely simple to implement. In particular,
+for large ground set sizes our experiments show that our
+algorithm cuts down runtime to a fraction of the previously
+optimal EM runtimes.
+We presented a theoretical analysis of the convergence properties of the Picard iteration, and found sufficient conditions
+
+for its convergence. However, our experiments reveal that
+the Picard iteration converges for a wider range of stepsizes (parameter a in the iteration and plots) than currently
+accessible to our theoretical analysis. It is a part of our
+future work to develop more complete convergence theory,
+especially because of its strong empirical performance.
+In light of our results, another line of future work is to apply
+fixed-point analysis to other DPP learning tasks.
+ACKNOWLEDGMENTS
+Suvrit Sra is partly supported by NSF grant: IIS-1409802.
+
+Fixed-point algorithms for determinantal point processes
+
+A. Bound on a
+Ui , and ∆ be as defined above; set
+Proposition
+P A.1. Let L,−1
+Z = n1 i Ui (Ui∗ LUi ) Ui∗ . Define the constant
+γ := max{λmin (LZ), 1/λmax (I + L)}.
+
+(A.1)
+
+Then, 0 ≤ γ ≤ 1 and for a ≤ (1 − γ)−1 the update
+L0 ← L + aL∆L
+
+1
+n
+
+−1
+
+Pn
+
+i=1
+
+Ui∗ .
+
+Ui (Ui∗ LUi )
+
+To ensure L + aL∆L  0 we equivalently show
+
+L−1 + a n1
+
+n
+X
+
+Ui (Ui∗ LUi )
+
+i=1
+1/2
+
+=⇒ I + aL
+
+−1
+
+−1
+
+Ui∗ − (L + I)
+
+
+
+0
+
+−1
+
+ZL1/2  aL (L + I)
+
+=⇒ (1 − a)I + a(I + L)−1 + aL1/2 ZL1/2  0
+(as L(L + I)−1 = I − (I + L)−1 )
+−1
+
+=⇒ (1 − a) + aλmin ((I + L)
+
++ L1/2 ZL1/2 ) > 0.
+
+This inequality can be numerically optimized to find the
+largest feasible value of a. The simpler bound in question
+can be obtained by noting that
+−1
+
+λmin ((I + L)
+
++ L1/2 ZL1/2 )
+
+≥ max{λmin (LZ), 1/λmax (I + L)} = γ.
+Thus, we have the easily computable bound for feasible a:
+a≤
+
+N. Boumal, B. Mishra, P.-A. Absil, and R. Sepulchre.
+Manopt, a Matlab toolbox for optimization on manifolds.
+Journal of Machine Learning Research, 15:1455–1459,
+2014. URL http://www.manopt.org.
+J. Gillenwater, A. Kulesza, and B. Taskar. Near-optimal
+MAP inference for Determinantal Point Processes. In Advances in Neural Information Processing Systems (NIPS),
+2012.
+
+ensures that L0 is also positive definite.
+Proof. Let Z =
+
+D. P. Bertsekas. Nonlinear Programming. Athena Scientific,
+second edition, 1999.
+R. Bhatia. Positive Definite Matrices. Princeton University
+Press, 2007.
+
+1
+.
+1−γ
+
+Clearly, by construction γ ≥ 0. To see why γ ≤ 1, observe
+−1
+that (I + L) ≺ I, so that λmin ((I + L) ) < 1. Further,
+block-matrix calculations show that Z  L−1 , whereby
+λmin (L1/2 ZL1/2 ) ≤ λmin (I) = 1.
+
+References
+P.-A. Absil, R. Mahony, and R. Sepulchre. Optimization
+algorithms on matrix manifolds. Princeton University
+Press, 2009.
+R. Affandi, A. Kulesza, E. Fox, and B. Taskar. Nyström
+approximation for large-scale Determinantal Point Processes. In Artificial Intelligence and Statistics (AISTATS),
+2013.
+
+J. Gillenwater, A. Kulesza, E. Fox, and B. Taskar.
+Expectation-Maximization for learning Determinantal
+Point Processes. In Advances in Neural Information Processing Systems (NIPS), 2014.
+A. Granas and J. Dugundji. Fixed-point theory. Springer,
+2003.
+J. B. Hough, M. Krishnapur, Y. Peres, and B. Virág. Determinantal processes and independence. Probability Surveys,
+3(206–229):9, 2006.
+A. Krause, A. Singh, and C. Guestrin. Near-optimal sensor placements in Gaussian processes: theory, efficient
+algorithms and empirical studies. Journal of Machine
+Learning Research (JMLR), 9:235–284, 2008.
+A. Kulesza. Learning with Determinantal Point Processes.
+PhD thesis, University of Pennsylvania, 2013.
+A. Kulesza and B. Taskar. k-DPPs: Fixed-size Determinantal Point Processes. In International Conference on
+Maachine Learning (ICML), 2011a.
+A. Kulesza and B. Taskar. Learning Determinantal Point
+Processes. In Uncertainty in Artificial Intelligence (UAI),
+2011b.
+A. Kulesza and B. Taskar. Determinantal Point Processes
+for machine learning, volume 5. Foundations and Trends
+in Machine Learning, 2012.
+H. Lin and J. Bilmes. Learning mixtures of submodular
+shells with application to document summarization. In
+Uncertainty in Artificial Intelligence (UAI), 2012.
+R. Lyons. Determinantal probability measures. Publications Mathématiques de l’Institut des Hautes Études Scientifiques, 98(1):167–212, 2003.
+O. Macchi. The coincidence approach to stochastic point
+processes. Advances in Applied Probability, 7(1), 1975.
+
+R. Affandi, E. Fox, R. Adams, and B. Taskar. Learning the
+parameters of Determinantal Point Process kernels. In
+International Conference on Machine Learning, 2014.
+
+S. Sra and R. Hosseini. Conic geometric optimization on
+the manifold of positive definite matrices. SIAM Journal
+on Optimization, 25(1):713–739, 2015.
+
+R. Affandi, E. Fox, and B. Taskar. Approximate inference
+in continuous Determinantal Point Processes. In Uncertainty in Artificial Intelligence (UAI), 2103.
+
+A. L. Yuille and A. Rangarajan. The concave-convex procedure. Neural Comput., 15(4):915–936, Apr. 2003. ISSN
+0899-7667.
+
+Fixed-point algorithms for determinantal point processes
+
+T. Zhou, Z. Kuscsik, J.-G. Liu, M. Medo, J. R. Wakeling,
+and Y.-C. Zhang. Solving the apparent diversity-accuracy
+dilemma of recommender systems. Proceedings of the National Academy of Sciences, 107(10):4511–4515, 2010.
+
+

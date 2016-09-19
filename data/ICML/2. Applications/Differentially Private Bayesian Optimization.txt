@@ -1,0 +1,1195 @@
+Differentially Private Bayesian Optimization
+
+Matt J. Kusner
+Jacob R. Gardner
+Roman Garnett
+Kilian Q. Weinberger
+Washington University in St. Louis, 1 Brookings Dr., St. Louis, MO 63130
+
+Abstract
+Bayesian optimization is a powerful tool for finetuning the hyper-parameters of a wide variety of
+machine learning models. The success of machine learning has led practitioners in diverse
+real-world settings to learn classifiers for practical problems. As machine learning becomes
+commonplace, Bayesian optimization becomes
+an attractive method for practitioners to automate
+the process of classifier hyper-parameter tuning.
+A key observation is that the data used for tuning models in these settings is often sensitive.
+Certain data such as genetic predisposition, personal email statistics, and car accident history, if
+not properly private, may be at risk of being inferred from Bayesian optimization outputs. To
+address this, we introduce methods for releasing the best hyper-parameters and classifier accuracy privately. Leveraging the strong theoretical guarantees of differential privacy and known
+Bayesian optimization convergence bounds, we
+prove that under a GP assumption these private
+quantities are often near-optimal. Finally, even if
+this assumption is not satisfied, we can use different smoothness guarantees to protect privacy.
+
+1. Introduction
+
+MKUSNER @ WUSTL . EDU
+GARDNER . JAKE @ WUSTL . EDU
+GARNETT @ WUSTL . EDU
+KILIAN @ WUSTL . EDU
+
+In these scenarios data cannot be shared legally, but companies and hospitals may want to share hyper-parameters and
+validation accuracies through publications or other means.
+However, data-holders must be careful, as even a small
+amount of information can compromise privacy.
+Which hyper-parameter setting yields the highest accuracy
+can reveal sensitive information about individuals in the
+validation or training data set, reminiscent of reconstruction attacks described by Dwork & Roth (2013) and Dinur
+& Nissim (2003). For example, imagine updated hyperparameters are released right after a prominent public figure is admitted to a hospital. If a hyper-parameter is known
+to correlate strongly with a particular disease the patient is
+suspected to have, an attacker could make a direct correlation between the hyper-parameter value and the individual.
+To prevent these sorts of attacks, we develop a set of algorithms that automatically fine-tune the hyper-parameters
+of a machine learning algorithm while provably preserving
+differential privacy (Dwork et al., 2006b). Our approach
+leverages recent results on Bayesian optimization (Snoek
+et al., 2012; Hutter et al., 2011; Bergstra & Bengio,
+2012; Gardner et al., 2014), training a Gaussian process
+(GP) (Rasmussen & Williams, 2006) to accurately predict
+and maximize the validation gain of hyper-parameter settings. We show that the GP model in Bayesian optimization
+allows us to release noisy final hyper-parameter settings to
+protect against aforementioned privacy attacks, while only
+sacrificing a tiny, bounded amount of validation gain.
+
+Machine learning is increasingly used in application areas
+with sensitive data. For example, hospitals use machine
+learning to predict if a patient is likely to be readmitted
+soon (Yu et al., 2013), webmail providers classify spam
+emails from non-spam (Weinberger et al., 2009), and insurance providers forecast the extent of bodily injury in car
+crashes (Chong et al., 2005).
+
+Our privacy guarantees hold for releasing the best hyperparameters and best validation gain. Specifically our contributions are as follows: 1. We derive, to the best of our
+knowledge, the first framework for Bayesian optimization
+with differential privacy guarantees, with/without oberservation noise, 2. We show that even if our validation gain is
+not drawn from a Gaussian process, we can guarantee differential privacy under different smoothness assumptions.
+
+Proceedings of the 32 nd International Conference on Machine
+Learning, Lille, France, 2015. JMLR: W&CP volume 37. Copyright 2015 by the author(s).
+
+We begin with background on Bayesian optimization and
+differential privacy we will use to prove our guarantees.
+
+Differentially Private Bayesian Optimization
+
+2. Background
+In general, our aim will be to protect the privacy of a validation dataset of sensitive records V ⊆ X (where X is
+the collection of all possible records) when the results of
+Bayesian optimization depends on V.
+Bayesian optimization. Our goal is to maximize an unknown function fV : Λ → R that depends on some validation dataset V ⊆ X :
+max fV (λ).
+λ∈Λ
+
+(1)
+
+It is important to point out that all of our results hold for the
+general setting of eq. (1), but throughout the paper, we use
+the vocabulary of a common application: that of machine
+learning hyper-parameter tuning. In this case fV (λ) is the
+gain of a learning algorithm evaluated on validation dataset
+V that was trained with hyper-parameters λ ∈ Λ ⊆ Rd .
+As evaluating fV is expensive (e.g., each evaluation requires training a learning algorithm), Bayesian optimization gives a procedure for selecting a small number of locations to sample fV : [λ1 , . . . , λT ] = λT ∈ Rd×T . Specifically, given a current sample λt , we observe a validation gain vt such that vt = fV (λt ) + αt , where αt ∼
+N (0, σ 2 ) is Gaussian noise with possibly non-zero variance σ 2 . Then, given vt and previously observed values
+v1 , . . . , vt−1 , Bayesian optimization updates its belief of
+fV and samples a new hyper-parameter λt+1 . Each step of
+the optimization proceeds in this way.
+To decide which hyper-parameter to sample next, Bayesian
+optimization places a prior distribution over fV and updates
+it after every (possibly noisy) function observation. One
+popular prior distribution
+ over functions is the Gaussian
+process GP µ(·), k(·, ·) (Rasmussen & Williams, 2006),
+parameterized by a mean function µ(·) (we set µ = 0,
+w.l.o.g.) and a kernel covariance function k(·, ·). Functions
+drawn from a Gaussian process have the property that any
+finite set of values of the function are normally distributed.
+Additionally, given samples λT = [λ1 , . . . , λT ] and observations vT = [v1 , . . . , vT ], the GP posterior mean and
+variance has a closed form:
+µT (λ) = k(λ, λT )(KT + σ 2 I)−1 vT
+kT (λ, λ0 ) = k(λ, λ0 ) − k(λ, λT )(KT + σ 2 I)−1 k(λT , λ0 )
+σT2 (λ) = kT (λ, λ),
+
+(2)
+
+where k(λ, λT ) ∈ R1×T is evaluated element-wise on each
+of the T columns of λT , and λ ∈ Λ is any hyper-parameter.
+As well, KT = k(λT , λT ) ∈ RT ×T is evaluated on all
+hyper-parameter pairs from λT . As more samples are observed, the mean function µT (λ) approaches fV (λ).
+One well-known method to select hyper-parameters λ maximizes the upper-confidence bound (UCB) of the posterior
+
+GP model of fV (Auer et al., 2002; Srinivas et al., 2010):
+p
+(3)
+λt+1 , arg max µt (λ) + βt+1 σt (λ),
+λ∈Λ
+
+where βT +1 is a parameter that trades off the exploitation of maximizing µt (λ) and the exploration of maximizing σt (λ). Srinivas et al. (2010) proved that given certain assumptions on fV and fixed, non-zero observation
+noise (σ 2 > 0), selecting hyper-parameters λ to maximize
+eq. (3) is aPno-regret Bayesian optimization procedure:
+T
+limT →∞ T1 t=1 fV (λ∗ ) − fV (λt ) = 0, where fV (λ∗ ) is
+the maximizer of eq. (1). For the no-noise setting, de Freitas et al. (2012) give a UCB-based no-regret algorithm.
+Contributions. Alongside maximizing fV , we would
+like to guarantee that if fV depends on (sensitive) validation data, we can release information about fV so that the
+data V remains private. Specifically, we may wish to release (a) our best guess λ̂ , arg maxt≤T fV (λt ) of the true
+(unknown) maximizer λ∗ and (b) our best guess fV (λ̂) of
+the true (also unknown) maximum objective fV (λ∗ ). The
+primary question this work aims to answer is: how can we
+release private versions of λ̂ and fV (λ̂) that are close to
+their true values, or better, the values λ∗ and fV (λ∗ )? We
+give two answers to these questions. The first will make
+a Gaussian process assumption on fV , which we describe
+immediately below. The second, described in Section 5,
+will utilize Lipschitz and convexity assumptions to guarantee privacy in the event the GP assumption does not hold.
+Setting. For our first answer to this question, let us define a Gaussian process over hyper-parameters λ, λ0 ∈ Λ
+0
+0
+and datasets
+ V, V ⊆ X as follows: GP 0, k1 (V, V ) ⊗
+0
+k2 (λ, λ ) . A prior of this form is known as a multi-task
+Gaussian process (Bonilla et al., 2008). Many choices for
+k1 and k2 are possible. The function k1 (V, V 0 ) defines a
+set kernel (e.g., a function of the number of records that
+differ between V and V 0 ). For k2 , we focus on either the
+squared exponential: k2 (λ, λ0 ) = exp −kλ − λ0 k22 /(2`2 )
+or
+(e.g., for ν√ = 5/2, k2 (λ, λ0 ) = (1 +
+√ Matérn kernels:
+2
+2
+5r/` + (5r )/(3` )) exp(− 5r/`), for r = kλ − λ0 k2 ),
+for a fixed `, as they have known bounds on the maximum
+information gain (Srinivas et al., 2010). Note that as defined, the kernel k2 is normalized (i.e., k2 (λ, λ) = 1).
+Assumption 1. We have a problem of type (1), where
+all possible dataset functions [f1 , . . ., f2|X | ] are GP distributed GP 0, k1 (V, V 0 ) ⊗ k2 (λ, λ0 ) for known kernels
+k1 , k2 , for all V, V 0 ⊆ X and λ, λ0 ∈ Λ, where |Λ| < ∞.
+Similar Gaussian process assumptions have been made in
+previous work (Srinivas et al., 2010). For a result in the nonoise observation setting, we will make use of the assumptions of de Freitas et al. (2012) for our privacy guarantees,
+as described in Section 4.
+
+Differentially Private Bayesian Optimization
+
+2.1. Differential Privacy
+One of the most widely accepted frameworks for private
+data release is differential privacy (Dwork et al., 2006b),
+which has been shown to be robust to a variety of privacy attacks (Sweeney, 1997; Dinur & Nissim, 2003; Ganta
+et al., 2008; Narayanan & Shmatikov, 2008). Given an algorithm A that outputs a value λ when run on dataset V,
+the goal of differential privacy is to ‘hide’ the effect of a
+small change in V on the output of A. Equivalently, an attacker should not be able to tell if a single private record
+was changed in V just by looking at the output of A. If two
+datasets V, V 0 differ in the value of a single individual, we
+will refer to them as neighboring datasets. Note that any
+non-trivial algorithm (i.e., an algorithm A that outputs different values on V and V 0 for some pair V, V 0 ⊆ X ) must
+include some amount of randomness to guarantee such a
+change in V is ‘unobservable’ in the output λ of A (Dwork
+& Roth, 2013). The level of privacy we wish to guarantee decides the amount of randomness we need to add to λ
+(better privacy requires increased randomness). Formally,
+the definition of differential privacy is stated below.
+Definition 1. A randomized algorithm A is (, δ)differentially private for , δ ≥ 0 if for all λ ∈ Range(A)
+and for all neighboring datasets V, V 0 (i.e., such that V and
+V 0 differ in the value of one record) we have that
+
+
+
+
+Pr A(V) = λ ≤ e Pr A(V 0 ) = λ + δ.
+(4)
+The parameters , δ guarantee how private A is; the smaller,
+the more private. The maximum privacy is  = δ = 0 in
+which case eq. (4) holds with equality. This can be seen by
+the fact that V and V 0 can be swapped in the definition, and
+thus the inequality holds in both directions. If δ = 0, we
+say the algorithm is simply -differentially private. For a
+survey on differential privacy we refer the interested reader
+to Dwork & Roth (2013).
+There are two popular methods for making an algorithm differentially private: (a) the Laplace mechanism (Dwork
+et al., 2006b), in which we add random noise to λ and (b)
+the exponential mechanism (McSherry & Talwar, 2007),
+which draws a random output λ̃ such that λ̃ ≈ λ. For
+each mechanism we must define an intermediate quantity called the global sensitivity describing how much A
+changes when V changes.
+Definition 2. (Laplace mechanism) The global sensitivity
+of an algorithm A over all neighboring datasets V, V 0 (i.e.,
+V, V 0 differ by the value of one record) is
+0
+
+∆A , max
+kA(V) − A(V )k1 .
+0
+
+The Laplace mechanism hides the output of A by perturbing its output with some amount of random noise.
+Definition 3. Given a dataset V and an algorithm A, the
+Laplace mechanism returns A(V) + ω, where ω is a noise
+variable drawn from Lap(∆A /), the Laplace distribution
+with scale parameter ∆A / (and location parameter 0).
+The exponential mechanism draws a slightly different λ̃
+that is ‘close’ to λ, the output of A.
+Definition 4. Given a dataset V and an algorithm
+A(V) = arg maxλ∈Λ q(V, λ), the exponential mechanism returns λ̃, whereλ̃ is drawn from the distribution
+1
+Z exp q(V, λ)/(2∆q ) , and Z is a normalizing constant.
+Given Λ, a possible set of hyper-parameters, we derive
+methods for privately releasing the best hyper-parameters
+and the best function values fV , approximately solving
+eq. (1). We first address the setting with observation noise
+(σ 2 > 0) in eq. (2) and then describe small modifications
+for the no-noise setting. For each setting we use the UCB
+sampling technique in eq. (3) to derive our private results.
+
+3. With observation noise
+In general cases of Bayesian optimization, observation
+noise occurs in a variety of real-world modeling settings
+such as sensor measurements (Krause et al., 2008). In
+hyper-parameter tuning, noise in the validation gain may
+be as a result of noisy validation or training features.
+Algorithm 1 Private Bayesian Opt. (noisy observations)
+2
+; γT
+Input: V; Λ ⊆ Rd ; T ; (, δ); σV,0
+µV,0 = 0
+for t = 1 . . . T do
+βt = 2 log(|Λ|t2 π 2 /(3δ))
+√
+λt , arg maxλ∈Λ µV,t−1 (λ) + βt σV,t−1 (λ)
+Observe validation gain vV,t , given λt
+2
+Update µV,t and σV,t
+according to (2)
+end for
+q
+
+
+c = 2 1−k(V, V 0 ) log 3|Λ|/δ
+p
+10: q = σ 8 log(3/δ)
+11: C1 = 8/ log(1 + σ −2 )
+
+
+µV,T (λ)
+√
+12: Draw λ̃ ∈ Λ w.p. Pr[λ] ∝ exp
+
+1:
+2:
+3:
+4:
+5:
+6:
+7:
+8:
+9:
+
+2(2
+
+13: v ∗ = maxt≤T vhV,t
+√
+
+14: Draw θ ∼ Lap
+15: ṽ = v ∗ + θ
+16: Return: λ̃, ṽ
+
+C1√
+βT γT
+ T
+
++
+
+c
+
+
++
+
+q
+
+
+βT +1 +c)
+
+i
+
+V,V ⊆X
+
+(Exponential mechanism) The global sensitivity of a function q : X ×Λ → R over all neighboring datasets V, V 0 is
+∆q , max
+kq(V, λ) − q(V 0 , λ)k1 .
+0
+V,V ⊆X
+λ∈Λ
+
+In the sections that follow, although the quantities f, µ, σ, v
+all depend on the validation dataset V, for notational simplicity we will occasionally omit the subscript V. Similarly,
+2
+for V 0 we will often write: f 0 , µ0 , σ 0 , v 0 .
+
+Differentially Private Bayesian Optimization
+
+3.1. Private near-maximum hyper-parameters
+In this section we guarantee that releasing λ̃ in Algorithm
+1 is private (Theorem 1) and has high utility (Theorem 2).
+Our proof strategy is as follows: we will first demonstrate
+the global sensitivity of µT (λ) with probability at least 1−
+δ. Then we will show that releasing λ̃ via the exponential
+mechanism is (, δ)-differentially private. Finally, we show
+that µT (λ̃) is close to maxλ∈Λ µT (λ).
+Global sensitivity. As a first step we bound the global
+sensitivity of µT (λ) as follows:
+Theorem 1. Given Assumption 1, for any two neighboring
+datasets V, V 0 and for all λ ∈ Λ with probability at least
+1 − δ there is an upper bound on the global sensitivity (in
+the exponential mechanism sense) of µT :
+p
+p
+|µ0T (λ) − µT (λ)| ≤ 2 βT +1 + σ1 2 log (3|Λ|/δ),
+q
+
+
+
+for σ1 = 2 1−k1 (V, V 0 ) , βt = 2 log |Λ|t2 π 2 /(3δ) .
+
+tail probability bounds) for selected hyperparameters αi ∈
+{α1 , . . . , αT } we have that µT (αi ) ≈ f (λi ). Therefore,
+it is reasonable to select λ = arg maxλ∈Λ µT (λ), to optimize (1). McSherry & Talwar (2007) show that exponential
+mechanism (line 12) selects a noisy maximum as follows.
+Theorem 2. (McSherry & Talwar, 2007) The exponential
+mechanism selects λ̃ that has value µT (λ̃) that is close to
+the maximum maxλ∈Λ µT (λ),
+maxλ∈Λ µT (λ) − µT (λ̃) ≤
+
+2∆
+ (log |Λ|
+
++ a), (5)
+p
+w.p. ≥ 1 − (δ + e−a ), where ∆ = 2 βT +1 + c (for βT +1
+and c defined as in Algorithm 1).
+Notice that as T increases, so does ∆ in the above inequality, as the distribution in line 12 becomes more uniform.
+However, because ∆ increases
+p much more slowly than T
+(i.e. ∆ is asymptotically O( log(T +1)2 )), T should be
+selected as large as possible to achieve small average regret.
+3.2. Private near-maximum validation gain
+
+Proof. Note that, by applying the triangle inequality twice,
+for all λ ∈ Λ,
+|µ0T (λ) − µT (λ)| ≤ |µ0T (λ) − f 0 (λ)| + |f 0 (λ) − µT (λ)|
+≤ |µ0T (λ) − f 0 (λ)| + |f 0 (λ) − f (λ)| + |f (λ) − µT (λ)|.
+We can now bound each one of the terms in the summation
+on the right hand side (RHS) with probability at least 3δ .
+According to Srinivas
+p et al. (2010), Lemma 5.1, we obtain
+|µ0T (λ) − f 0 (λ)| ≤ βT +1 σT0 (λ). The same can be applied
+k(λ, λ) = 1,
+to |f (λ) − µT (λ)|. As σT0 (λ) ≤ 1, because
+p
+we can upper bound both terms by 2 βT +1 . In order to
+bound the remaining (middle) term on the RHS recall that
+
+for a random variable Z ∼ N (0, 1) we have: Pr |Z| > γ ≤
+2
+e−γ /2 . For variables Z1 , . . . Zn ∼ N (0, 1), we have, by
+
+
+2
+the union bound, that Pr ∀i, |Zi | ≤ γ ≥ 1 − ne−γ /2 ,
+0
+
+(λ)|
+1 − 3δ . If we set Z = |f (λ)−f
+and n = |Λ|, we obtain
+σ1
+q
+
+γ = 2 log 3|Λ|/δ , which completes the proof.
+
+
+We remark that all of the quantities in Theorem 1 are either
+given or selected by the modeler (e.g, δ, T ). Given this
+upper bound we can apply the exponential mechanism to
+release λ̃ privately, as per Definition 1:
+Corollary 1. Let A(V) denote Algorithm 1 applied on
+dataset V. Given
+1, λ̃ is (, δ)-differentially
+ Assumption
+
+
+private, i.e., Pr A(V) = λ̃ ≤ e Pr A(V 0 ) = λ̃ +δ, for any
+pair of neighboring datasets V, V 0 .
+We leave the proof of Corollary 1 to the supplementary material. As described in (Srinivas et al., 2010), lines 3-8
+(UCB) of Algorithm 1 is P
+a no-regret Bayesian optimizaT
+tion procedure: limT →∞ t=1 (f (λ∗ ) − f (λt ))/T = 0.
+Further, with high probability (as given by the Gaussian
+
+In this section we demonstrate releasing the validation gain
+ṽ in Algorithm 1 is private (Theorem 3) and that the noise
+we add to ensure privacy is bounded with high probability (Theorem 4). As in the previous section our approach
+will be to first derive the global sensitivity of the maximum v found by Algorithm 1. Then we show releasing ṽ
+is (, δ)-differentially private via the Laplace mechanism.
+Surprisingly, we can also show that ṽ is close to f (λ∗ ).
+Global sensitivity. We bound the global sensitivity of the
+maximum v found with Bayesian optimization and UCB:
+Theorem 3. Given Assumption 1, and neighboring V, V 0 ,
+we have the following global sensitivity bound (in the
+Laplace mechanism sense) for the maximum v, w.p. ≥ 1−δ
+√
+C1 βT γT
+0
+√
++ c + q.
+| max vt − max vt | ≤
+t≤T
+t≤T
+T
+(for c, q, βT in Algorithm 1) where the maximum GP information gain γT is bounded above for the squared exponential and Matérn kernels (Srinivas et al., 2010).
+Proof. For notational
+simplicity let us denote the regret
+√
+term as Ω , C1 T βT γT . Then from Theorem 1 in Srinivas et al. (2010) we have that
+T
+Ω
+1X
+≥ f (λ∗ ) −
+f (λt ) ≥ f (λ∗ ) − max f (λt ). (6)
+t≤T
+T
+T t=1
+
+This implies f (λ∗ ) ≤ maxt≤T f (λt ) + TΩ with probability
+at least 1 − 3δ (with appropriate choice of βT ).
+Recall that in the proof of Theorem 1 we showed that
+|f (λ) − f 0 (λ)| ≤ c with probability at least 1 − 3δ (for
+
+Differentially Private Bayesian Optimization
+
+c given in Algorithm 1). This along with the above expression imply the following two sets of inequalities with
+probability greater than 1 − 2δ
+3 :
+f 0 (λ∗ ) − c ≤ f (λ∗ ) < max f (λt ) +
+
+Ω
+T;
+
+t≤T
+
+f (λ∗ ) − c ≤ f 0 (λ∗ ) < max f 0 (λt ) +
+t≤T
+
+Ω
+T.
+
+t≤T
+
+t≤T
+
+max f (λt ) ≤ f (λ∗ ) < max f 0 (λt ) +
+t≤T
+
+t≤T
+
+Ω
+T
+Ω
+T
+
++ c;
++ c.
+
+with probability at least 1−(δ+e−a ) for Ω =
+
+This implies | maxt≤T f 0 (λt ) − maxt≤T f (λt )| ≤ TΩ + c.
+That is, the global sensitivity of maxt≤T f (λt ) is bounded.
+Given the sensitivity of the maximum f , we can readily
+derive the sensitivity of maximum v. First note that we can
+use the triangle inequality to derive
+| max vt0 − max vt | ≤ | max vt − max f (λt )|
+t≤T
+
+t≤T
+
+t≤T
+
++
+
+t≤T
+
+| max vt0
+t≤T
+
+− max f (λt )|
+t≤T
+
+t≤T
+
+We can immediately bound the final term on the right
+hand side. For the first term, let tv,max = arg maxt≤T vt
+be the index of the best observed validation gain. Let
+tf,max = arg maxt≤T f (λt ) be the index of the best true
+validation gain. The first term is upper bounded by |α| ,
+max{|αtv,max |, |αtf,max |} (this can be easily seen by enumerating the cases: (a) tv,max = tf,max and (b) tv,max 6=
+tf,max ). Similarly, |α0 | upper bounds the second term (defined in the same way). Let α̂ = max{α, α0 } so we have,
+| max vt0 − max vt | ≤
+t≤T
+
+t≤T
+
+Ω
+T
+
++ c + |2α̂|.
+
+Although |α̂| can be arbitrarily large, recall that for Z ∼
+2
+N (0, 1) we have: Pr[|Z| ≤ γ] ≥ 1 − e−γ /2 , 1 − 3δ .
+p
+Therefore if we set Z = α̂
+we have γ = 2 log(3/δ). This
+pσ
+implies that |2α̂| ≤ σ 8 log(3/δ) = q with probability at
+least 1 − 3δ . Therefore, if Theorem 1 from Srinivas et al.
+(2010) and the bound on |f (λ) − f 0 (λ)| hold together with
+probability at least 1 − 2δ
+3 as described above, the theorem
+follows directly.
+
+As in Theorem 1 each quantity in the above bound is given
+in Algorithm 1 (β, c, q), given in previous results (Srinivas
+et al., 2010) (γT , C1 ) or specified by the modeler (T , δ).
+Now that we have a bound on the sensitivity of the maximum v we will use the Laplace mechanism to prove our
+privacy guarantee (proof in supplementary material):
+
+√
+
+c
+
+
++
+
+q
+
+
+
+
+,
+
+C1 T βT γT .
+
+Proof. Let Z be a Laplace random variable with scale parameter
+b and location
+parameter 0; Z ∼ Lap(b). Then
+
+
+Pr |Z| ≤ ab = 1 − e−a . Thus, in Algorithm 1,
+Ω
+|ṽ − maxt≤T vt | ≤ ab for b = T
++ c + q with prob−a
+ability at least 1 − e . Let tf,max = arg maxt≤T f (λt ).
+Further observe,
+ab ≥ max vt − ṽ ≥ (max f (λt ) − αtf,max ) − ṽ
+t≤T
+
+0
+
++ | max f 0 (λt ) − max f (λt )|.
+t≤T
+
+Further, as the Laplace distribution has exponential tails,
+the noise we add to obtain ṽ is small and shrinks as T increases. In fact, we can show that this noisy validation error
+is close to the optimal noise-free validation error.
+Theorem 4. Given Assumption 1 we have,
+
+p
+Ω
++
+|ṽ − f (λ∗ )| ≤ σ 8 log(1/δ) + TΩ + a T
+
+These, in turn, imply the two sets of inequalities:
+max f 0 (λt ) ≤ f 0 (λ∗ ) < max f (λt ) +
+
+Corollary 2. Let A(V) denote Algorithm 1 run on dataset
+V. Given Assumption 1, releasing ṽ is (, δ)-differentially
+private, i.e., Pr[A(V) = ṽ] ≤ e Pr[A(V 0 ) = ṽ]+δ.
+
+t≤T
+
+≥ f (λ∗ ) −
+
+Ω
+T
+
+− αtf,max − ṽ
+
+(7)
+
+where the second and third inequality follow from the
+proof of Theorem 3 (using the regret bound of Srinivas
+et al. (2010): Theorem 1). Note that the third inequality holds with probability greater than 1 − 2δ (given βt in
+Algorithm 1). The final inequality implies f (λ∗ ) − ṽ ≤
+αtf,max + TΩ + ab. Let tv,max = arg maxt≤T vt . Also note,
+ab ≥ ṽ − max vt ≥ ṽ − (max f (λt ) + αtv,max )
+t≤T
+
+∗
+
+≥ ṽ − f (λ ) −
+
+t≤T
+
+Ω
+T
+
+− αtv,max
+
+(8)
+
+This implies that f (λ∗ ) − ṽ ≥ −αtv,max − TΩ − ab. Thus
+we have that |ṽ − f (λ∗ )| ≤ αtf,max + αtv,max + TΩ + ab.
+Finally, because αtf,max and αtv,max could be arbitrarily
+large we give a high probability upper bound on these
+quantities. Let α̂ , max{αtf,max , αtv,max }. Again recall
+that for Z ∼ N (0, 1), we have the tail probability bound
+
+2
+Pr Z ≤ γ] ≥ 1 − (1/2)e−γ /2 , 1 − 2δ . Therefore if we
+p
+set Z = α̂
+arrive at γ = σ 2 log(1/δ). This entails
+σ we
+p
+that 2α̂ ≤ σ 8 log(1/δ). Therefore, our proposed bound
+in Theorem 4 holds.
+
+The right side of Theorem 4 becomes smaller as T increases, so T should be set as large as possible. We note
+that, because releasing either λ̃ or ṽ is (, δ)-differentially
+private, by Corollaries 1 and 2, releasing both private quantities in Algorithm 1 guarantees (2, 2δ)-differential privacy for validation dataset V. This is due to the composition properties of (, δ)-differential privacy (Dwork et al.,
+2006a) (in fact stronger composition results can be demonstrated, (Dwork & Roth, 2013)).
+
+Differentially Private Bayesian Optimization
+
+4. Without observation noise
+In hyper-parameter tuning it may be reasonable to assume
+that we can observe function evaluations exactly: vV,t =
+fV (λt ). First note that we can use the same algorithm to
+report the maximum λ in the no-noise setting. Indeed,
+Theorems 1 and 2 still hold. However, we cannot readily report a private maximum f as the information gain
+γT in Theorems 3 and 4 approaches infinity as σ 2 → 0.
+Therefore, we extend results from the previous section to
+the exact observation case via the regret bounds of de Freitas et al. (2012). In this setting, the authors show that they
+can achieve exponentially-decreasing regret for each sample: f (λ∗ ) − f (λt ) < O(e−t/ log(t) ). Therefore our strategy will be to select the last sample and add enough noise to
+cover a change in a validation record. Algorithm 2 demonstrates this strategy for privatizing the maximum f .
+Algorithm 2 Private Bayesian Opt. (noise free obs.)
+1: Input: V; Λ ⊆ Rd ; T ; (, δ); A, τ ; assumptions on fV
+
+in de Freitas et al. (2012)
+2: Observe noise-free samples: fV (λ1 ), . . . , fV (λT ) us-
+
+ing method
+of de Freitas et al. (2012)
+q
+
+3: c = 2
+1 − k(V, V 0 ) log(2|Λ|/δ)
+h − Tτ
+i
+(log T )d/4 + c
+e
+4: Draw θ ∼ Lap A
+
+
+5: Return: f˜ = fV (λT ) + θ
+
+4.1. Private near-maximum validation gain
+We demonstrate that releasing f˜ in Algorithm 2 is private
+(Corollary 3) and that a small amount of noise is added
+to make f˜ private (Theorem 6). To do so, we derive the
+global sensitivity of fV (λT ) in Algorithm 2 independent
+of the maximum information gain γT via de Freitas et al.
+(2012). Then we prove releasing f˜ is (, δ)-differentially
+private and that f˜ is close to the optimal f (λ∗ ).
+Global sensitivity. The following Theorem gives a
+bound on the global sensitivity of the maximum f .
+Theorem 5. Given Assumption 1 and the assumptions
+in Theorem 2 of de Freitas et al. (2012), for neighboring datasets V, V 0 we have the following global sensitivity
+bound (in the Laplace mechanism sense),
+−
+
+Tτ
+
+|f 0 (λT ) − f (λT )| ≤ Ae (log T )d/4 + c
+q
+
+w.p. at least 1 − δ for c = 2 1−k(V, V 0 ) log(2|Λ|/δ),
+given constants A and τ in de Freitas et al. (2012).
+We leave the proof to the supplementary material.
+Given this sensitivity, we may apply the Laplace mechanism to release f˜.
+
+Corollary 3. Let A(V) denote Algorithm 2 run on dataset
+V. Given Assumption 1 and that f satisfies the assumptions
+of de Freitas et al. (2012), f˜ is (, δ)-differentially private,
+with respect to any neighboring dataset V 0 , i.e.,
+
+
+
+
+Pr A(V) = f˜ ≤ e Pr A(V 0 ) = f˜ + δ.
+Even though we must add noise to the maximum f we show
+that f˜ is still close to the optimal f (λ∗ ).
+Theorem 6. Given the assumptions of Corollary 3, we
+have the utility guarantee for Algorithm 2:
+
+
+|f˜ − f (λ∗ )| ≤ Ω + a Ω + c
+w.p. at least 1−(δ + e−a ) for Ω = Ae
+
+−
+
+Tτ
+(log T )d/4
+
+.
+
+We prove Corollary 3 and Theorem 6 in the supplementary
+material. As in the noisy setting, selecting T as large as
+possible is the best strategy, as this reduces the right side of
+Theorem 6 (less Laplacian noise is required). We have thus
+shown that in noisy and noise-free settings it is possible to
+release private, high-quality hyper-parameter settings λ̃ as
+well as private, near-optimal function evaluations ṽ, f˜.
+
+5. Without the GP assumption
+Even if our our true validation score f is not drawn from
+a Gaussian process (Assumption 1), we can still guarantee
+differential privacy for releasing its value after Bayesian
+optimization f BO = maxt≤T f (λt ). In this section we
+describe a different functional assumption on f that also
+yields differentially private Bayesian optimization for the
+case of machine learning hyper-parameter tuning.
+Assume we have a (nonsensitive) training set T =
+{(xi , yi )}ni=1 , which, given a hyperparameter λ produces
+a model w(λ) from the following optimization,
+Oλ (w)
+
+z
+}|
+{
+n
+X
+1
+λ
+wλ = arg min kwk22 +
+`(w, xi , yi ),
+2
+n i=1
+w
+
+(9)
+
+The function ` is a training loss function (e.g., logistic
+loss, hinge loss). Given a (sensitive) validation set V =
+{(xi , y i )}m
+i=1 ⊆ X we would like to use Bayesian optimization to maximize a validation score fV .
+Assumption 2. Our true validation score fV is
+m
+
+fV (wλ ) = −
+
+1 X
+g(wλ , xi , y i ),
+m i=1
+
+where g(·) is a validation loss function that is L-Lipschitz
+in wλ (e.g., ramp loss, normalized sigmoid (Huang et al.,
+2014)). Additionally, the training model wλ is the minimizer of eq. (9) for a training loss `(·) that is 1-Lipschitz in
+wλ and convex (e.g., logistic loss, hinge loss).
+
+Differentially Private Bayesian Optimization
+
+Algorithm 3 describes a procedure for privately releasing
+the best validation accuracy f BO given Assumption 2. Different from previous algorithms, we may run Bayesian optimization in Algorithm 3 with any acquisition function
+(e.g., expected improvement (Mockus et al., 1978), UCB)
+and privacy is still guaranteed.
+Algorithm 3 Private Bayesian Opt. (Lipschitz and convex)
+1: Input: T size n; V size m; Λ; λmin ; λmax ; ; T ; L; d
+2: Run Bayesian optimization for T timesteps, observing:
+fV (wλ1 ), . . . , fV (wλT ) for {λ1 , . . . , λT } = ΛV,T ⊆ Λ
+3: f BO = maxt≤T fV (wλt )
+4: g ∗ = max(x,y)∈X ,w∈Rp g(w, x, y)
+h
+i
+5: Draw θ ∼ Lap
+
+6: Return: f˜L = f
+
+∗
+
+g
+1
+L
+ min{ m , mλmin }
+BO
+
++
+
+(λmax −λmin )L
+λmax λmin
+
++θ
+
+Similar to Algorithms 1 and 2 we use the Laplace mechanism to mask the possible change in validation accuracy
+when a single record is changed in V. Different from the related work of Chaudhuri & Vinterbo (2013) changing V to
+neighboring dataset V 0 may also lead to Bayesian optimization searching different hyper-parameters, ΛV,T vs. ΛV 0 ,T .
+Therefore, we must bound the total global sensitivity of f
+with respect to V and λ,
+Definition 5. The total global sensitivity of f over all
+neighboring datasets V, V 0 is
+V,V ⊆X
+λ,λ0 ∈Λ
+
+In the following theorem we demonstrate that we can
+bound the change in f for arbitrary λ < λ0 (w.l.o.g.).
+Theorem 7. Given Assumption 2, for neighboring V, V 0
+and arbitrary λ < λ0 we have that,
+	
+ ∗
+0
+|fV (wλ )−fV 0 (wλ0 )| ≤ (λλ−λ)L
++ min gm , mλLmin
+0λ
+where L is the Lipschitz constant of f , m is the size of V,
+and g ∗ = max(x,y)∈X ,w∈Rp g(w, x, y).
+Proof. Applying the triangle inequality yields
+|fV (wλ ) − fV 0 (wλ0 )| ≤ |fV (wλ ) − fV (wλ0 )|
++ |fV (wλ0 ) − fV 0 (wλ0 )|.
+This second term is bounded by Chaudhuri & Vinterbo
+(2013) in the proof of Theorem 4. The only difference is,
+as we are not adding random noise to wλ0 we have that
+|fV (wλ0 ) − fV 0 (wλ0 )| ≤ min{g ∗ /m, L/(mλmin ) }.
+To bound the first term, let Oλ (w) be the value of the objective in eq. (9) for a particular λ. Note that Oλ (w) and
+Oλ0 (w) are λ and λ0 -strongly convex. Define
+λ0 −λ
+2
+2 kwk2 .
+
+∇Oλ (wλ ) = ∇Oλ (wλ0 ) + ∇h(wλ0 ) = 0.
+
+(11)
+
+Given that Oλ is λ-strongly convex (Shalev-Shwartz,
+2007), and by the Cauchy-Schwartz inequality,
+h
+i> h
+i
+λ kwλ −wλ0 k22 ≤ ∇Oλ (wλ ) − ∇Oλ (wλ0 )
+wλ −wλ0
+h
+i
+≤ ∇h(wλ0 )> wλ −wλ0 ≤ k∇h(wλ0 )k2 kwλ −wλ0 k2 .
+Rearranging,
+ λ0 −λ
+
+1
+
+
+k∇h(wλ0 )k2 = 
+∇kwλ0 k22  ≥ kwλ −wλ0 k2
+λ
+2
+2
+(12)
+Now as wλ0 is the minimizer of Oλ0 we have,
+
+
+Pn
+∇kwλ0 k22 = λ20 − n1 i=1 ∇`(wλ0 , xi , yi ) .
+Substituting this value of wλ0 into eq. (12) and noting that
+we can pull the positive constant term (λ0 − λ)/2 out of the
+norm and drop the negative sign in the norm gives us
+ P
+
+
+n
+1
+λ0−λ  1
+λ0−λ
+0
+0
+i=1 ∇`(wλ , xi , yi ) = λλ0 .
+λ k∇h(wλ )k2 = λλ0  n
+2
+
+The last equality follows from the fact that the loss ` is
+1-Lipschitz by Assumption 2 and the triangle inequality.
+Thus, along with eq. (12), we have
+
+∆f , max
+|fV (wλ ) − fV 0 (wλ0 )|.
+0
+
+h(w) = Oλ0 (w) − Oλ (w) =
+
+Further, define the minimizers wλ = arg minw Oλ (w) and
+wλ0 = arg minw [Oλ (w) + h(w)]. This implies that
+
+(10)
+
+kwλ −wλ0 k2 ≤ λ1 k∇h(wλ0 )k2 ≤
+
+λ0 −λ
+λλ0 .
+
+Finally, as f is L-Lipschitz in w,
+0
+
+−λ
+|fV (wλ ) − fV (wλ0 )| ≤ Lkwλ − wλ0 k2 ≤ L λλλ
+0
+
+Combining the result of Chaudhuri & Vinterbo (2013) with
+the above expression completes the proof.
+
+Given a finite set of hyperparameters Λ, in order to bound
+the total global sensitivity of f note that, by Theorem 7,
+n ∗
+o
+−λmin )L
+g
+L
++
+min
+,
+,
+∆f ≤ (λλmax
+λ
+m
+mλ
+max min
+min
+as (λ0 −λ)/(λ0 λ) is strictly increasing in λ0 and is strictly
+decreasing in λ. Given the total global sensitivity of f we
+can use the Laplace mechanism to ‘hide’ the validation set.
+Corollary 4. Let A(V) denote Algorithm 3 applied on
+dataset V. Given
+Assumption
+2, f˜L is -differentially
+pri
+
+
+
+˜
+vate, i.e., Pr A(V) = fL ≤ e Pr A(V 0 ) = f˜L
+We leave the proof to the supplementary material. Further,
+by the exponential tails of the Laplace mechanism we have
+the following utility guarantee,
+
+Differentially Private Bayesian Optimization
+
+Theorem 8. Given the assumptions of Theorem 7, we have
+the following utility guarantee for f˜L w.r.t. f BO ,
+h
+i
+1
+L
+max −λmin )L
+|f˜L − f BO | ≤ a m
+} + (λλ
+min{g ∗ , λmin
+max λmin
+with probability at least 1 − e−a .
+Proof. This follows exactly from the tail bound on Laplace
+random variables, given in the proof of Theorem 6.
+
+One should set T as large as possible as Bayesian optimization may only possibly find better parameter settings when
+T is increased, and the noise added is independent of T .
+
+6. Related work
+There has been much work towards differentially private convex optimization (Chaudhuri et al., 2011; Kifer
+et al., 2012; Duchi et al., 2013; Song et al., 2013; Jain &
+Thakurta, 2014; Bassily et al., 2014). The work of Bassily et al. (2014) established upper and lower bounds for
+the excess empirical risk of  and (, δ)-differentially private algorithms for many settings including convex and
+strongly convex risk functions that may or may not be
+smooth. There is also related work towards private highdimensional regression, where the dimensions outnumber the number of instances (Kifer et al., 2012; Smith &
+Thakurta, 2013a). In such cases the Hessian becomes singular and so the loss is nonconvex. However, it is possible
+to use the restricted strong convexity of the loss in the regression case to guarantee privacy.
+Differential privacy has been shown to be achievable in
+online and interactive kernel learning settings (Jain et al.,
+2012; Smith & Thakurta, 2013b; Jain & Thakurta, 2013;
+Mishra & Thakurta, 2014). In general, non-private online
+algorithms are closest in spirit to the methods of Bayesian
+optimization. However, all of the previous work in differentially private online learning represents a dataset as
+a sequence of bandit arm pulls (the equivalent notion in
+Bayesian optimization is function evaluations f (λt )). Instead, we consider functions in which changing a single
+dataset entry possibly affects all future function evaluations. Closest to our work is that of Chaudhuri & Vinterbo (2013), who show that given a fixed set of hyperparameters which are always evaluated for any validation
+set, they can return a private version of the index of the
+best hyper-parameter, as well as a private model trained
+with that hyper-parameter. In one sense, their setting is
+more difficult as they guarantee privacy for the training and
+validation sets (we assume the training set is fixed). On the
+other hand, our selection strategy is more general in that,
+if the validation set changes, Bayesian optimization could
+search completely different hyper-parameters.
+Bayesian optimization, largely due to its principled han-
+
+dling of the exploration/exploitation trade-off of global,
+black-box function optimization, is quickly becoming
+the global optimization paradigm of choice. Alongside
+promising empirical results there is a wealth of recent work
+on convergence guarantees for Bayesian optimization, similar to those used in this work (Srinivas et al., 2010; de Freitas et al., 2012). Vazquez & Bect (2010) and Bull (2011)
+give regret bounds for optimization with the expected improvement acquisition function. BayesGap (Hoffman et al.,
+2014) gives a convergence guarantee for Bayesian optimization with budget constraints. Bayesian optimization
+has also been extended to multi-task optimization (Bardenet et al., 2013; Swersky et al., 2013), the parallel experiment setting (Azimi et al., 2012; Snoek et al., 2012),
+and to constrained optimization (Gardner et al., 2014).
+
+7. Conclusion
+We have introduced methods for privately releasing the
+best hyper-parameters and validation accuracies in the case
+of exact and noisy observations. Our work makes use
+of the differential privacy framework, which has become
+commonplace in private machine learning (Dwork & Roth,
+2013). We believe we are the first to demonstrate differentially private quantities in the setting of global optimization
+of expensive (possibly nonconvex) functions, through the
+lens of Bayesian optimization.
+One key future direction is to design techniques to release
+each sampled hyper-parameter and validation accuracy privately (during the run of Bayesian optimization). This
+requires analyzing how the maximum upper-confidence
+bound changes as the validation dataset changes. Another
+interesting direction is extending our guarantees in Sections
+3 and 4 to other acquisition functions.
+For the case of machine learning hyper-parameter tuning
+our results are designed to guarantee privacy of the validation set only (it is equivalent to guarantee that the training
+set is never allowed to change). To simultaneously protect
+the privacy of the training set it may be possible to use techniques similar to the training stability results of Chaudhuri
+& Vinterbo (2013). Training stability could be guaranteed,
+for example, by assuming an additional training set kernel
+that bounds the effect of altering the training set on f . We
+leave developing these guarantees for future work.
+
+Acknowledgments
+KQW, MJK, and JRG are supported by NSF grants IIA1355406, IIS-1149882, EFRI-1137211. This work was
+also supported by Yahoo! Labs, where MJK was a research intern working on this project. The authors thank
+Abhradeep Thakurta and Avishek Saha for helpful guidance, discussions, and suggestions.
+
+Differentially Private Bayesian Optimization
+
+References
+Auer, Peter, Cesa-Bianchi, Nicolo, and Fischer, Paul.
+Finite-time analysis of the multiarmed bandit problem.
+Machine learning, 47(2-3):235–256, 2002.
+Azimi, Javad, Jalali, Ali, and Fern, Xiaoli Z. Hybrid batch
+bayesian optimization. In ICML 2012, pp. 1215–1222.
+ACM, 2012.
+Bardenet, Rémi, Brendel, Mátyás, Kégl, Balázs, and Sebag, Michèle. Collaborative hyperparameter tuning. In
+ICML, 2013.
+Bassily, Raef, Smith, Adam, and Thakurta, Abhradeep.
+Private empirical risk minimization, revisited. arXiv
+preprint arXiv:1405.7085, 2014.
+Bergstra, James and Bengio, Yoshua. Random search
+for hyper-parameter optimization. JMLR, 13:281–305,
+2012.
+Bonilla, Edwin, Chai, Kian Ming, and Williams, Christopher. Multi-task gaussian process prediction. In NIPS,
+2008.
+
+Dwork, Cynthia and Roth, Aaron. The algorithmic foundations of differential privacy. Theoretical Computer Science, 9(3-4):211–407, 2013.
+Dwork, Cynthia, Kenthapadi, Krishnaram, McSherry,
+Frank, Mironov, Ilya, and Naor, Moni. Our data, ourselves: Privacy via distributed noise generation. In Advances in Cryptology-EUROCRYPT 2006, pp. 486–503.
+Springer, 2006a.
+Dwork, Cynthia, McSherry, Frank, Nissim, Kobbi, and
+Smith, Adam. Calibrating noise to sensitivity in private
+data analysis. In Theory of Cryptography, pp. 265–284.
+Springer, 2006b.
+Ganta, Srivatsava Ranjit, Kasiviswanathan, Shiva Prasad,
+and Smith, Adam. Composition attacks and auxiliary information in data privacy. In KDD, pp. 265–273. ACM,
+2008.
+Gardner, Jacob, Kusner, Matt, Xu, Zhixiang, Weinberger,
+Kilian, and Cunningham, John. Bayesian optimization
+with inequality constraints. In ICML, pp. 937–945, 2014.
+
+Bull, Adam D. Convergence rates of efficient global optimization algorithms. JMLR, 12:2879–2904, 2011.
+
+Hoffman, Matthew, Shahriari, Bobak, and de Freitas,
+Nando. On correlation and budget constraints in modelbased bandit optimization with application to automatic
+machine learning. In AISTATS, pp. 365–374, 2014.
+
+Chaudhuri, Kamalika and Vinterbo, Staal A. A stabilitybased validation procedure for differentially private machine learning. In Advances in Neural Information Processing Systems, pp. 2652–2660, 2013.
+
+Huang, Xiaolin, Shi, Lei, and Suykens, Johan AK. Ramp
+loss linear programming support vector machine. The
+Journal of Machine Learning Research, 15(1):2185–
+2211, 2014.
+
+Chaudhuri, Kamalika, Monteleoni, Claire, and Sarwate,
+Anand D. Differentially private empirical risk minimization. JMLR, 12:1069–1109, 2011.
+
+Hutter, Frank, Hoos, H. Holger, and Leyton-Brown, Kevin.
+Sequential model-based optimization for general algorithm configuration. In Learning and Intelligent Optimization, pp. 507–523. Springer, 2011.
+
+Chong, Miao M, Abraham, Ajith, and Paprzycki,
+Marcin. Traffic accident analysis using machine learning
+paradigms. Informatica (Slovenia), 29(1):89–98, 2005.
+Cortes, Corinna and Vapnik, Vladimir. Support-vector networks. Machine learning, 20(3):273–297, 1995.
+de Freitas, Nando, Smola, Alex, and Zoghi, Masrour. Exponential regret bounds for gaussian process bandits
+with deterministic observations. In ICML, 2012.
+Dinur, Irit and Nissim, Kobbi. Revealing information while
+preserving privacy. In Proceedings of the SIGMODSIGACT-SIGART symposium on principles of database
+systems, pp. 202–210. ACM, 2003.
+Duchi, John C, Jordan, Michael I, and Wainwright, Martin J. Local privacy and statistical minimax rates. In
+FOCS, pp. 429–438. IEEE, 2013.
+
+Jain, Prateek and Thakurta, Abhradeep. Differentially private learning with kernels. In ICML, pp. 118–126, 2013.
+Jain, Prateek and Thakurta, Abhradeep Guha. (near) dimension independent risk bounds for differentially private learning. In ICML, pp. 476–484, 2014.
+Jain, Prateek, Kothari, Pravesh, and Thakurta, Abhradeep.
+Differentially private online learning. COLT, 2012.
+Kifer, Daniel, Smith, Adam, and Thakurta, Abhradeep.
+Private convex empirical risk minimization and highdimensional regression. JMLR, 1:41, 2012.
+Krause, Andreas, Singh, Ajit, and Guestrin, Carlos. Nearoptimal sensor placements in gaussian processes: Theory, efficient algorithms and empirical studies. JMLR, 9:
+235–284, 2008.
+
+Differentially Private Bayesian Optimization
+
+McSherry, Frank and Talwar, Kunal. Mechanism design via
+differential privacy. In FOCS, pp. 94–103. IEEE, 2007.
+Mishra, Nikita and Thakurta, Abhradeep. Private stochastic
+multi-arm bandits: From theory to practice. In ICML
+Workshop on Learning, Security, and Privacy, 2014.
+Mockus, Jonas, Tiesis, Vytautas, and Zilinskas, Antanas.
+The application of bayesian methods for seeking the extremum. Towards Global Optimization, 2(117-129):2,
+1978.
+Narayanan, Arvind and Shmatikov, Vitaly. Robust deanonymization of large sparse datasets. In IEEE Symposium on Security and Privacy, pp. 111–125. IEEE, 2008.
+Rasmussen, Carl Edward and Williams, Christopher K. I.
+Gaussian processes for machine learning. 2006.
+Schölkopf, Bernhard and Smola, Alexander J. Learning
+with kernels: support vector machines, regularization,
+optimization, and beyond. MIT press, 2001.
+Shalev-Shwartz, Shai. Online learning: Theory, algorithms, and applications. 2007.
+Smith, Adam and Thakurta, Abhradeep Guha. Differentially private feature selection via stability arguments,
+and the robustness of the lasso. In COLT, pp. 819–850,
+2013a.
+Smith, Adam and Thakurta, Abhradeep Guha. (nearly)
+optimal algorithms for private online learning in fullinformation and bandit settings. In NIPS, pp. 2733–
+2741, 2013b.
+Snoek, Jasper, Larochelle, Hugo, and Adams, Ryan P.
+Practical bayesian optimization of machine learning algorithms. In NIPS, pp. 2951–2959, 2012.
+Song, Shuang, Chaudhuri, Kamalika, and Sarwate,
+Anand D. Stochastic gradient descent with differentially
+private updates. In IEEE Global Conference on Signal
+and Information Processing, 2013.
+Srinivas, Niranjan, Krause, Andreas, Kakade, Sham M, and
+Seeger, Matthias. Gaussian process optimization in the
+bandit setting: No regret and experimental design. In
+ICML, 2010.
+Sweeney, Latanya. Weaving technology and policy together to maintain confidentiality. The Journal of Law,
+Medicine & Ethics, 25(2-3):98–110, 1997.
+Swersky, Kevin, Snoek, Jasper, and Adams, Ryan P. Multitask bayesian optimization. In NIPS, pp. 2004–2012,
+2013.
+
+Vazquez, Emmanuel and Bect, Julien. Convergence properties of the expected improvement algorithm with fixed
+mean and covariance functions. Journal of Statistical
+Planning and Inference, 140(11):3088–3095, 2010.
+Weinberger, Kilian, Dasgupta, Anirban, Langford, John,
+Smola, Alex, and Attenberg, Josh. Feature hashing for
+large scale multitask learning. In ICML, pp. 1113–1120.
+ACM, 2009.
+Yu, Shipeng, Esbroeck, Alexander van, Farooq, Faisal,
+Fung, Glenn, Anand, Vikram, and Krishnapuram, Balaji. Predicting readmission risk with institution specific
+prediction models. In IEEE International Conference
+on Healthcare Informatics (ICHI), pp. 415–420. IEEE,
+2013.
+
+

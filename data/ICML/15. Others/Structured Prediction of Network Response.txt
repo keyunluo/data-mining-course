@@ -1,0 +1,1518 @@
+Structured Prediction of Network Response
+
+Hongyu Su
+Aristides Gionis
+Juho Rousu
+Helsinki Institute for Information Technology (HIIT)
+Department of Information and Computer Science, Aalto University, Finland
+
+Abstract
+We introduce the following network response
+problem: given a complex network and an action, predict the subnetwork that responds to action, that is, which nodes perform the action and
+which directed edges relay the action to the adjacent nodes.
+We approach the problem through max-margin
+structured learning, in which a compatibility
+score is learned between the actions and their activated subnetworks. Thus, unlike the most popular influence network approaches, our method,
+called SPIN, is context-sensitive, namely, the
+presence, the direction and the dynamics of influences depend on the properties of the actions.
+The inference problems of finding the highest
+scoring as well as the worst margin violating networks, are proven to be NP-hard. To solve the
+problems, we present an approximate inference
+method through a semi-definite programming relaxation (SDP), as well as a more scalable greedy
+heuristic algorithm.
+In our experiments, we demonstrate that taking advantage of the context given by the actions and the network structure leads SPIN to
+a markedly better predictive performance over
+competing methods.
+
+1. Introduction
+With the widespread use and extensive availability of largescale networks, an increasing amount of research has been
+proposed to study the structure and function of networks.
+In particular, network analysis has been applied to study
+dynamic phenomena and complex interactions, such as
+Proceedings of the 31 st International Conference on Machine
+Learning, Beijing, China, 2014. JMLR: W&CP volume 32. Copyright 2014 by the author(s).
+
+HONGYU . SU @ AALTO . FI
+ARISTIDES . GIONIS @ AALTO . FI
+JUHO . ROUSU @ AALTO . FI
+
+information propagation, opinion formation, adoption of
+technological innovations, viral marketing, and disease
+spreading (De Choudhury et al., 2010; Kempe et al., 2003;
+Watts & Dodds, 2007).
+Influence models typically consider actions performed by
+the network nodes. Examples of such actions include buying a product or (re)posting a news story in one’s social
+network. Often, network nodes perform such actions as a
+result of influence from neighbouring nodes, and a number
+of different models have been proposed to quantify influence in a network, most notably the independent-cascade
+and the linear-threshold models (Kempe et al., 2003). On
+the other hand, performing an action may also come as a
+result to an external (out of the network) stimulus, a situation that has also been subject to modeling and analysis (Anagnostopoulos et al., 2008). A typical assumption
+made by existing models is that influence among nodes depends only on the nodes that perform the action and not on
+the action itself.
+A central question in the study of network influence, is to
+infer the latent structure that governs the influence dynamics. This question can be formulated in different ways. In
+one case no underlying network is available (for example,
+news agencies that do not link each other) and one asks
+to infer the hidden network structure, e.g., to discover implicit edges between the network nodes (De Choudhury
+et al., 2010; Du et al., 2012; Eagle et al., 2009; GomezRodriguez et al., 2010; 2011). However, this problem is
+an unnecessarily hard one to solve in many applications.
+On the other hand, in many applications the network is
+known (e.g., “follower” links in twitter), and the research
+question is to estimate the hidden variables of the influence
+model (Goyal et al., 2010; Saito et al., 2008).
+The present paper is motivated by the following observation: the influence between two nodes in the network does
+not depend only on the nodes and their connections, but
+also depends on the action under consideration. For example, if u and v represent users in twitter, v may be influenced from u regarding topics related to science but not
+
+Structured Prediction of Network Response
+
+regarding topics related to, say, politics. Thus, in our view,
+the influence model needs to be context-sensitive.
+We thus consider the following network response problem:
+given an action, predict which nodes in the network will
+perform it and along which edges the action will spread.
+We approach the problem via structured output learning
+that models the activated response network as a directed
+graph. We learn a function for mappings between action
+descriptions and the response subnetwork. Given an action, the model is able to predict a directed subnetwork that
+is most favourable to performing the action.
+
+2. Preliminaries
+We consider a directed network G = (V, E) where the
+nodes v ∈ V represent entities, and edges e = (u, v) ∈ E
+represent relationships among entities. As discussed in the
+introduction, for each edge (u, v) we assume that node v
+can be influenced by node u. In real applications, some
+networks are directed (e.g., follower networks), while other
+networks are undirected (e.g., friendship networks). For
+simplicity of exposition, and without loss of generality we
+formulate our problem for directed networks; indeed an
+undirected edge can be modeled by considering pair of directed edges. In our experiments we also consider undirected networks.
+In addition to other nodes, we allow the nodes to be influenced by external stimuli, modelled by a root node r, which
+is connected to all other nodes in the network, namely
+(r, v) ∈ E, for all v ∈ V \ {r}. Reversely, no node can
+influence r, so (v, r) 6∈ E, for all v ∈ V \ {r}.
+The second ingredient of our model consists of the actions
+performed by the network nodes. We write A to denote
+the underlying action space, that is, the set of all possible
+actions, and we use a to indicate a particular action in A.
+We assume that actions in A are represented using a feature
+map φ : A→FA to an associated inner product space FA .
+For example, FA can be a vector space of dimension k,
+where each action a is represented by a k-dimensional vector φ(a). In the social-network application discussed in the
+introduction, where actions a correspond to news articles
+posted by users, φ(a) can be the bag-of-words representation of the news article a.
+We assume that the network gets exposed to an action a ∈
+A, and in response a subgraph Ga = (Va , Ea ) ⊆ G, called
+the response network gets activated. The nodes Va ⊆ V are
+the ones that get activated and Ea ⊆ E is the set of induced
+edges. We assume that the root r is always activated, i.e.,
+r ∈ Va . Note that even though r is directly connected to
+each node v ∈ Va , in every response network Ga , some
+nodes in Va may exercise on v stronger influence than the
+influence that r exercises on v. The nodes that get directly
+
+a
+u
+
+i
+h
+g
+x
+
+v
+
+b
+w
+
+c
+
+e
+
+(u, a, t = 1)
+(v, a, t = 2)
+(w, a, t = 5)
+
+y
+
+f
+d
+
+a ! (a)
+
+Ga ! (Ga ) = (app , apn , ann , bpp , bpn , bnn , cpp , cpn , cnn , dpp , dpn , dnn , . . .)
+= ( 1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, . . .)
+
+(u) = ( (u; a), (u; b), (u; c), (u; d), . . .) = (1, , ,
+
+2
+
+, . . .)
+
+Figure 1. An action a perfromed by nodes u, v, w of a directed
+network at times 1, 2, 5, respectively. Nodes x and y do not perform the action. The action a is represented by input feature
+map φ(a). The response network Ga is represented by output
+feature map ψ(Ga ) that encodes the propagation of the action a
+with respect to edge e (details in the text). Finally, γ is a scaling function (see Sec. 3.4). For instance, γ(u) represents a vector
+of exponentially-decaying weights for node u with respect to all
+edges.
+
+activated by the root node r as a response to an action are
+called the focal points or foci of the response network.
+
+	m
+We assume a dataset (ai , Gai ) i=1 of m training examples, where each example (ai , Gai ) consists of an action
+ai and the output Gai encoding the response network activated by ai . Our intention is to build a model that given a
+previously unobserved action a, predicts the response network Ga .
+
+3. Model for network responses
+3.1. Structured-prediction model
+Our method is based on embedding the input and output
+into a joint feature space and learning in that space a linear
+compatibility score
+F (a, Ga ; w) = hw, ϕ(a, Ga )i.
+The score F (a, Ga ; w) is given by the inner product of
+parameters w and the joint feature ϕ(a, Ga ). As the
+joint feature we will use the tensor product ϕ(a, Ga ) =
+φ(a) ⊗ ψ(Ga ) of the input feature map φ(a) of action a,
+and the output feature map ψ(Ga ) that represents the response network Ga to the action a. The tensor product
+ϕ(a, Ga ) consists of all pairs of input and output features
+ϕij (a, Ga ) = φi (a)ψj (Ga ).
+The output features will encode the activated subgraph in
+the network. We use labels {p, n} to indicate whether
+nodes perform an action (positive vs. negative). Similarly, we use edge labels {pp, pn, nn} to indicate the role
+of edges in the propagation of actions. In particular, for
+each edge (u, v) = e of a response network Ga and each
+label ` ∈ {pp, pn, nn} we define the feature ψe,` (Ga ) to
+
+Structured Prediction of Network Response
+
+be 1 if and only if e is of type ` in Ga (and 0 otherwise).
+For example, ψ(u,v),pp (Ga ) = 1 indicates that both nodes
+u and v are activated in Ga and u precedes v in the partial
+order of activation.
+An example of the model is shown in Figure 1. For the sake
+of brievity in the figure, we abuse notation and we use e`
+to denote ψe,` (Ga ). For instance, in this example we have
+app = (u, v)pp = 1 since both u and v are activated and
+u precedes v in the activation order, and thus it is possible
+that u has influenced v.
+3.2. Maximum-margin structured learning
+The feature weight parameters w of the compatibility score
+function F are learned by solving a regularized structuredoutput learning problem
+m
+
+min
+w,ξ
+
+s.t.
+
+X
+1
+2
+||w||2 + C
+ξi ,
+2
+i=1
+
+(1)
+
+F (ai , Gai ; w) > argmax F (ai , G0ai ; w)
+G0a ∈H(G)
+i
+
+
++`G (G0ai , Gai ) − ξi , ξi ≥ 0, ∀i = {1, · · · , m}.
+The impact of the constraints on the above optimization
+problem is to push the compatibility score of input ai
+with output Gai above the scores of all competing outputs G0ai ∈ H(G) with a margin proportional to the loss
+`G (G0ai , Gai ) between the correct Gai and any competing
+subgraph G0ai . H(G) is the set of directed acyclic subgraphs of G rooted at r. The slack variable ξi is used to
+relax the constraints so that a feasible solution can always
+be found. C is a slack parameter that controls the amount
+of regularization in the model. The objective minimizes
+an L2 -norm regularizer of the weight vector and the slack
+allocated to the training set. This is equivalent to maximizing the margin subject to allowing some data to be outliers.
+In practice, the optimization problem (Eq. 1) is tackled by
+marginal dual conditional gradient optimization (Rousu
+et al., 2007).
+3.3. The inference problem
+In the structured prediction model, both in training and in
+prediction, we need to solve the problem of finding the
+highest-scoring subgraph for an action. The two problems
+differ only in the definition of the score: in training we need
+to iteratively find the subgraph that violates its margins the
+most, whilst in prediction we need to find the subgraph with
+the maximum compatibility to a given action. We explain
+our inference algorithms for the latter problem and note that
+the first problem is a straightforward variant.
+Given feature weights w and a network G = (V, E),
+the prediction for a new input action a is the maximally-
+
+scoring response graph H ∗ = (V H , E H )
+H ∗ (a) = argmax F (a, H; w).
+H∈H(G)
+
+Writing this problem explicitly, in terms of the parameters
+and the feature maps gives
+H ∗ (a) = argmax hw, φ(a) ⊗ ψ(H)i
+H∈H(G)
+
+= argmax
+H∈H(G)
+
+X
+
+sye (e, a),
+
+(2)
+
+e∈E H
+
+P
+where we have substituted sye (e, a) =
+i wi,e,ye φi (a).
+We will abbreviate sye (e, a) to sye (e), as the action a
+is fixed for an individual inference problem. The output response network H can be specified by a node label
+yv ∈ {p, n}, where yv = p if and only if v is activated.
+We write Hy to emphasize the dependence of the output
+subgraph H from labelling y. The node labels yv induce
+edge labels ye . The score function s(e) can be interpreted
+as a score function for the edges, given by the current input a and weight vector w. The variable ye indicates the
+possible labels of an edge e, and for each possible label the
+score function s(e) assigns a different score. Depending
+on the values that ye can take, the inference problem can
+be further diverged into two modes:
+Activation mode. We assume ye ∈ {pp, pn} where ye =
+pp implies node v is activated by u via a directed edge
+e = (u, v), and ye = pn means that the activation cannot
+pass through e. In activation mode, the inference problem
+is transformed as finding the maximally scoring node label yv and corresponding edge label ye , consistent with an
+activated subgraph Hy given a set of edge scores sye (e).
+Negative-feed mode. In addition to the setting in activation mode, we also explicitly model the inactive network
+by assume ye ∈ {pp, pn, nn}, where by ye = nn we denote our belief that both u and v should be inactive given
+action a. The inference problem is then to find the maximally scoring node labels and induced edge labels with
+regards to an activated subgraph together with the inactive
+counterpart given a set of edge score sye (e).
+It is not difficult to show that the inference problem (Eq. 2)
+is NP-hard. The proof of the following lemma, which provides a reduction from the MAX - CUT problem, is given in
+the supplementary material.
+Lemma 1 Finding the graph that maximizes Eq. (2) is an
+NP-hard problem.
+To solve the inference problem we propose two algorithms,
+described on the negative-feed mode. Similar techniques
+can be adapted to the activation-mode by setting edge score
+snn (e) = 0. The first algorithm is based on a semidefinite programming (SDP) relaxation, similar to the one
+
+Structured Prediction of Network Response
+
+used for MAX - CUT and satisfiability problems (Goemans
+& Williamson, 1995). The SDP algorithm offers a constantfactor approximation guarantee for the inference problem.
+However, it requires solving semidefinite programs. Efficient solvers do exist, but the method is not scalable to
+large datasets. Besides, it cannot handle the order of activations. In contrast, our second approach is a more efficient
+GREEDY algorithm that models activation order in a natural
+way, but it does not provide any quality guarantee.
+The SDP inference. Recall that for each edge (u, v) ∈
+E we are given three scores: spp (u, v), spn (u, v), and
+snn (u, v). The inference problem is to assign a label p or
+n for each vertex u ∈ V . If a vertex u is assigned to label
+p we say that u is activated. If both vertices u and v of an
+edge (u, v) ∈ E are activated, a gain spp (u, v) incurs. Respectively, the assignments pn and nn yield gains spn (u, v)
+and snn (u, v). The objective is to find the assignments that
+maximizes the total gain.
+We formulate this optimization problem as a quadratic
+program. We introduce a variable xu ∈ {−1, +1}, for
+each u ∈ V . We also introduce a special variable x0 ∈
+{−1, +1}, which is used to distinguish the activated vertices. In particular, if xu = x0 we consider that the vertex u is assigned to label p, and thus it is activated, while
+xu = −x0 implies that u is assigned to n and not activated.
+The network-response inference problem can now be written as (QP):
+max
+
+1
+4
+
+X
+(u,v)∈E
+
+[spn (u, v)(1 + x0 xu − x0 xv − xu xv )
+
++snn (u, v)(1 − x0 xu − x0 xv + xu xv )
+
++spp (u, v)(1 + x0 xu + x0 xv + xu xv )],
+s.t.
+
+x0 , xu , xv ∈ {−1, +1}, for all u, v ∈ V.
+
+The intuition behind the formulation of Problem (QP) is
+that there is gain spn (u, v) if x0 = xu = −xv , a gain
+snn (u, v) if x0 = −xu = −xv , and a gain spp (u, v) if
+x0 = xu = xv .
+To solve the problem (QP), we use the similar technique introduced by Goemans & Williamson (1995), such that each
+variable xu is relaxed to a vector vu ∈ Rn . The relaxed
+quadratic program becomes (RQP):
+max
+
+1
+4
+
+X
+(u,v)∈E
+
+[spn (u, v)(1 + v0 vu − v0 vv − vu vv )
+
++snn (u, v)(1 − v0 vu − v0 vv + vu vv )
+
++spp (u, v)(1 + v0 vu + v0 vv + vu vv )],
+s.t.
+
+n
+
+vi ∈ R , for all i = 0, . . . , n.
+
+Consider an (n + 1) × (n + 1) matrix Y whose (u, v) entry
+is yu,v = vu · vv . If V is the matrix having vu ’s as its
+
+columns, i.e., V = [v0 . . . vk ], then Y = V T V , implying
+that the matrix Y is semidefinite, a fact we denote by Y 
+0. Problem (RQP) now becomes (SDP):
+max
+
+k
+1 X
+[spn (u, v)(1 + y0,u − y0,v − yu,v )
+4 u,v=1
+
++snn (u, v)(1 − y0,u − y0,v + yu,v )
+
++spp (u, v)(1 + y0,u + y0,v + yu,v )],
+s.t.
+
+Y  0.
+
+Problem (SDP) asks to find a semidefinite matrix, so that
+a linear function on the entries of the matrix is optimized.
+This problem can be solved by semidefinite programming
+within accuracy , in time that it is polynomial on k and
+1
+ . After solving the semidefinite program one needs to
+round each vector vu to the variable xu ∈ {−1, +1} in the
+following way:
+1. Factorize Y with Cholesky decomposition to find V =
+[v0 , v1 . . . vn ].
+2. Select a random vector r.
+3. For each u = 0, 1, . . . , n, if vu · r ≥ 0 set xu = 1,
+otherwise set xu = −1.
+Let Z be the value of the solution obtained by the above
+algorithm. Let Z ∗ be the optimal value of Problem (QP)
+and ZR the optimal value of Problem (SDP). Since Problem (SDP) is a relaxation of Problem (QP) it is ZR ≥ Z ∗ .
+Furthermore, it can be shown that for the expected value
+of Z it holds E[Z] ≥ (α − )ZR , with α > 0.796 and
+where expectation is taken over the choice of r. Thus the
+above algorithm is a 0.796 approximation algorithm for
+Problem (QP).
+The GREEDY inference. The inference (Eq. 2) is defined
+on all edges of the network, which can be expressed equivalently as a function of activated vertices (see details in supplementary)
+X
+H ∗ (a) = argmax
+Fm (vi ),
+H∈H(G)
+
+vi ∈VpH
+
+where VpH is a set of activated vertices. Fm (vi ) is the
+marginal gain on each node that is comprised partially from
+changing edge label from pn to pp on incoming edges
+{(vp , vi ) | vp ∈ parents(vi )}, and partially from changing edge label from nn to pn on outgoing edges {(vi , vc ) |
+vc ∈ parents(vi )} defined as
+X
+Fm (vi ) =
+[spp (vp , vi ) − spn (vp , vi )]
+vp ∈parents(vi )
+
++
+
+X
+
+[spn (vi , vc ) − snn (vi , vc )].
+
+vc ∈children(vi )
+
+Structured Prediction of Network Response
+
+It is difficult to maximize the sum of marginal gains as
+the activated subnetwork is unknown. One can instead
+compute for each vertex the maximized marginal gain
+maxvi Fm (vi ) in an iterative fashion as long as Fm (vi ) ≥
+0, which leads to a greedy algorithm described as follows.
+The algorithm starts with an activated vertex set VpH =
+{r}. In each iteration, it chooses a vertex vi ∈ V /VpH
+and adds to VpH such that vi is the current maximizer of
+Fm (v). The procedure terminates if the maximized gain
+is smaller than 0. E H can be obtained by adding edges
+e = (vi , vj ) ∈ E, if vi , vj ∈ VpH and vi was added to VpH
+prior to vj . The time complexity for greedy inference algorithm is O(|E| log |V |). See supplementary material for
+details of the algorithm.
+We note that we have not been able to show an approximation guarantee for the quality of solutions produced by
+the GREEDY algorithm. A property that it is typically used
+to analyse greedy methods is submodularity. However,
+for this particular problem submodularity does not hold
+(it only holds in the special case of MAX - CUT, i.e., when
+spp (e) = snn (e) = 0 and spn (e) = 1).
+3.4. Loss functions
+Instead of penalizing prediction mistakes uniformly on the
+network G, we wish to focus in the vicinity of the response
+network. To achieve this effect we scale the loss accrued
+on the nodes and edges by their distance to the children of
+the root of the response network.
+As the loss function in (1) we use symmetric-difference loss
+(or Hamming loss), applied to the nodes and the edges of
+the subgraphs separately, and scaled by function γG (vk )
+according distance to the focal point vk .
+`G (Ga , Gb ) =
+
+X
+
+`∆
+v (Ga , Gb )γG (vk ; v)
+
+v∈V
+
++
+
+X
+
+`∆
+v,v 0 (Ga , Gb )γG (vk ; v),
+
+(v,v 0 )∈E
+∆
+where `∆
+v (Ga , Gb ) = [v ∈ Va ∆Vb ], `e (Ga , Gb ) = [e ∈
+0
+Ea ∆Eb ], S∆S denotes the symmetric difference of two
+sets S and S 0 . We consider the following strategies to construct the scaling function γG (vk ):
+
+Exponential scaling. Mistakes are penalized by λ and λ
+is weighted exponentially according to the shortest path
+distance to the focal point vk . Given focal point vk , edge
+(vi , vj ), and distance matrix D between the nodes, the scaling function is defined as
+
+ 1
+λD(k,i)
+γG (vk ; vi , vj ) =
+ (R+1)
+λ
+
+if i = 0
+if i 6= 0 and D(k, i) ≤ R
+if D(k, i) > R
+
+where λ > 0 is the scaling factor and R > 1 is a radius
+parameter. Edges outside the radius have equal scalings.
+Diffusion scaling. The diffusion kernel defines a distancebased function between nodes vi and vj (Kondor & Lafferty, 2002). The kernel value K(i, j) corresponds to the
+probability of a random walk from node vi to node vj .
+Given the adjacency matrix L of the network G, the diffusion kernel is computed as
+s
+
+βL
+= exp(βL),
+K = lim I +
+s→∞
+s
+where I is the identity matrix and β is the a parameter that
+controls how much the random walks deviate from the focal
+point. Given focal node vk , edge (vi , vj ), and diffusion
+kernel K the scaling function is defined as
+
+1
+if i = 0,
+γG (vk ; vi , vj ) =
+K(vk , vi ) otherwise.
+The scaling function keeps the loss value on the edges
+connecting the focal point, and scale other edges by the
+weights computed from diffusion kernel. Diffusion scaling
+has the effect of shrinking the distance to nodes that connects to the focal point by many paths.
+
+4. Experimental evaluation
+In this section, we evaluate the performance of SPIN and
+compare it with the state-of-the-art methods through extensive experiments. We use two real-world datasets,
+DBLP and Memetracker, described below. Statistics of the
+datasets are given in Table 1.
+DBLP1 dataset is a collection of bibliographic information
+on major computer science journals and proceedings. We
+extract a subset of original data by using “inproceedings”
+articles from year 2000. First, we construct an undirected
+DBLP network G by connecting pairs of authors who have
+coauthored more that p papers (p = 5, 10, 15). After that,
+we generate a set of experimental networks of different size
+by performing snowball sampling (Goodman, 1961). For
+each experimental network, we extract all the documents
+for which at least one of their authors is a node in the
+network. We apply LDA algorithm (Blei et al., 2002) on
+the titles of extracted documents to generated topics. Topics are associated with publications, timestamped by publication dates, and described by bag-of-word features computed from LDA. In this way, a topic can be seen as an
+action and we will study the influence among authors.
+Memetracker2 dataset is a set of phrases propagated over
+prominent online news sites in March 2009. We construct
+1
+
+http://www.informatik.uni-trier.de/˜ley/
+
+db/
+2
+
+http://Memetracker.org
+
+Structured Prediction of Network Response
+
+directed networks G for Memetracker dataset by connecting two websites via a directed edge if there are at least five
+phrases copying from one website to the other. A posted
+phrase corresponds to an action, which again is timestamped and represented with bag-of-word features.
+4.1. Experimental setup and metrics
+SPIN can be applied to predict action-specific network response (contenxt-aware) when action representation φ(a)
+is given as input. It is also capable of predicting edge influence scores in context-free mode when φ(a) is treated
+as unknown. For comparison purposes, we evaluate SPIN
+against the following the state-of-the-art methods:
+• Support Vector Machine (SVM) is used as a single target classifier used to predict the response network via
+decomposing it as a bag of nodes and edges, and predicting each element in the bag.
+• Max-Margin Conditional Random Field (MMCRF)
+(Rousu et al., 2007; Su et al., 2010) is a multi-label
+classifier that utilizes the structure of output graph G.
+The model predicts the node labels of the network.
+• Expectation-Maximization for the independent cascade model (ICM-EM) (Saito et al., 2008) is a contextfree model that infers the influence probability of the
+network given a directed network and a set of action cascades. Here we use the implementation from
+Mathioudakis et al. (2011) of this algorithm, which is
+publicly available3 .
+• Netrate (Gomez-Rodriguez et al., 2011) models the
+network influence as temporal processes occurs at difference rate. It infers the directed edges of the global
+network and estimates the transmission rate of each
+edge.
+To quantitatively evaluate the performance of the tested
+methods in predicting node and edge labels, we adopt two
+popular metrics: accuracy and F1 score, defined as
+2·P ·R
+,
+P +R
+where P is precision and R is recall. We also define Predicted Subgraph Coverage (PSC) as
+F1 =
+
+PSC =
+
+m
+1 XX
+|Gv |,
+mn i=1
+v∈Vi
+
+where Vi is the set of focal points given action ai , n is the
+number of nodes in the network, and m is the number of
+actions. PSC expresses the relative size of a correctly predicted subgraph Gv in terms of node predictions that cover
+the focal points v.
+3
+https://dl.dropboxusercontent.com/u/
+21620176/public_html/spine/index.html
+
+Training
+Example
+440
+478
+2119
+2800
+3720
+6030
+509
+1869
+2620
+3560
+3618
+4632
+4804
+4809
+
+Dataset
+DBLP S100
+DBLP M100
+DBLP M500
+DBLP M700
+DBLP M1k
+DBLP M2k
+DBLP L100
+DBLP L500
+DBLP L700
+DBLP L1k
+DBLP L2k
+memeS
+memeM
+memeL
+
+Feature
+Space
+1190
+1127
+3619
+4369
+5281
+7183
+1274
+3424
+4300
+5405
+5454
+181
+179
+179
+
+Network
+|V |
+|E|
+100
+204
+100
+151
+500
+699
+699
+952
+1000
+1368
+2000
+2687
+100
+152
+499
+701
+699
+960
+1000
+1368
+1023
+1402
+82
+325
+182
+521
+333
+597
+
+Table 1. Statistics of DBLP and Memetracker datasets.
+Data
+S100
+M100
+L100
+Geom.
+
+Accuracy
+
+F1 Score
+
+Time (102 s)
+
+SDP
+
+Neg
+
+Act
+
+SDP
+
+Neg
+
+Act
+
+SDP
+
+Neg Act
+
+79.9
+75.8
+75.1
+76.9
+
+77.6
+73.6
+72.0
+74.3
+
+72.9
+68.5
+67.4
+69.6
+
+57.2
+51.6
+53.5
+52.0
+
+56.2
+53.1
+56.9
+55.4
+
+55.5
+54.5
+57.2
+55.7
+
+16.0
+15.2
+13.7
+15.0
+
+1.5
+1.4
+1.6
+1.5
+
+0.2
+0.2
+0.3
+0.3
+
+Table 2. Comparison of different inference algorithms. Geom. is
+geometric mean of rows.
+
+Our metrics are computed both in global context where we
+pool all the nodes and edges from the background network,
+as well as in local context where we only collect the nodes
+and edges within certain radius R of the focal points. The
+experimental results are from a five-fold cross validation.
+4.2. Experimental results
+We examine whether our context-sensitive structure predictor can boost the performance of predicting network responses. We compare SPIN with other methods in both
+context-sensitive and context-free problems. We show that
+SPIN can perform significantly better in terms of predicting
+action-specific network responses.
+Comparison of inference algorithms. Table 2 shows the
+geometric mean of node accuracy, F1 and running time
+over parameter space on three DBLP datasets, where “Neg”
+and “Act” represent the GREEDY inference defined on the
+negative-feed and the activation modes. SDP is also formulated on the negative-feed mode. In general, the inference
+algorithm based on negative-feed mode outperforms activation mode in terms of accuracy. The difference in F1
+is smaller in comparison. SDP based inference surpasses
+GREEDY inference in accuracy, however, by a small margin. In addition, GREEDY inference is almost 10 times
+faster even on small datasets, where running time is total
+time used for cross validation. For the following experiments, we opted for GREEDY inference in negative-feed
+mode as the inference engine of SPIN.
+
+Structured Prediction of Network Response
+Dataset
+memeS
+memeM
+memeL
+M100
+M500
+M700
+M1k
+M2k
+L100
+L500
+L700
+L1k
+L2k
+Geom.
+
+Node Accuracy
+
+Node F1 Score
+
+Edge Acc
+
+Time (103 s)
+
+PSC
+
+SVM
+
+MMCRF
+
+SPIN
+
+SVM
+
+MMCRF
+
+SPIN
+
+SVM
+
+SPIN
+
+SVM
+
+MMCRF
+
+SPIN
+
+SVM
+
+MMCRF
+
+SPIN
+
+73.4
+82.1
+89.9
+71.2
+89.0
+91.9
+94.1
+96.8
+69.4
+85.9
+89.7
+92.4
+92.5
+85.5
+
+68.0
+79.0
+88.3
+73.6
+91.4
+94.1
+95.8
+97.6
+72.2
+89.1
+92.4
+94.4
+94.5
+86.4
+
+72.2
+81.5
+89.8
+76.7
+92.0
+92.1
+94.2
+96.7
+75.7
+86.8
+89.7
+91.5
+91.9
+86.6
+
+39.0
+29.1
+26.7
+49.3
+18.8
+13.8
+10.9
+6.2
+51.1
+21.7
+16.2
+12.4
+12.3
+19.8
+
+39.8
+30.1
+27.1
+50.8
+13.5
+7.3
+3.5
+1.4
+53.1
+15.1
+9.4
+6.4
+5.4
+12.6
+
+47.1
+38.0
+35.0
+54.3
+14.6
+14.2
+9.3
+3.4
+57.4
+24.7
+17.3
+13.9
+12.7
+20.3
+
+62.7
+61.1
+45.5
+33.3
+28.2
+26.3
+26.6
+25.3
+31.6
+27.9
+26.5
+26.4
+26.5
+32.6
+
+45.6
+68.8
+80.0
+61.7
+92.6
+93.0
+94.7
+97.6
+62.3
+87.9
+90.4
+92.3
+93.2
+79.7
+
+23.4
+18.6
+17.7
+33.3
+29.3
+29.4
+33.7
+34.6
+30.9
+14.2
+9.5
+6.1
+6.0
+18.9
+
+25.3
+18.8
+18.9
+35.6
+26.4
+23.9
+16.6
+9.6
+31.7
+11.2
+6.7
+4.4
+2.9
+14.2
+
+33.6
+28.3
+27.6
+34.6
+29.5
+34.4
+35.2
+14.7
+33.4
+19.7
+12.5
+8.4
+7.2
+21.7
+
+6.6
+13.7
+19.9
+0.1
+9.0
+18.5
+42.2
+165.0
+0.1
+6.5
+16.0
+40.3
+41.9
+9.4
+
+2.9
+3.2
+5.9
+0.2
+3.8
+8.3
+14.7
+88.4
+0.2
+3.2
+7.8
+13.7
+21.9
+4.6
+
+4.1
+7.3
+11.8
+0.1
+3.2
+4.4
+10.4
+54.1
+0.3
+2.1
+5.3
+10.4
+13.1
+4.3
+
+Table 3. Comparison of prediction performance on global context. The best in bold-face, the second best in italic.
+
+The good performance of SPIN compared to Netrate is
+mostly explained by the fact that Netrate solves a much
+harder problem in which the underlying undirected network
+is assumed to be unknown, while SPIN is able to leverage
+the known network structure. In the experiment reported,
+the edge predictions from Netrate are filtered against the
+underlying complex network, in order to excessively penalize influence predictions along non-linked nodes.
+
+1
+
+2
+
+3
+
+Subgraph Radius
+
+4
+
+15
+10
+5
+0
+−5
+0
+
+5
+
+1
+
+2
+
+3
+
+4
+
+5
+
+4
+
+5
+
+45
+
+Subgraph Radius
+40
+
+Edge Accuracy Improvement %
+
+15
+10
+5
+0
+−5
+0
+
+−10
+
+5
+
+35
+
+4
+
+30
+
+3
+
+Subgraph Radius
+
+25
+
+2
+
+−15
+
+Node F1 Score Improvement %
+
+0
+−5
+
+1
+
+20
+
+15
+10
+
+7
+
+5
+
+1
+3
+5
+
+−10
+
+Node Accuracy Imporvement %
+
+λ
+0.3
+0.5
+0.7
+
+0
+
+PSC Improvement %
+
+Context-free network influence prediction. Here we
+compare SPIN to methods developed for influence network
+prediction, namely Netrate and ICM-EM, on Memetracker
+data. To make the comparison fair to the competition, we
+convert the network to undirected network and replace action features by a constant value. For SPIN, we further
+represent each undirected edge by two directed edges. The
+measure of success is Precision@K, where we ask for topK percent edge predictions from each model and compute
+the precision. Table 4 shows Precision@K as function
+of K, where the performance of SPIN surpasses ICM-EM
+and Netrate in all spectrum of K with a noticeable margin.
+ICM-EM has the least accurate predictions of the three, but
+achieves by far the the best running time. SPIN and Netrate solve more complex convex optimization problems,
+leading more accurate predictions at the cost of more CPU
+time needed for training, SPIN being the more efficient on
+the largest dataset, memeL.
+
+Effect of loss scaling. Figure 2 depicts the effect of pa-
+
+−10
+
+Context-aware prediction. We apply SPIN with exponential scaling to predict context-sensitive network responses.
+Comparison of prediction performance against SVM and
+MMCRF is listed in Table 3. We show that SPIN can
+dramatically boost the performance of all measures except
+node accuracy: MMCRF wins in node accuracy, but SPIN
+is the second best and the difference is small. In terms of
+time consumption for training, SPIN is around three times
+faster than SVM and two times faster than MMCRF on the
+largest M2k dataset.
+
+0
+
+1
+
+2
+
+3
+
+Subgraph Radius
+
+Figure 2. The improvement of prediction performance for different scaling factor λ with respect to SVM.
+
+rameter λ of the exponential loss scaling to prediction performance on subgraphs of different radius. SVM (dashed
+line) is used as the baseline. When 0 < λ < 1, the
+node prediction accuracy (top, left) and F1 (top, right) decrease by the increasing subgraph radius, while λ ≥ 1
+leads to the opposite behavior allowing larger subgraph
+to be learned. Predicted subgraph coverage decreases by
+incresing λ. Edge prediction accuracy (bottom, right) increases monotonically in λ implying that predicting the
+longer influence paths is a hard problem for SVM. In Table 5 we examine the performance of diffusion scaling. The
+numbers reported are geometric means over the different
+Memetracker and DBLP datasets. We observe a decreased
+performance when increasing the parameter β, which corresponds to smoothing the distance matrix. This indicates
+
+Structured Prediction of Network Response
+Dataset
+memeS
+memeM
+memeL
+
+Model
+
+T (103 s)
+
+SPIN
+ICM-EM
+NETRATE
+SPIN
+ICM-EM
+NETRATE
+SPIN
+ICM-EM
+NETRATE
+
+5.50
+0.01
+5.83
+5.52
+0.02
+13.93
+4.75
+0.01
+12.63
+
+10%
+82.9
+60.3
+76.2
+82.7
+56.3
+61.2
+82.2
+52.1
+56.5
+
+20%
+81.0
+63.5
+73.8
+72.1
+55.3
+64.6
+73.6
+55.7
+57.8
+
+30%
+76.0
+65.1
+70.4
+70.5
+56.8
+62.9
+69.1
+54.2
+60.0
+
+40%
+74.0
+62.0
+68.7
+69.2
+57.4
+62.5
+66.7
+56.5
+59.3
+
+Precision @ K
+50% 60%
+74.0 70.0
+62.0 61.5
+68.7 66.8
+69.2 67.9
+57.4 56.3
+62.5 62.4
+66.7 65.9
+56.5 56.7
+59.3 59.4
+
+70%
+69.8
+62.2
+64.9
+66.2
+57.5
+61.2
+66.1
+57.4
+58.9
+
+80%
+67.9
+60.4
+63.4
+65.6
+57.8
+60.1
+65.9
+58.0
+58.4
+
+90%
+66.7
+60.7
+62.9
+64.3
+58.3
+58.7
+63.9
+57.6
+57.5
+
+100%
+64.7
+61.9
+61.9
+64.2
+58.5
+58.5
+63.6
+57.0
+57.0
+
+Table 4. Model performance in context-free influence network prediction.
+Loss Scaling
+Dif β = 0.1
+Dif β = 0.5
+Dif β = 0.8
+Exp λ = 0.5
+
+Node Acc
+
+Node F1
+
+Edge Acc
+
+Time (103 s)
+
+PSC
+
+Meme
+
+DBLP
+
+Meme
+
+DBLP
+
+Meme
+
+DBLP
+
+Meme
+
+DBLP
+
+Meme
+
+DBLP
+
+80.8
+66.4
+63.5
+80.9
+
+86.5
+86.5
+86.5
+83.9
+
+40.0
+42.5
+40.9
+39.7
+
+28.6
+28.5
+28.5
+28.7
+
+63.0
+40.9
+39.3
+63.1
+
+80.5
+80.5
+80.5
+77.7
+
+30.2
+33.0
+31.2
+29.7
+
+30.3
+30.2
+30.2
+24.3
+
+68.3
+50.9
+32.6
+71.0
+
+2.7
+4.0
+3.2
+10.8
+
+Table 5. Comparison of diffusion scaling with exponential scaling.
+
+that emphasizing connections between long-distance nodes
+makes prediction more difficult, a finding consistent with
+the results on exponential scaling. Setting β = 0.1 leads
+to comparable performance over exponential scaling with
+λ = 0.5, with slight improvement on the DBLP datasets.
+
+5. Discussion
+We have presented a novel approach, based on structured
+output learning, to the problem of modelling influence
+in networks. In contrast to previous state-of-the-art approaches, such as Netrate and ICM-EM, our proposal,
+named SPIN, is a context-sensitive model. SPIN does not
+try to force global influence parameters, but instead it incorporates the action space into the learning process and
+makes predictions tailored to the action under consideration. Our method can provide a useful tool in market research or other application scenarios when actions arise
+from a high-dimensional space, and one wants to make
+predictions for actions not seen before. Another benefit
+of our approach, compared to other state-of-the-art methods, is that our method does not make explicit assumptions
+regarding the underlying propagation model. Additionally, action responses are explicitly formulated as directed
+acyclic subgraphs, and the model is capable of predicting
+the complete subgraph structure. We proved that the inference problem of SPIN is NP-hard, and we provided an
+approximation algorithm based on semidefinite programming (SDP). In addition, we developed a greedy heuristic algorithm for the inference problem that scales linearly
+in the size of the network, with time consumption in the
+same ballpark as Netrate. With extensive experiments we
+show that SPIN can dramatically boost the performance of
+action-based network-response prediction. SPIN can also
+
+be applied in context-free prediction where it captures the
+edge influence weight of the network.
+
+References
+Anagnostopoulos, Aris, Kumar, Ravi, and Mahdian, Mohammad. Influence and correlation in social networks.
+KDD, 2008.
+Blei, D., Ng, A., and Jordan, M. Latent dirichlet allocation.
+In Dietterich, T., Becker, S., and Ghahramani, Z. (eds.),
+Advances in Neural Information Processing Systems 14.
+MIT Press, 2002.
+De Choudhury, Munmun, Mason, Winter A, Hofman,
+Jake M, and Watts, Duncan J. Inferring relevant social
+networks from interpersonal communication. WWW, pp.
+301–310, 2010.
+Du, Nan, Song, Le, Smola, Alex, and Yuan, Ming. Learning Networks of Heterogeneous Influence. NIPS, 2012.
+Eagle, Nathan, Pentland, Alex Sandy, and Lazer, David.
+Inferring friendship network structure by using mobile
+phone data. Proceedings of the National Academy of
+Sciences, 106(36):15274–15278, 2009.
+Goemans, Michel and Williamson, David. Improved approximation algorithms for maximum cut and satisfiability problems using semidefinite programming. JACM, 42
+(6), 1995.
+Gomez-Rodriguez, Manuel, Leskovec, Jure, and Krause,
+Andreas. Inferring Networks of Diffusion and Influence.
+KDD, 2010.
+
+Structured Prediction of Network Response
+
+Gomez-Rodriguez, Manuel, Balduzzi, David, and
+Schölkopf, Bernhard.
+Uncovering the Temporal
+Dynamics of Diffusion Networks. ICML, 2011.
+Goodman, Leo A. Snowball sampling. The annals of mathematical statistics, 32(1):148–170, 1961.
+Goyal, Amit, Bonchi, Francesco, and Lakshmanan,
+Laks VS. Learning influence probabilities in social networks. WSDM, 2010.
+Kempe, David, Kleinberg, Jon, and Tardos, Éva. Maximizing the spread of influence through a social network. In
+KDD, 2003.
+Kondor, I.R. and Lafferty, J. D. Diffusion kernels on graphs
+and other discrete structures. In Proceedings of the
+ICML, 2002.
+Mathioudakis, Michael, Bonchi, Francesco, Castillo, Carlos, Gionis, Aristides, and Ukkonen, Antti. Sparsification of influence networks. KDD, 2011.
+Rousu, J., Saunders, C., Szedmak, S., and Shawe-Taylor, J.
+Efficient algorithms for max-margin structured classification. Predicting Structured Data, pp. 105–129, 2007.
+Saito, Kazumi, Nakano, Ryohei, and Kimura, Masahiro.
+Prediction of information diffusion probabilities for independent cascade model. In Knowledge-Based Intelligent Information and Engineering Systems (KES), 2008.
+Su, Hongyu, Heinonen, Markus, and Rousu, Juho. Structured output prediction of anti-cancer drug activity. In
+Proceedings of the 5th IAPR international conference on
+Pattern recognition in bioinformatics, PRIB’10, 2010.
+Watts, Duncan J and Dodds, Peter Sheridan. Influentials,
+networks, and public opinion formation. Journal of consumer research, 34(4):441–458, 2007.
+
+

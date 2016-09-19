@@ -1,0 +1,842 @@
+Fast Computation of Wasserstein Barycenters
+
+Marco Cuturi
+Graduate School of Informatics, Kyoto University
+
+MCUTURI @ I . KYOTO - U . AC . JP
+
+Arnaud Doucet
+Department of Statistics, University of Oxford
+
+DOUCET @ STAT. OXFORD . AC . UK
+
+Abstract
+We present new algorithms to compute the mean
+of a set of empirical probability measures under
+the optimal transport metric. This mean, known
+as the Wasserstein barycenter, is the measure that
+minimizes the sum of its Wasserstein distances to
+each element in that set. We propose two original algorithms to compute Wasserstein barycenters that build upon the subgradient method. A direct implementation of these algorithms is, however, too costly because it would require the repeated resolution of large primal and dual optimal
+transport problems to compute subgradients. Extending the work of Cuturi (2013), we propose to
+smooth the Wasserstein distance used in the definition of Wasserstein barycenters with an entropic
+regularizer and recover in doing so a strictly convex objective whose gradients can be computed
+for a considerably cheaper computational cost using matrix scaling algorithms. We use these algorithms to visualize a large family of images and to
+solve a constrained clustering problem.
+
+(a) (b)
+(c) (d)
+
+1. Introduction
+Comparing, summarizing and reducing the dimensionality
+of empirical probability measures defined on a space Ω are
+fundamental tasks in statistics and machine learning. Such
+tasks are usually carried out using pairwise comparisons of
+measures. Classic information divergences (Amari and Nagaoka, 2001) are widely used to carry out such comparisons.
+
+(e)
+
+Unless Ω is finite, these divergences cannot be directly applied to empirical measures, because they are ill-defined
+for measures that do not have continuous densities. They Figure 1. (Top) 30 artificial images of two nested random ellipses.
+also fail to incorporate prior knowledge on the geometry Mean measures using the (a) Euclidean distance (b) Euclidean after
+Proceedings of the 31 st International Conference on Machine
+Learning, Beijing, China, 2014. JMLR: W&CP volume 32. Copyright 2014 by the author(s).
+
+re-centering images (c) Jeffrey centroid (Nielsen, 2013) (d) RKHS
+distance (Gaussian kernel, σ = 0.002) (e) 2-Wasserstein distance.
+
+Fast Computation of Wasserstein Barycenters
+
+of Ω, which might be available if, for instance, Ω is also
+a Hilbert space. Both of these issues are usually solved using Parzen’s approach (1962) to smooth empirical measures
+with smoothing kernels before computing divergences: the
+Euclidean (Gretton et al., 2007) and χ2 distances (Harchaoui
+et al., 2008), the Kullback-Leibler and Pearson divergences
+(Kanamori et al., 2012a;b) can all be computed fairly efficiently by considering matrices of kernel evaluations.
+The choice of a divergence defines implicitly the mean element, or barycenter, of a set of measures, as the particular
+measure that minimizes the sum of all its divergences to that
+set of target measures (Veldhuis, 2002; Banerjee et al., 2005;
+Teboulle, 2007; Nielsen, 2013). The goal of this paper is to
+compute efficiently barycenters (possibly in a constrained
+subset of all probability measures on Ω) defined by the optimal transport distance between measures (Villani, 2009,
+§6). We propose to minimize directly the sum of optimal
+transport distances from one measure (the variable) to a set
+of fixed measures by gradient descent. These gradients can
+be computed for a moderate cost by solving smoothed optimal transport problems as proposed by Cuturi (2013).
+Wasserstein distances have many favorable properties, documented both in theory (Villani, 2009) and practice (Rubner
+et al., 1997; Pele and Werman, 2009). We argue that their
+versatility extends to the barycenters they define. We illustrate this intuition in Figure 1, where we consider 30 images
+of nested ellipses on a 100 × 100 grid. Each image is a discrete measure on [0, 1]2 with normalized intensities. Computing the Euclidean, Gaussian RKHS mean-maps or Jeffrey centroid of these images results in mean measures that
+hardly make any sense, whereas the 2-Wasserstein mean on
+that grid (defined in §3.1) produced by Algorithm 1 captures
+perfectly the structure of these images. Note that these results were recovered without any prior knowledge on these
+images other than that of defining a distance in [0, 1]2 , here
+the Euclidean distance. Note also that the Gaussian kernel
+smoothing approach uses the same distance, in addition to a
+bandwidth parameter σ which needs to be tuned in practice.
+This paper is organized as follows: we provide background
+on optimal transport in §2, followed by the definition of
+Wasserstein barycenters with motivating examples in §3.
+Novel contributions are presented from §4: we present two
+subgradient methods to compute Wasserstein barycenters,
+one which applies when the support of the mean measure
+is known in advance and another when that support can
+be freely chosen in Ω. These algorithms are very costly
+even for measures of small support or histograms of small
+size. We show in §5 that the key ingredients of these
+approaches—the computation of primal and dual optimal
+transport solutions—can be bypassed by solving smoothed
+optimal transport problems. We conclude with two applications of our algorithms in §6.
+
+2. Background on Optimal Transport
+Let Ω be an arbitrary space, D a metric on that space and
+P (Ω) the set of Borel probability measures on Ω. For any
+point x ∈ Ω, δx is the Dirac unit mass on x.
+Definition 1 (Wasserstein Distances). For p ∈ [1, ∞) and
+probability measures µ, ν in P (Ω), their p-Wasserstein distance (Villani, 2009, §6) is
+def
+
+Wp (µ, ν) =
+
+!
+
+inf
+
+π∈Π(µ,ν)
+
+"
+
+#1/p
+D(x, y) dπ(x, y)
+,
+p
+
+Ω2
+
+where Π(µ, ν) is the set of all probability measures on Ω2
+that have marginals µ and ν.
+2.1. Restriction to Empirical Measures
+We will only consider empirical measures
+$nthroughout this
+paper, that is measures of the form µ = i=1 ai δxi where
+n is an integer, X = (x1 , . . . , xn ) ∈ Ωn and (a1 , . . . , an )
+lives in the probability simplex Σn ,
+def
+
+Σn = {u ∈ Rn | ∀i ≤ n, ui ≥ 0,
+
+n
+%
+
+ui = 1}.
+
+i=1
+
+Let us introduce additional notations:
+Measures on a Set X with Constrained Weights. Let Θ
+be a non-empty closed subset Θ of Σn . We write
+def
+
+P (X, Θ) = {µ =
+
+n
+%
+i=1
+
+ai δxi , a ∈ Θ}.
+
+Measures supported on up to k points. Given an integer
+k and a subset Θ of Σk , we consider the set Pk (Ω, Θ) of
+measures of Ω that have discrete support of size up to k and
+weights in Θ,
+&
+def
+Pk (Ω, Θ) =
+P (X, Θ).
+X∈Ωk
+
+When no constraints on the weights are considered, namely
+when the weights are free to be chosen anywhere on the
+def
+probability simplex, we use the shorter notations P (X) =
+def
+P (X, Σn ) and Pk (Ω) = Pk (Ω, Σk ).
+2.2. Wasserstein & Discrete Optimal Transport
+Consider two families X = (x1 , . . . , x$
+=
+n ) and Y
+n
+(y1 , . . $
+. , ym ) of points in Ω. When µ =
+a
+δ
+and
+i=1 i xi
+n
+ν =
+i=1 bi δyi , the Wasserstein distance Wp (µ, ν) between µ and ν is the pth root of the optimum of a network
+flow problem known as the transportation problem (Bertsimas and Tsitsiklis, 1997, §7.2). This problem builds upon
+two elements: the matrix MXY of pairwise distances between elements of X and Y raised to the power p, which
+
+Fast Computation of Wasserstein Barycenters
+
+• Centroids of Histograms: N > 1, Ω finite, P = P (Ω).
+When Ω is a set of size d and a matrix M ∈ Rd×d
+describes
++
+def
+MXY = [D(xi , yj )p ]ij ∈ Rn×m ,
+(1) the pairwise distances between these d points (usually called
+in that case bins or features), the 1-Wasserstein distance is
+and the transportation polytope U (a, b) of a ∈ Σn and
+known as the Earth Mover’s Distance (EMD) (Rubner et al.,
+b ∈ Σm , which acts as a feasible set, defined as the set of
+1997). In that context, Wasserstein barycenters have also
+n × m nonnegative matrices such that their row and column
+been called EMD prototypes by Zen and Ricci (2011).
+marginals are equal to a and b respectively. Writing 1n for
+• Euclidean Ω: N = 1, D(x, y) = *x − y*2 , p = 2, P =
+the n-dimensional vector of ones,
+Pk (Ω). Minimizing f on Pk (Ω) when (Ω, D) is a Euclidean
+def
+n×m
+U (a, b) = {T ∈ R+
+| T 1m = a, T T 1n = b}. (2) metric space and p = 2 is equivalent to the k-means problem
+(Pollard, 1982; Canas and Rosasco, 2012).
+
+acts as a cost parameter,
+
+def
+
+Let 'A, B ( = tr(AT B) be the Frobenius dot-product
+of matrices. Combining Eq. (1) & (2), we have that
+Wpp (µ, ν)—the distance Wp (µ, ν) raised to the power p—
+can be written as the optimum of a parametric linear program p on n × m variables, parameterized by the marginals
+a, b and a (cost) matrix MXY :
+
+• Constrained k-Means: N = 1, P = Pk (Ω, {1k /k}).
+Consider a measure ν with support Y ∈ Ωm and weights
+b ∈ Σm . The problem of approximating this measure by a uniform measure with k atoms—a measure in
+Pk (Ω, {1k /k})—in 2-Wasserstein sense was to our knowledge first considered by Ng (2000), who proposed a variant
+of Lloyd’s algorithm (1982) for that purpose. More recently,
+def
+Wpp (µ, ν) = p(a, b, MXY ) = min 'T, MXY (. (3) Reich (2013) remarked that such an approximation can be
+T ∈U(a,b)
+used in the resampling step of particle filters and proposed
+in that context two ensemble methods inspired by optimal
+3. Wasserstein Barycenters
+transport, one of which reduces to a single iteration of Ng’s
+We present in this section the Wasserstein barycenter prob- algorithm. Such approximations can also be obtained with
+lem, a variational problem involving all Wasserstein dis- kernel-based approaches, by minimizing an information ditances from one to many measures, and show how it encom- vergence between the (smoothed) target measure ν and its
+(smoothed) uniform approximation as proposed recently by
+passes known problems in clustering and approximation.
+Chen et al. (2010) and Sugiyama et al. (2011).
+3.1. Definition and Special Cases
+Definition 2 (Agueh and Carlier, 2011). A Wasserstein
+barycenter of N measures {ν1 , . . . , νN } in P ⊂ P (Ω) is
+a minimizer of f over P, where
+
+3.2. Recent Work
+
+Agueh and Carlier (2011) consider conditions on the νi ’s
+for a Wasserstein barycenter in P (Ω) to be unique using the
+multi-marginal transportation problem. They provide soluN
+tions in the cases where either (i) Ω = R; (ii) N = 2 using
+%
+def 1
+Wpp (µ, νi ).
+(4) McCann’s interpolant (1997); (iii) all the measures νi are
+f (µ) =
+N i=1
+Gaussians in Ω = Rd , in which case the barycenter is a
+Gaussian with the mean of all means and a variance matrix
+Agueh and Carlier consider more generally a non-negative which is the unique positive definite root of a matrix equaweight λi in front of each distance Wpp (µ, νi ). The algo- tion (Agueh and Carlier, 2011, Eq.6.2).
+rithms we propose extend trivially to that case but we use
+Rabin et al. (2012) were to our knowledge the first to conuniform weights in this work to keep notations simpler.
+sider practical approaches to compute Wasserstein barycenWe highlight a few special cases where minimizing f over ters between point clouds in Rd . To do so, Rabin et al.
+a set P is either trivial, relevant to data analysis and/or has (2012) propose to approximate the Wasserstein distance bebeen considered in the literature with different tools or under tween two point clouds by their sliced Wasserstein distance,
+a different name. In what follows X ∈ Ωn and Y ∈ Ωm are the expectation of the Wasserstein distance between the proarbitrary finite subsets of Ω.
+jections of these point clouds on lines sampled randomly.
+• N = 1, P = P (X) When only one measure ν, supported Because the optimal transport between two point clouds on
+on Y ∈ Ωm is considered, its closest element µ in P (X)—if the real line can be solved with a simple sort, the sliced
+no constraints on weights a are given—can be computed by Wasserstein barycenter can be computed very efficiently, usdefining a weight vector a on the elements of X that results ing gradient descent. Although their approach seems very
+from assigning all of the mass bi to the closest neighbor in effective in lower dimensions, it may not work for d ≥ 4
+and does not generalize to non-Euclidean metric spaces.
+metric D of yi in X.
+
+Fast Computation of Wasserstein Barycenters
+
+4. New Computational Approaches
+
+also the maximum of a finite set of linear functions, each
+indexed by the set of extreme points of CM , evaluated at a
+We propose in this section new approaches to compute and is therefore polyhedral convex. When the dual optimal
+Wasserstein barycenters when (i) each of the N measures vector is unique, α% is a gradient of p at a, and a subgradient
+νi is an empirical measure, described by a list of atoms otherwise.
+Yi ∈ Ωmi of size mi ≥ 1, and a probability vector bi in the
+simplex Σmi ; (ii) the search for a barycenter is not considBecause for any real value t the pair (α + t1n , β − t1m )
+ered on the whole of P (Ω) but restricted to either P (X, Θ)
+is feasible if the pair (α, β) is feasible, and because their
+(the set of measures supported on a predefined finite set X
+objective are identical, any dual optimum (α, β) is deterof size n with weights in a subset Θ of Σn ) or Pk (Ω, Θ) (the
+mined up to an additive constant. To remove this degree
+set of measures supported on up to k atoms with weights in
+of freedom—which arises from the fact that one among all
+a subset Θ of Σk ).
+n+m row/column sum constraints of U (a, b) is redundant—
+Looking for a barycenter µ with atoms X and weights a is we can either remove a dual variable or normalize any dual
+equivalent to minimizing f (see Eq. 3 for a definition of p), optimum α% so that it sums to zero, to enforce that it belongs
+to the tangent space of Σn . We follow the latter strategy in
+N
+%
+the rest of the paper.
+def 1
+p(a, bi , MXYi ),
+(5)
+f (a, X) =
+N i=1
+4.2. Fixed Support: Minimizing f over P (X)
+over relevant feasible sets for a and X. When X is fixed,
+n
+we show in §4.1 that f is convex w.r.t a regardless of the Let X ⊂ Ω be fixed and let Θ be a closed convex subset
+weights a ∈ Θ
+properties of Ω. A subgradient for f w.r.t a can be re- of Σn . The aim of this section is to compute
+%
+such
+that
+f
+(a,
+X)
+is
+minimal.
+Let
+α
+be
+the
+optimal dual
+i
+covered through the dual optimal solutions of all problems
+variable
+of
+d(a,
+b
+;
+M
+)
+normalized
+to
+sum
+to
+0. f being
+i
+XY
+i
+p(a, bi , MXYi ), and f can be minimized using a projected
+a
+sum
+of
+terms
+p(a,
+b
+,
+M
+),
+we
+have
+that:
+i
+XY
+i
+subgradient method outlined in §4.2. If X is free, constrained to be of cardinal k, and Ω and its metric D are both Corollary 1. The function a ,→ f (a, X) is polyhedral conEuclidean, we show in §4.4 that f is not convex w.r.t X but vex, with subgradient
+we can provide subgradients for f using the primal optimal
+N
+%
+solutions of all problems p(a, bi , MXYi ). This in turn sugdef 1
+α% .
+α=
+gests an algorithm to reach a local minimum for f w.r.t. a
+N i=1 i
+and X in Pk (Ω, Θ) by combining both approaches.
+Assuming Θ is closed and convex, we can consider a naive
+projected subgradient minimization of f . Alternatively,
+Dual transportation problem. Given a matrix M ∈ if there exists a Bregman divergence B(a, b) = ω(b) −
+Rn×m , the optimum p(a, b, M ) admits the following dual ω(a) − '∇ω(a), b − a ( for a, b ∈ Θ defined by a proxLinear Program (LP) form (Bertsimas and Tsitsiklis, 1997, function ω, we can define the proximal mapping Pa (b) =
+argminc∈Θ ('b, c − a ( + B(a, c)) and consider accelerated
+§7.6,§7.8), known as the dual optimal transport problem:
+gradient approaches (Nesterov, 2005). We summarize this
+d(a, b, M ) = max αT a + β T b ,
+(6) idea in Algorithm 1.
+4.1. Differentiability of p(a, b, MXY ) w.r.t a
+
+(α,β)∈CM
+
+where the polyhedron CM of dual variables is
+CM = {(α, β) ∈ Rn+m | αi + βj ≤ mij }.
+By LP duality, d(a, b, M ) = p(a, b, M ). The dual optimal
+solutions—which can be easily recovered from the primal
+optimal solution (Bertsimas and Tsitsiklis, 1997, Eq.7.10)—
+define a subgradient for p as a function of a:
+Proposition 1. Given b ∈ Σm and M ∈ Rn×m , the map
+a ,→ p(a, b, M ) is a polyhedral convex function. Any
+optimal dual vector α% of d(a, b, M ) is a subgradient of
+p(a, b, M ) with respect to a.
+Proof. These results follow from sensitivity analysis in LP’s
+(Bertsimas and Tsitsiklis, 1997, §5.2). d is bounded and is
+
+Algorithm 1 Wasserstein Barycenter in P (X, Θ)
+Inputs: X ∈ Ωn , Θ ⊂ Σn . For i ≤ N : Yi ∈ Ωmi , bi ∈
+Σmi , p ∈ [1, ∞), t0 > 0.
+Form all n × mi matrices Mi = MXYi , see Eq. (1).
+Set â = ã = argminΘ ω.
+while not converged do
+β = (t + 1)/2, a ← (1 − β −1 )â + β −1 ã.
+$N
+Form subgradient α ← N −1 i=1 α%i using all dual
+optima α%i of d(a, bi , Mi ).
+α).
+ã ← Pa (t0 βα
+â ← (1 − β −1 )â + β −1 ã, t ← t + 1.
+end while
+Notice that when Θ = Σn and B is the Kullback-Leibler
+divergence (Beck and Teboulle, 2003), we can initialize ã
+
+Fast Computation of Wasserstein Barycenters
+
+with 1n /n and use the multiplicative update to realize the
+α
+proximal update: ã ← ã ◦ e−t0 βα
+; ã ← ã/ãT 1n , where
+◦ is Schur’s product. Alternative sets Θ for which this
+projection can be easily carried out include, for instance,
+all (convex) level set of the entropy function H, namely
+Θ = {a ∈ Σn |H(a) ≥ τ } where 0 ≤ τ ≤ log n.
+4.3. Differentiability of p(a, b, MXY ) w.r.t X
+We consider now the case where Ω = Rd with d ≥ 1,
+D is the Euclidean distance and p = 2. When Ω = Rd ,
+a family of n points X and a family of m points Y can
+be represented respectively as a matrix in Rd×n and another in Rd×m . The pairwise squared-Euclidean distances
+between points in these sets can be recovered by writing
+def
+def
+x = diag(X T X) and y = diag(Y T Y ), and observing that
+MXY = x1Tm + 1n yT − 2X T Y ∈ Rn×m .
+
+A simple interpretation of this update is as follows: the matrix T %T diag(a−1 ) has n column-vectors in the simplex
+Σm . The suggested update for X is to replace it by n
+barycenters of points enumerated in Y with weights defined
+by the optimal transport T % . Note that, because the minimization problem we consider in X is not convex to start
+with, one could be fairly creative when it comes to choosing
+D and p among other distances and exponents. This substitution would only involve more complicated gradients of
+MXY w.r.t. X that would appear in Eq. (7).
+4.4. Free Support: Minimizing f over Pk (Rd , Θ)
+We now consider, as a natural extension of §4.2 when Ω =
+Rd , the problem of minimizing f over a probability measure
+µ that is (i) supported by at most k atoms described in X, a
+matrix of size d × k, (ii) with weights in a ∈ Θ ⊂ Σk .
+
+Alternating Optimization. To obtain an approximate minimizer of f (a, X) we propose in Algorithm 2 to update alterTransport Cost as a function of X. Due to the margin connatively locations X (with the Newton step defined in Eq. 8)
+straints that apply if a matrix T is in the polytope U (a, b),
+and weights a (with Algorithm 1).
+we have:
+Algorithm 2 2-Wasserstein Barycenter in Pk (Rd , Θ)
+
+'T, MXY ( = 'T, x1Td + 1Td y − 2X T Y (
+
+= tr T T x1Td + tr T T 1Td y − 2'T, X T Y (
+= xT a + yT b − 2'T, X T Y (.
+
+Discarding constant terms in y and b, we have that minimizing p(a, b, MXY ) with respect to locations X is equivalent
+to solving
+min xT a + p(a, b, −X T Y ).
+
+X∈Rd×k
+
+(7)
+
+Input: Yi ∈ Rd×mi , bi ∈ Σmi for i ≤ N.
+initialize X ∈ Rd×k and a ∈ Θ
+while X and a have not converged do
+a ← a% using Algorithm 1.
+for i ∈ (1, . . . , N ) do
+Ti% ← optimal solution of p(a, bi ; MXYi )
+end for
+(
+' $
+N
+%T
+diag(a−1 ), setX ← (1 − θ)X + θ N1
+Y
+T
+i
+i
+i=1
+ting θ ∈ [0, 1] with line-search or a preset value.
+end while
+
+As a function of X, that objective is the sum of a convex
+quadratic function of X with a piecewise linear concave Algorithm 2 and Lloyd/Ng Algorithms. As mentioned
+in §2, minimizing f defined in Eq. (5) over Pk (Rd ), with
+function, since
+N = 1, p = 2 and no constraints on the weights (Θ = Σk ),
+p(a, b, −X T Y ) = min 'X, −Y T T (
+is equivalent to solving the k-means problem applied to the
+T ∈U(a,b)
+set of points enumerated in ν1 . In that particular case, Algorithm
+2 is also equivalent to Lloyd’s algorithm. Indeed, the
+is the minimum of linear functions indexed by the vertices
+assignment
+of the weight of each point to its closest centroid
+of the polytope U (a, b). As a consequence, p(a, b, MXY )
+in
+Lloyd’s
+algorithm
+(the maximization step) is equivalent to
+is not convex with respect to X.
+the computation of a% in ours, whereas the re-centering step
+(the expectation step) is equivalent to our update for X using
+Quadratic Approximation. Suppose that T % is optimal for the optimal transport, which is in that case the trivial transproblem p(a, b, MXY ). Updating Eq. (7),
+port that assigns the weight (divided by N ) of each atom
+in Yi to its closest neighbor in X. When the weight vector
+xT a−'T % , X T Y ( = *X diag(a1/2 )−Y T %T diag(a−1/2 )*2 a is constrained to be uniform (Θ = {1k /k}), Ng (2000)
+proposed a heuristic to obtain uniform k-means that is also
+− *Y T %T diag(a−1/2 )*2 .
+equivalent to Algorithm 2, and which also relies on the reMinimizing a local quadratic approximation of p at X yields peated computation of optimal transports. For more general
+sets Θ, Algorithm 1 ensures that the weights a remain in Θ
+thus the Newton update
+at each iteration of Algorithm 2, which cannot be guaranteed
+X ← Y T %T diag(a−1 ).
+(8) by neither Lloyd’s nor Ng’s approach.
+
+Fast Computation of Wasserstein Barycenters
+
+Algorithm 2 and Reich’s (2013) Transform. Reich (2013)
+has recently suggested to approximate a weighted measure
+ν by a uniform measure supported on as many atoms. This
+approximation is motivated by optimal transport theory, notably asymptotic results by McCann (1995), but does not
+attempt to minimize, as we do in Algorithm 2, any Wasserstein distance between that approximation and the original
+measure. This approach results in one application of the
+Newton update defined in Eq. (8), when X is first initialized
+to Y and a = 1m /m to compute the optimal transport T % .
+
+smoothed version of the original dual transportation problem, where the positivity constraints of each term mij −
+αi − βj have been replaced by penalties λ1 e−λ(mij −αi −βj ) :
+
+and strictly convex approximations of both primal and dual
+problems p and d. The matrix scaling approach advocated
+by Cuturi was motivated by the fact that it provided a fast
+approximation pλ to p. We show here that the same approach can be used to smooth the objective f and recover
+for a cheap computational price its gradients w.r.t. a and X.
+
+(u, v) ,→ (Av −1 ./b, AT u−1 ./a).
+
+dλ (a, b; M ) = maxn+m
+αT a + β T b −
+(α,β)∈R
+
+% e−λ(mij −αi −βj )
+
+i≤n,j≤m
+
+λ
+
+.
+
+These two problems are related below in the sense that their
+respective optimal solutions are linked by a unique positive
+vector u ∈ Rn+ :
+Summary We have proposed two original algorithms to Proposition 2. Let K be the elementwise exponential of
+compute Wasserstein barycenters of probability measures: −λMXY , K def
+= e−λMXY . Then there exists a pair of vecone which applies when the support of the barycenter is tors (u, v) ∈ Rn+ × Rm
++ such that the optimal solutions of
+fixed and its weights are constrained to lie in a convex subset pλ and dλ are respectively given by
+Θ of the simplex, another which can be used when the supT
+port can be chosen freely. These algorithms are relatively T % = diag(u)K diag(v), α% = − log(u) + log(u) 1n 1n .
+λ
+λ
+λ
+λn
+simple, yet—to the best of our knowledge—novel. We suspect these approaches were not considered before because of
+Proof. The result follows from the Lagrange method of
+their prohibitive computational cost: Algorithm 1 computes
+multipliers for the primal as shown by Cuturi (2013, Lemma
+at each iteration the dual optima of N transportation prob2), and a direct application of first-order conditions for the
+lems to form a subgradient, each with n + mi variables and
+dual, which is an unconstrained convex problem. The term
+n × mi inequality constraints. Algorithm 2 incurs an even log(u)T 1
+n
+1n in the definition of α%λ is used to normalize α%λ
+higher cost, since it involves running Algorithm 1 at each
+λn
+iteration, in addition to solving N primal optimal transport so that it sums to zero as discussed in the end of §4.1.
+problems to form a subgradient to update X. Since both objectives rely on subgradient descent schemes, they are also 5.2. Matrix Scaling Computation of (u, v)
+likely to suffer from a very slow convergence. We propose
+The positive vectors (u, v) mentioned in Proposition 2 can
+to solve these issues by following Cuturi’s approach (2013)
+be computed through Sinkhorn’s matrix scaling algorithm
+to smooth the objective f and obtain strictly convex objecapplied to K, as outlined in Algorithm 3:
+tives whose gradients can be computed more efficiently.
+Lemma 1 (Sinkhorn, 1967). For any positive matrix A in
+n×m
+R+
+and positive probability vectors a ∈ Σn and b ∈ Σm ,
+5. Smoothed Dual and Primal Problems
+there exist positive vectors u ∈ Rn+ and v ∈ Rm
++ , unique
+up
+to
+scalar
+multiplication,
+such
+that
+diag(u)A
+diag(v)
+∈
+To circumvent the major computational roadblock posed by
+U
+(a,
+b).
+Such
+a
+pair
+(u,
+v)
+can
+be
+recovered
+as
+a
+fixed
+point
+the repeated computation of primal and dual optimal transports, we extend Cuturi’s approach (2013) to obtain smooth of the Sinkhorn map
+
+5.1. Regularized Primal and Smoothed Dual
+A n × m transport T , which is by definition in the nm$
+def
+simplex, has entropy h(T ) = − n,m
+i,j=1 tij log(tij ). Cuturi
+(2013) has recently proposed to consider, for λ > 0, a regularized primal transport problem pλ as
+
+The convergence of the algorithm is linear when using Hilbert’s projective metric between the scaling factors
+(Franklin and Lorenz, 1989, §3). Although we use this algorithm in our experiments because of its simplicity, other
+algorithms exist (Knight and Ruiz, 2012) which are known
+to be more reliable numerically when λ is large.
+
+Summary: Given a smoothing parameter λ > 0, using
+Sinkhorn’s algorithm on matrix K, defined as the elementwise exponential of −λM (the pairwise Gaussian kernel
+matrix between the√supports X and Y when p = 2, using
+bandwidth σ = 1/ 2λ) we can recover smoothed optima
+1
+α%λ and Tλ% for both smoothed primal pλ and dual dλ transpλ (a, b; M ) = min 'X, M ( − h(T ).
+λ
+T ∈U(a,b)
+port problems. To take advantage of this, we simply propose
+to substitute the smoothed optima α%λ and Tλ% to the original
+We introduce in this work its dual problem, which is a optima α% and T % that appear in Algorithms 1 and 2.
+
+Fast Computation of Wasserstein Barycenters
+
+Figure 2. (top) For each digit, 15 out of the ≈ 5.000 scaled and translated images considered for each barycenter. (bottom) Barycenters
+after t = 1, 10, 60 gradient steps. For t = 60, images are cropped to show the 30 × 30 central pixels.
+
+Algorithm 3 Smoothed Primal Tλ% and Dual α%λ Optima
+Input M, λ, a, b
+K = exp(−λM );
+) = diag(a−1 )K % use bsxfun(@rdivide,K,a)
+K
+Set u =ones(n,1)/n;
+while u changes do
+T
+)
+u = 1./(K(b./(K
+u))).
+end while
+v = b./(K T u).
+T
+1n
+1n .
+α%λ = − λ1 log(u) + log(u)
+λn
+Tλ% = diag(u)K diag(v).
+% use bsxfun(@times, v, (bsxfun(@times, K, u))% );
+
+6. Applications
+We present two applications, one of Algorithm 1 and one of
+Algorithm 2, that both rely on the smooth approximations
+presented in §5. The settings we consider involve computing
+respectively tens of thousands or tens of high-dimensional
+optimal transport problems—2.500×2.500 for the first application, 57.647 × 48 for the second—which cannot be realistically carried out using network flow solvers. Using network flow solvers, the resolution of a single transport problem of these dimensions could take between several minutes
+to several hours. We also take advantage in the first application of the fact that Algorithm 3 can be run efficiently on
+GPGPUs using vectorized code (Cuturi, 2013, Alg.1).
+6.1. Visualization of Perturbed Images
+We use 50.000 images of the MNIST database, with approximately 5.000 images for each digit from 0 to 9. Each image
+(originally 20 × 20 pixels) is scaled randomly, uniformly
+between half-size and double-size, and translated randomly
+within a 50 × 50 grid, with a bias towards corners. We dis-
+
+play intermediate barycenter solutions for each of these 10
+datasets of images for t = 1, 10, 60 gradient iterations. λ
+is set to 60/median(M ), where M is the squared-Euclidean
+distance matrix between all 2,500 pixels in the grid. Using
+a Quadro K5000 GPU with close to 1500 cores, the computation of a single barycenter takes about 2 hours to reach
+100 iterations. Because we use warm starts to initialize u
+in Algorithm 3 at each iteration of Algorithm 1, the first iterations are typically more computationally intensive than
+those carried out near the end.
+6.2. Clustering with Uniform Centroids
+In practice, the k-means cost function applied to a given empirical measure could be minimized with a set of centroids
+X and weight vector a such that the entropy of a is very
+small. This can occur when most of the original points in
+the dataset are attributed to a very small subset of the k centroids, and could be undesirable in applications of k-means
+where a more regular attribution is sought. For instance, in
+sensor deployment, when each centroid (sensor) is limited
+in the number of data points (users) it can serve, we would
+like to ensure that the attributions agree with those limits.
+Whereas the original k-means cannot take into account such
+limits, we can ensure them using Algorithm 2. We illustrate the difference between looking for optimal centroids
+with “free” assignments (Θ = Σk ), and looking for optimal “uniform” centroids with constrained assignments (Θ =
+{1k /k}) using US census data for income and population
+repartitions across 57.647 spatial locations in the 48 contiguous states. These weighted points can be interpreted as two
+empirical measures on R2 with weights directly proportional
+to these respective quantities. We initialize both “free” and
+“uniform” clustering with the actual 48 state capitals. Results displayed in Figure 3 show that by forcing our approximation to be uniform, we recover centroids that induce a
+
+Fast Computation of Wasserstein Barycenters
+
+Wasserstein Distance
+
+speed which is directly comparable to that of the k-means in
+terms of iterations, with a relatively modest computational
+overhead. Unsurprisingly, the Wasserstein distance between
+the clusters and the original measure is higher when adding
+uniform constraints on the weights.
+
+15
+Uniform Wasserstein Barycenter
+K−Means (Free Was. Barycenter)
+
+10
+
+5
+
+2
+
+4
+
+6
+
+8
+10
+Iterations
+
+12
+
+14
+
+Figure 4. Wasserstein distance of the uniform Wasserstein
+barycenter (weights constrained to be in Θ = {1k /k}) and
+its unconstrained equivalent (k-means) to the income empirical
+measure. Note that, because of the constraints on weights, the
+Wasserstein distance of the uniform Wasserstein barycenter is
+necessarily larger. On a single CPU core, these computations
+require 12.5 seconds for the constrained case, using Sinkhorn’s approximation, and 1.55 seconds for the regular k-means algorithm.
+Using a regular transportation solver, computing the optimal
+transport from the 57.647 points to the 48 centroids would require
+about 1 hour for a single iteration
+
+Conclusion We have proposed in this paper two original
+algorithms to compute Wasserstein barycenters of empirical measures. Using these algorithms in practice for measures of large support is a daunting task for two reasons:
+they are inherently slow because they rely on the subgradiFigure 3. Comparison of two Wasserstein barycenters on spatial
+ent method; the computation of these subgradients involves
+repartitions of income and population in the 48 contiguous states,
+solving optimal and dual optimal transport problems. Both
+using as many (k = 48) centroids. The size of each of the 57.647
+blue crosses is proportional to the local average of the relevant vari- issues can be substantially alleviated by smoothing the priable (income above and population below) at that location, nor- mal optimal transport problem with an entropic penalty and
+malized to sum to 1. Each downward triangle is a centroid of the considering its dual. Both smoothed problems admit grak-means clustering (equivalent to a Wasserstein barycenter with dients which can be computed efficiently using only matrix
+Θ = Σk ) whose size is proportional to the portion of mass cap- vector products. Our aim in proposing such algorithms is to
+tured by that centroid. Red dots indicate centroids obtained with a demonstrate that Wasserstein barycenters can be used for viuniform constraint on the weights, Θ = {1k /k}. Since such cen- sualization, constrained clustering, and hopefully as a core
+troids are constrained to carry a fixed portion of the total weight, component within more complex data analysis techniques in
+one can observe that they provide a more balanced clustering than future applications. We also believe that our smoothing apthe k-means solution.
+proach can be directly applied to more complex variational
+problems that involve multiple Wasserstein distances, such
+more balanced clustering. Indeed, each cell of the Voronoi as Wasserstein propagation (Solomon et al., 2014).
+diagram built with these centroids is now constrained to hold
+the same aggregate wealth or population. These centroids Acknowledgements We thank reviewers for their comcould form the new state capitals of equally rich or equally ments and Gabriel Peyré for fruitful discussions. MC was
+populated states. On an algorithmic note, we notice in Fig- supported by grant 26700002 from JSPS. AD was partially
+ure 4 that Algorithm 2 converges to its (local) optimum at a supported by EPSRC.
+
+Fast Computation of Wasserstein Barycenters
+
+References
+M. Agueh and G. Carlier. Barycenters in the Wasserstein space.
+SIAM Journal on Mathematical Analysis, 43(2):904–924, 2011.
+S.-I. Amari and H. Nagaoka. Methods of Information Geometry.
+AMS vol. 191, 2001.
+A. Banerjee, S. Merugu, I. S. Dhillon, and J. Ghosh. Clustering
+with bregman divergences. The Journal of Machine Learning
+Research, 6:1705–1749, 2005.
+A. Beck and M. Teboulle. Mirror descent and nonlinear projected
+subgradient methods for convex optimization. Operations Research Letters, 31(3):167–175, 2003.
+D. Bertsimas and J. Tsitsiklis. Introduction to Linear Optimization.
+Athena Scientific, 1997.
+G. Canas and L. Rosasco. Learning probability measures with respect to optimal transport metrics. In Adv. in Neural Infor. Proc.
+Systems 25, pages 2501–2509. 2012.
+Y. Chen, M. Welling, and A. J. Smola. Supersamples from kernelherding. In Uncertainty in Artificial Intelligence (UAI), 2010.
+M. Cuturi. Sinkhorn distances: Lightspeed computation of optimal transport. In Advances in Neural Information Processing
+Systems 26, pages 2292–2300, 2013.
+J. Franklin and J. Lorenz. On the scaling of multidimensional matrices. Linear Algebra and its applications, 114:717–735, 1989.
+A. Gretton, K. M. Borgwardt, M. Rasch, B. Schoelkopf, and A. J.
+Smola. A kernel method for the two-sample-problem. In Advances in Neural Information Processing Systems 19, pages
+513–520. MIT Press, 2007.
+Z. Harchaoui, F. Bach, and E. Moulines. Testing for homogeneity
+with kernel fisher discriminant analysis. In Advances in Neural
+Information Processing Systems 20, pages 609–616. MIT Press,
+2008.
+T. Kanamori, T. Suzuki, and M. Sugiyama. f-divergence estimation and two-sample homogeneity test under semiparametric
+density-ratio models. IEEE Trans. on Information Theory, 58
+(2):708–720, 2012a.
+T. Kanamori, T. Suzuki, and M. Sugiyama. Statistical analysis
+of kernel-based least-squares density-ratio estimation. Machine
+Learning, 86(3):335–367, 2012b.
+P. A. Knight and D. Ruiz. A fast algorithm for matrix balancing.
+IMA Journal of Numerical Analysis, 2012.
+S. Lloyd. Least squares quantization in pcm. IEEE Trans. on Information Theory, 28(2):129–137, 1982.
+R. J. McCann. Existence and uniqueness of monotone measurepreserving maps. Duke Mathematical Journal, 80(2):309–324,
+1995.
+R. J. McCann. A convexity principle for interacting gases. Advances in Mathematics, 128(1):153–179, 1997.
+Y. Nesterov. Smooth minimization of non-smooth functions. Math.
+Program., 103(1):127–152, May 2005.
+M. K. Ng. A note on constrained k-means algorithms. Pattern
+Recognition, 33(3):515–519, 2000.
+
+F. Nielsen. Jeffreys centroids: A closed-form expression for positive histograms and a guaranteed tight approximation for frequency histograms. IEEE Signal Processing Letters (SPL),
+2013.
+E. Parzen. On estimation of a probability density function and
+mode. The Annals of Mathematical Statistics, 33(3):1065–1076,
+1962.
+O. Pele and M. Werman. Fast and robust earth mover’s distances.
+In ICCV’09, 2009.
+D. Pollard. Quantization and the method of k-means. IEEE Trans.
+on Information Theory, 28(2):199–205, 1982.
+J. Rabin, G. Peyré, J. Delon, and M. Bernot. Wasserstein barycenter and its application to texture mixing. In Scale Space and
+Variational Methods in Computer Vision, volume 6667 of Lecture Notes in Computer Science, pages 435–446. Springer, 2012.
+S. Reich. A non-parametric ensemble transform method for
+bayesian inference. SIAM Journal of Scientific Computing, 35
+(4):A2013–A2024, 2013.
+Y. Rubner, L. Guibas, and C. Tomasi. The earth movers distance, multi-dimensional scaling, and color-based image retrieval. In Proceedings of the ARPA Image Understanding Workshop, pages 661–668, 1997.
+R. Sinkhorn. Diagonal equivalence to matrices with prescribed row
+and column sums. The American Mathematical Monthly, 74(4):
+402–405, 1967.
+J. Solomon, R. Rustamov, G. Leonidas, and A. Butscher. Wasserstein propagation for semi-supervised learning. In Proceedings of The 31st International Conference on Machine Learning,
+pages 306–314, 2014.
+M. Sugiyama, M. Yamada, M. Kimura, and H. Hachiya. On
+information-maximization clustering: Tuning parameter selection and analytic solution. In Proceedings of the 28th International Conference on Machine Learning, pages 65–72, 2011.
+M. Teboulle. A unified continuous optimization framework for
+center-based clustering methods. The Journal of Machine
+Learning Research, 8:65–102, 2007.
+R. Veldhuis. The centroid of the symmetrical kullback-leibler distance. Signal Processing Letters, IEEE, 9(3):96–99, 2002.
+C. Villani. Optimal transport: old and new, volume 338. Springer
+Verlag, 2009.
+G. Zen and E. Ricci. Earth mover’s prototypes: A convex learning
+approach for discovering activity patterns in dynamic scenes. In
+Computer Vision and Pattern Recognition (CVPR), 2011 IEEE
+Conference on, pages 3225–3232. IEEE, 2011.
+
+

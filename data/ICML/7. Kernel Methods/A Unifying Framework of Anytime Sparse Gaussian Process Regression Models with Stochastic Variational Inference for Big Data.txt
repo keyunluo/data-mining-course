@@ -1,0 +1,1553 @@
+A Unifying Framework of Anytime Sparse Gaussian Process Regression
+Models with Stochastic Variational Inference for Big Data
+Trong Nghia Hoang†
+NGHIAHT @ COMP. NUS . EDU . SG
+Quang Minh Hoang†
+HQMINH @ COMP. NUS . EDU . SG
+Kian Hsiang Low†
+LOWKH @ COMP. NUS . EDU . SG
+†
+Department of Computer Science, National University of Singapore, Republic of Singapore
+
+Abstract
+
+This paper presents a novel unifying framework
+of anytime sparse Gaussian process regression
+(SGPR) models that can produce good predictive performance fast and improve their predictive performance over time. Our proposed unifying framework reverses the variational inference
+procedure to theoretically construct a non-trivial,
+concave functional that is maximized at the predictive distribution of any SGPR model of our
+choice. As a result, a stochastic natural gradient
+ascent method can be derived that involves iteratively following the stochastic natural gradient of
+the functional to improve its estimate of the predictive distribution of the chosen SGPR model
+and is guaranteed to achieve asymptotic convergence to it. Interestingly, we show that if the predictive distribution of the chosen SGPR model
+satisfies certain decomposability conditions, then
+the stochastic natural gradient is an unbiased estimator of the exact natural gradient and can be
+computed in constant time (i.e., independent of
+data size) at each iteration. We empirically evaluate the trade-off between the predictive performance vs. time efficiency of the anytime SGPR
+models on two real-world million-sized datasets.
+
+1. Introduction
+A Gaussian process regression (GPR) model is a Bayesian
+nonparametric model for performing nonlinear regression
+that provides a Gaussian predictive distribution with formal measures of predictive uncertainty. The expressivity of
+a full-rank GPR (FGPR) model, however, comes at a cost
+of cubic time in the size of the data, thus rendering it computationally impractical for training with massive datasets.
+To improve its scalability, a number of sparse GPR (SGPR)
+models (Lázaro-Gredilla et al., 2010; Quiñonero-Candela
+nd
+
+Proceedings of the 32
+International Conference on Machine
+Learning, Lille, France, 2015. JMLR: W&CP volume 37. Copyright 2015 by the author(s).
+
+& Rasmussen, 2005; Snelson & Ghahramani, 2007; Titsias, 2009) exploiting low-rank approximate representations have been proposed, many of which share a similar
+structural assumption of conditional independence (albeit
+of varying degrees) based on the notion of inducing variables (Section 2) and consequently incur only linear time
+in the data size. The work of Quiñonero-Candela & Rasmussen (2005) has in fact presented a unifying view of
+such SGPR models, which include the subset of regressors (SoR) (Smola & Bartlett, 2001), deterministic training conditional (DTC) (Seeger et al., 2003), fully independent training conditional (FITC) (Snelson & Gharahmani, 2005), fully independent conditional (FIC), partially
+independent training conditional (PITC) (Schwaighofer &
+Tresp, 2003), and partially independent conditional (PIC)
+(Snelson & Ghahramani, 2007) approximations. To scale
+up these SGPR models further for performing real-time
+predictions necessary in many time-critical applications
+and decision support systems (e.g., ocean sensing (Cao
+et al., 2013; Dolan et al., 2009; Low et al., 2008; 2009;
+2011; 2012; Podnar et al., 2010), traffic monitoring (Chen
+et al., 2012; 2013b; 2015; Hoang et al., 2014a;b; Low et al.,
+2014a;b; Ouyang et al., 2014; Xu et al., 2014; Yu et al.,
+2012)), the work of Gal et al. (2014) has parallelized DTC
+while that of Chen et al. (2013a) has parallelized FITC,
+FIC, PITC, and PIC to be run on multiple machines. The
+recent work of Low et al. (2015) has produced a spectrum
+of SGPR models with PIC and FGPR at the two extremes
+that are also amenable to parallelization on multiple machines. Ideally, these parallel SGPR models can reduce the
+incurred time of their centralized counterparts by a factor
+close to the number of machines. In practice, since the
+number of machines is limited due to budget constraints,
+their incurred time will still grow with an increasing size
+of data. Like their centralized counterparts, they can be
+trained using all the data.
+A more affordable alternative is to instead train a SGPR
+model in an anytime fashion with a small, randomly sampled subset of the data at each iteration, which requires
+only a single machine. To the best of our knowledge, the
+
+A Unifying Framework of Anytime Sparse Gaussian Process Regression Models
+
+only notable anytime SGPR model (Hensman et al., 2013)
+exploits a result of Titsias (2009) that DTC can alternatively be obtained using variational inference by minimizing the Kullback-Leibler (KL) distance between the variational approximation and the GP posterior distribution of
+some latent variables given the data, from which a stochastic natural gradient ascent (SNGA) method can be derived
+to achieve an asymptotic convergence of its predictive performance to that of DTC while incurring constant time per
+iteration. This anytime variant of DTC promises a huge
+speedup if the number of sampled subsets of data needed
+for convergence is much smaller than the total number of
+possible disjoint subsets that can be formed and sampled
+from all the data. But, it can be observed in our experiments
+(Section 5) that DTC often does not predict as well as the
+other SGPR models (except SoR) encompassed by the unifying view of Quiñonero-Candela & Rasmussen (2005) because it imposes the most restrictive structural assumption
+(Snelson, 2007). This motivates us to consider the possibility of constructing an anytime variant of any SGPR model
+of our choice whose derived SNGA method can achieve
+an asymptotic convergence of its predictive performance to
+that of the chosen SGPR model while preserving constant
+time per iteration. However, no alternative formulation
+based on variational inference exists for any SGPR model
+other than DTC in order to derive such a SNGA method.
+To address the above challenge, this paper presents a novel
+unifying framework of anytime SGPR models that can produce good predictive performance fast and improve their
+predictive performance over time. Our proposed unifying
+framework, perhaps surprisingly, reverses the variational
+inference procedure to theoretically construct a non-trivial,
+concave functional (i.e., of distributions) that is maximized
+at the predictive distribution of any SGPR model of our
+choice (Section 3). Consequently, a SNGA method can
+be derived that involves iteratively following the stochastic
+natural gradient of the functional to improve its estimate of
+the predictive distribution of the chosen SGPR model and
+is guaranteed to achieve asymptotic convergence to it. Interestingly, we show that if the predictive distribution of the
+chosen SGPR model satisfies certain decomposability conditions (e.g., DTC, FITC, PIC), then the stochastic natural
+gradient is an unbiased estimator of the exact natural gradient and can be computed in constant time (i.e., independent
+of data size) at each iteration (Section 4). We empirically
+evaluate the trade-off between the predictive performance
+vs. time efficiency of the anytime SGPR models spanned
+by our unifying framework (i.e., including state-of-the-art
+anytime variant of DTC (Hensman et al., 2013)) on two
+real-world million-sized datasets (Section 5).
+
+2. Background and Notations
+Full-Rank Gaussian Process Regression (FGPR). Let X
+
+be a set representing the input domain such that each ddimensional input feature vector x 2 X is associated with
+a latent output variable fx . Let {fx }x2X denote a Gaussian process (GP), that is, every finite subset of {fx }x2X
+follows a multivariate Gaussian distribution. Then, the GP
+is fully specified by its prior mean E[fx ], which we assume to be zero for notational simplicity, and covariance
+kxx0 , cov[fx , fx0 ] for all x, x0 2 X . Given a column vector yD , (yx0 )>
+x0 2D of noisy observed outputs
+yx0 , fx0 + " for some set D ⇢ X of training inputs
+where " ⇠ N (0, n2 ) and n2 is the noise variance, a FGPR
+model can perform probabilistic regression by providing a
+GP predictive distribution p(fx |yD ) = N (KxD (KDD +
+2
+1
+yD , kxx KxD (KDD + n2 I) 1 KDx ) of the lan I)
+tent output fx for any test input x 2 X where KxD ,
+>
+(kxx0 )x0 2D , KDD , (kx0 x00 )x0 ,x00 2D , and KDx , KxD
+.
+Computing the GP predictive distribution incurs O(|D|3 )
+time due to inversion of KDD , hence causing the FGPR
+model to scale poorly in the size |D| of data.
+
+Sparse Gaussian Process Regression (SGPR). To improve the scalability of the FGPR model, the SGPR models
+encompassed by the unifying view of Quiñonero-Candela
+& Rasmussen (2005) exploit a vector fU , (fx0 )>
+x0 2U of
+|U| inducing output variables for some small set U ⇢ X
+of inducing inputs (i.e., |U| ⌧ |D|) for approximating
+the GP predictive distribution p(fx |yD ). Specifically, they
+share a similar structural assumption (Snelson & Ghahramani, 2007) that the joint distribution of fx and fD ,
+(fx0 )>
+x0 2D conditioned on fU factorizes across a pre-defined
+partition of the input domain X into P disjoint subsets
+X1 , . . . , XP That is, supposing x 2 XP ,
+P
+Y
+p(fx , fD | fU ) = p(fx | fDP , fU )
+p(fDi | fU ) (1)
+i=1
+
+where fDi , (fx0 )>
+x0 2Di denotes a column vector of latent
+outputs for the disjoint subset Di , Xi \ D ⇢ D of training inputs for i = 1, . . . , P . Using (1), the GP predictive
+distribution p(fx |yD ) reduces to
+Z
+p(fx |yD ) =
+p(fx |yDP , fU ) p(fU |yD ) dfU
+(2)
+'
+
+Z
+
+q ⇤ (fx |yDP , fU ) q ⇤ (fU ) dfU
+
+(3)
+
+where yDP , (yx0 )>
+x0 2DP is a vector of noisy observed
+outputs for the subset DP of training inputs, derivation
+of (2) is in Appendix C.1, and p(fx |yDP , fU ) and p(fU |yD )
+are, respectively, approximated by q ⇤ (fx |yDP , fU ) and
+q ⇤ (fU ) in (3), as discussed in Remarks 1 and 2 below.
+Remark 1. PIC sets q ⇤ (fx |yDP , fU ) as the exact test conditional p(fx |yDP , fU ). The other SGPR models have additionally assumed conditional independence of fx and fDP
+given fU , thus resulting in p(fx |yDP , fU ) = p(fx |fU ) and
+q ⇤ (fx |yDP , fU ) , p(fx |fU ) (e.g., see eq. 5 in (Titsias,
+
+A Unifying Framework of Anytime Sparse Gaussian Process Regression Models
+
+2009) for the case of DTC). Then, q ⇤ (fx |yDP , fU ) can be
+computed in O(|U|3 ) time and space (i.e., |DP | = O(|U|)
+for the case of PIC), as shown in Appendix D.4.
+Remark 2. The work of Titsias (2009) has approximated
+p(fU |yD ) with a choice of q ⇤ (fU ) whose resulting predictive distribution (3) coincides with that of DTC. Interestingly, other choices of q ⇤ (fU ) can be derived to induce the
+predictive distributions (3) of the other SGPR models and
+computed in O(|D||U|2 ) time, as shown in Appendix D.1.
+
+Instead of computing q ⇤ (fU ) directly that becomes prohibitively expensive (i.e., O(|D||U|2 ) time) for massive
+datasets, we will derive a stochastic natural gradient ascent
+method that is guaranteed to achieve asymptotic convergence to q ⇤ (fU ) of any SGPR model of our choice while
+incurring only O(|U|3 ) time per iteration (Section 4), thus
+producing an anytime variant of the chosen SGPR model.
+Variational Inference for DTC. Variational inference can
+be used to derive q ⇤ (fU ) of DTC as follows: A variational
+approximation to the posterior distribution of some latent
+output variables (e.g., p(fD , fU |yD )) can be derived analytically by minimizing their KL distance, provided that it
+factorizes in some way or has some parametric form that
+is inexpensive to evaluate (Bishop, 2006). The work of
+Titsias (2009) parameterizes the variational approximation
+q(fD , fU ) to the GP posterior distribution p(fD , fU |yD ) by
+q(fD , fU )
+
+,
+
+p(fD | fU ) q(fU )
+
+(4)
+
+where p(fD |fU ) is the exact training conditional (8) and
+q(fU ) , N (µ, ⌃). The result below reveals how µ and ⌃,
+which depend on training data (D, yD ), can be selected to
+minimize the KL distance DKL (q(fD , fU )kp(fD , fU |yD )):
+Lemma 1 For any PDF q(fD , fU ) and p(fD , fU , yD ),
+log p(yD )
+
+= L(q) + DKL (q(fD , fU ) k p(fD , fU | yD ))
+
+where the functional L(q) is defined as
+✓
+◆
+Z
+p(fD , fU , yD )
+dfD dfU . (5)
+L(q) ,
+q(fD , fU ) log
+q(fD , fU )
+
+Its proof is in Appendix C.2. Lemma 1 implies that
+minimizing DKL (q(fD , fU )kp(fD , fU |yD )) is equivalent to
+maximizing L(q) since p(yD ) is constant with respect to
+q(fD , fU ). Using the parameterization in (4), L(q) becomes
+a concave function in µ and ⌃ that is maximized when its
+gradient is zero. So, q(fU ) , N (µ, ⌃) can be optimized by
+solving for µ and ⌃ such that @L/@µ = 0 and @L/@⌃ = 0.
+Remark 1. From Lemma 1, since DKL (.k.) is non-negative,
+log p(yD )
+L(q), which recovers the variational lower
+bound of Titsias (2009) by setting p(fD , fU , yD ) as the GP
+joint distribution.
+Remark 2. The work of Titsias (2009) is originally intended
+to jointly optimize q(fU ), inducing inputs U , and hyperpa-
+
+rameters of k(., .). In the context of our work here, by assuming U and the hyperparameters to be given, the optimal
+q(fU ) ⌘ q ⇤ (fU ) induces the predictive distribution (3) of
+DTC when q ⇤ (fx |yDP , fU ) , p(fx |fU ) (Titsias, 2009).
+
+3. Reverse Variational Inference
+This section introduces a novel, interesting use of variational inference, which we term reverse variational inference, to theoretically construct a concave, differential functional L(q) that is maximized at q(fU ) ⌘ q ⇤ (fU ) of any
+SGPR model of our choice; we call this requirement R1.
+The functional L(q) allows us to derive a stochastic natural gradient ascent (SNGA) method (Section 4) that takes
+small, iterative steps in the direction of the stochastic natural gradient of L(q) to improve its estimate q(fU ) of q ⇤ (fU )
+and is guaranteed to achieve asymptotic convergence of
+q(fU ) to q ⇤ (fU ) if the step sizes are scheduled appropriately
+(Robbins & Monro, 1951). If the stochastic natural gradient of L(q) can be computed in constant time (i.e., independent of data size |D|) and we call this requirement R2,
+then such a SNGA method is desirable in practice due to
+its anytime behavior of improving the estimation of q ⇤ (fU )
+over time. In Section 4, we will establish sufficient conditions for q ⇤ (fU ) to satisfy R2, thus entailing a unifying
+framework of anytime SGPR models.
+Constructing L(q) to Satisfy R1. Let q(fD , fU ) be factorized according to (4) and q ⇤ (fU ) , N (µ⇤ , ⌃⇤ ) where
+µ⇤ and ⌃⇤ depend on training data (D, yD ). Our key
+idea is to derive a joint distribution p(fD , fU , yD ) such
+that L(q) is maximized at q(fU ) ⌘ q ⇤ (fU ) of any SGPR
+model of our choice, which remains largely unexplored except for DTC: A result of Titsias (2009) has established
+that q ⇤ (fU ) of DTC (Appendix D.1.3) maximizes L(q)
+when p(fD , fU , yD ) coincides with the GP joint distribution, hence satisfying R1 for DTC only. Such a functional L(q) is then shown by Hensman et al. (2013) to
+satisfy R2 and can consequently be exploited for deriving
+a SNGA method to produce an anytime variant of DTC.
+However, this work neither extends nor discusses how L(q)
+can be derived for other choices of q ⇤ (fU ) and the conditions under which they will satisfy R1 and R2. We will
+address both these issues in this section and the next, respectively. In addition, the predictive performance of their
+SNGA method is severely limited by the highly restrictive
+structural assumption of DTC. Finally, their anytime variant of DTC turns out to be a special case spanned by our
+unifying framework of anytime SGPR models (Section 4).
+For the rest of this section, we will first evaluate L(q)
+to a concave function in µ and ⌃ (i.e., Theorems 1, 2,
+and 3) subject to our factorization of q(fD , fU ) in (4) and
+p(fD , fU , yD ) in (10). Then, we will show how the parameters defining p(fD , fU , yD ) can be appropriately selected such that the induced L(q) (5) is maximized at
+
+A Unifying Framework of Anytime Sparse Gaussian Process Regression Models
+
+q ⇤ (fU ) , N (µ⇤ , ⌃⇤ ) of our choice (i.e., Theorem 4).
+Theorem 1 Let q(fD |fU ) , q(fD , fU )/q(fU ). Then,
+Z
+L(q) =
+q(fU ) LU (q) dfU DKL (q(fU ) k p(fU ))
+where the functional LU (q) is defined as
+Z
+p(fD , yD | fU )
+LU (q) ,
+q(fD | fU ) log
+dfD .
+q(fD | fU )
+
+Its proof is in Appendix B.3.
+
+(6)
+
+Remark. (12) and (13) define the space of feasible pairs
+(⌫, ⇤) guaranteeing that L(q) is maximized at (µ, ⌃) =
+(µ⇤ , ⌃⇤ ). Interestingly, it is not necessary to explicitly
+solve for (⌫, ⇤) in order to construct L(q) that is maximized
+at q(fU ) ⌘ q ⇤ (fU ), as shown in (34) in Appendix B.3.
+
+(7)
+
+4. Anytime Sparse GP Regression Models
+
+Its proof is in Appendix C.3. The parameterization of
+q(fU ) , N (µ, ⌃) and factorization of q(fD , fU ) using (4)
+entail q(fD |fU ) being set as the exact training conditional:
+q(fD |fU ) , p(fD | fU ) = N (PDU fU , KDD
+
+QDD ) (8)
+
+where PDU ,
+and QDD , KDU KU U1 KU D .
+Using (8), LU (q) is reduced to a quadratic function of fU :
+KDU KU U1
+
+Theorem 2 By substituting (8) into LU (q) (7),
+1 > >
+1
+>
+LU (q) =
+fU PDU PDU fU + 2 fU> PDU
+yD + C (9)
+2
+2 n
+n
+where the constant C absorbs all terms independent of fU .
+Its proof is in Appendix B.1. Then, we factorize
+p(fD , fU , yD ) , p(yD | fD ) p(fD | fU ) p(fU )
+
+(10)
+
+where p(yD |fD ) = N (fD ,
+p(fD |fU ) is the exact
+training conditional (8), and we let p(fU ) , N (⌫, ⇤ 1 )
+(instead of defining p(fU ) as a GP prior by Titsias (2009)
+that makes p(fD , fU , yD ) a GP joint distribution) where ⇤
+denotes a precision matrix. Then, by applying Theorems 1
+and 2, L(q) becomes a concave function in both µ and ⌃:
+2
+n I),
+
+Theorem 3 By substituting q(fU ) , N (µ, ⌃), p(fU ) ,
+N (⌫, ⇤ 1 ), and LU (q) (9) into L(q) (6),
+1 >
+µ µ
+2
+µ> (1/
+
+L(q) =
+
+1
+1
+tr( ⌃) + log |⌃| +
+2
+2
+2
+>
+0
+n )PDU yD + ⇤⌫ + C
+
+(11)
+
+>
+where
+, (1/ n2 )PDU
+PDU + ⇤ and the constant C 0
+absorbs all terms independent of µ and ⌃.
+
+Its proof is in Appendix B.2. Using Theorem 3, the conditions for the parameters ⌫ and ⇤ defining p(fU ) (or, equivalently, p(fD , fU , yD )) can be determined such that L(q)
+is maximized at q(fU ) ⌘ q ⇤ (fU ) by making its derivatives
+with respect to µ and ⌃ go to zero at (µ, ⌃) = (µ⇤ , ⌃⇤ ):
+Theorem 4 If ⌫ and ⇤ satisfy the following conditions:
+✓
+◆
+1 >
+1 >
+⇤⌫ + 2 PDU yD =
+P P + ⇤ µ⇤
+(12)
+2 DU DU
+n
+
+and ⇤ = ⌃
+
+n
+
+⇤ 1
+
+then L(q) is maximized at q(fU )
+
+1
+
+P> P
+2 DU DU
+n
+⌘ q ⇤ (fU ).
+
+,
+
+(13)
+
+Using Theorem 4, a gradient ascent method that is guaranteed to achieve asymptotic convergence of (µ, ⌃) to
+(µ⇤ , ⌃⇤ ) can now be derived. Specifically, it starts with
+randomly initialized (µ, ⌃) = (µ0 , ⌃0 ) and iterates the following gradient ascent update until convergence:
+@L t t
+@L t t
+µt+1 = µt + ⇢t
+(µ , ⌃ ), ⌃t+1 = ⌃t + ⇢t
+(µ , ⌃ )
+@µ
+@⌃
+(14)
+@L
+t
+t
+t
+t
+where ⇢t is the step size and @L
+@µ (µ , ⌃ ) and @⌃ (µ , ⌃ )
+denote, respectively, @L/@µ and @L/@⌃ (i.e., see (35) and
+(36) in Appendix B.3 for their expressions) being evaluated
+at (µ, ⌃) =P(µt , ⌃t ). This method
+Pis guaranteed to converge if (a) t ⇢t = +1 and (b) t ⇢2t < +1, which is
+a well-known result in optimization. For example, one possible schedule is ⇢t = ⇢0 /(1 + ⌧ ⇢0 t) where ⌧ , , and ⇢0
+are determined empirically. However, evaluating the exact
+gradient (@L/@µ, @L/@⌃) requires computing q ⇤ (fU ) directly that incurs O(|D||U|2 ) time (Appendix D.1), which
+is prohibitively expensive for massive datasets.
+Stochastic Gradient Ascent (SGA). To sidestep the above
+scalability issue, we adopt the stochastic gradient ascent (SGA) method (Robbins & Monro, 1951) that replaces the exact gradient in (14) with its stochastic gradient
+b
+b
+(@ L/@µ,
+@ L/@⌃).
+The key idea is to iteratively compute
+b
+b
+(@ L/@µ, @ L/@⌃) in an efficient manner by randomly sampling a small block of data of size |U| whose incurred time
+per iteration is independent of the data size |D|. We will
+prove in Theorem 5 later that such a stochastic gradient is
+an unbiased estimator of the exact gradient. As a result,
+(14) is also guaranteed to converge using the above schedb
+b
+ule of {⇢t }t . To derive (@ L/@µ,
+@ L/@⌃),
+the following
+decomposability conditions for (µ⇤ , ⌃⇤ ) are necessary:
+Decomposability Conditions. Let F 0 (U ) and G0 (U )
+(F (U , yDi ) and G(U , yDi )) denote arbitrary functions
+depending on U (U and (Di , yDi )) only. The decomposability conditions for (µ⇤ , ⌃⇤ ) are
+P
+X
+(15)
+⌃⇤ 1 = F 0 (U ) +
+F (U , yDi ) ,
+i=1
+
+⌃⇤
+
+1 ⇤
+
+µ
+
+= G0 (U ) +
+
+P
+X
+i=1
+
+G(U , yDi ) .
+
+(16)
+
+Remark 1. Though (15) and (16) may appear rather awkward when viewed using the moment parameterization
+
+A Unifying Framework of Anytime Sparse Gaussian Process Regression Models
+
+q ⇤ (fU ) , N (µ⇤ , ⌃⇤ ), they can alternatively be perceived
+as simple additive decomposability of the natural parameters ✓1 , ⌃⇤ 1 µ⇤ and ✓2 , (1/2)⌃⇤ 1 , which define
+the canonical parameterization of q ⇤ (fU ) (Appendix E).
+Remark 2. Interestingly, this canonical view reveals a systematic way to construct new SGPR models from existing
+⇤
+ones that satisfy (15) and (16): Given a set {qm
+(fU )}M
+m=1
+of M SGPR models specified by their respective canonical
+parameterizations {(✓1,m , ✓2,m )}M
+m=1 satisfying (15) and
+(16), if they share the same test conditional q ⇤ (fx |yDP , fU )
+in (3), then any new SGPR model constructed with ✓b1 ,
+PM
+PM
+M
+b
+m=1 ↵m ✓1,m and ✓2 ,
+m=1 ↵m ✓2,m (i.e., {↵m }m=1
+is a set of linear coefficients) also satisfies (15) and (16).
+
+In practice, the decomposability conditions (15) and (16)
+are satisfied by many SGPR models that share a similar structural assumption of conditional independence
+in (1) such as SoR, DTC, FITC, FIC, PITC, and PIC.
+P
+For interested readers, {F (U , yDi )}P
+i=1 , {G(U , yDi )}i=1 ,
+0
+0
+F (U ), and G (U ) of these SGPR models are derived
+in Appendix D.2.
+If our choice of (µ⇤ , ⌃⇤ ) (i.e.,
+⇤
+q (fU )) satisfies (15) and (16), then the stochastic gradib
+b
+ent (@ L/@µ,
+@ L/@⌃)
+is an unbiased estimator of the exact
+gradient (@L/@µ, @L/@⌃):
+
+the direction of the steepest ascent when the space of its
+parameters (e.g., (µ, ⌃)) is Euclidean (Amari, 1998), the
+SGA update (14) has implicitly defined the parameter space
+of q(fU ) using the Euclidean distance between two candidate parameters, which unfortunately appears to be a poor
+dissimilarity measure between their corresponding distributions (Hoffman et al., 2013). To capture a more meaningful notion of dissimilarity, the parameter space of q(fU )
+is redefined using the symmetrized KL distance, which is a
+natural dissimilarity measure between two probability distributions (Hoffman et al., 2013). This motivates the use
+of the natural gradient of L(q) in the Euclidean space that
+can be equivalently considered its standard gradient in the
+redefined parameter space implementing the symmetrized
+KL distance (Amari, 1998). Such a natural gradient of L(q)
+will be used to derive the stochastic natural gradient ascent
+(SNGA) method. Intuitively, SNGA can be regarded as another version of SGA that operates in a different parameter
+space defined with a different distance metric. Therefore,
+both converge to the same optimal parameters, although
+SNGA is empirically demonstrated to converge faster than
+SGA (Amari, 1998) when an objective function L(q) is optimized with respect to a parameterized distribution q(fU ).
+This is expected since the symmetrized KL distance is more
+accurate than the Euclidean distance in measuring the dissimilarity between parameterized distributions.
+
+Theorem 5 Let S be a set of i.i.d. samples (i.e., |S| > 0)
+drawn from a uniform distribution over {1, 2, . . . , P } and
+To derive the natural gradient of L(q), the moment pab
+P X
+@L
+, G0 (U ) F 0 (U )µ +
+G(U , yDs ) F (U , yDs )µ , rameterization of q(fU ) , N (µ, ⌃) is first replaced by its
+@µ
+|S|
+canonical counterpart q(fU |✓):
+s2S
+(17)
+b
+@L
+1
+1 0
+P X
+q(fU | ✓) , N (µ, ⌃) = h(fU ) exp(✓> T(fU )
+A(✓))
+, ⌃ 1
+F (U )
+F (U , yDs ) .
+(18)
+@⌃
+2
+2
+2|S|
+s2S
+
+b
+If (µ⇤ , ⌃⇤ ) satisfies (15) and (16), then E[@ L/@µ]
+=
+b
+@L/@µ and E[@ L/@⌃] = @L/@⌃.
+Its proof is in Appendix B.4.
+
+Remark. By assuming |Di | = O(|U|) for i = 1, . . . , P ,
+b
+b
+computing stochastic gradient (@ L/@µ,
+@ L/@⌃)
+(i.e., (17)
+and (18)) incurs time independent of data size |D|, in particular, O(|S||U|3 ) time for SoR, DTC, FITC, FIC, PITC,
+and PIC (Appendix D.3) that reduces to O(|U|3 ) time by
+setting |S| = 1 in our experiments. Also, since (µ, ⌃) (i.e.,
+q(fU )) is readily available from the SGA update (14), the
+prediction time (i.e., time incurred to analytically integrate
+q ⇤ (fx |yDP , fU ) with q ⇤ (fU ) ⌘ q(fU ) in (3)) is independent
+of |D| (Appendix D.4). So, if the number t of iterations
+of SGA update is much smaller than min(|D|/|U|, P ),
+then the anytime variants spanned by our unifying framework achieve a huge computational gain (i.e., O(t|U|3 )
+time) over their corresponding SGPR models that incur
+O(|D||U|2 ) time (Appendix D.1).
+Stochastic Natural Gradient Ascent (SNGA). As the
+standard gradient of a function (e.g., L(q)) only points in
+
+where T(fU ) , fU ; vec(fU fU> ) , h(fU ) , (2⇡) |U |/2 ,
+A(✓) is simply a normalizing function guaranteeing that
+q(fU |✓) integrates to unity, and the natural parameters ✓ ,
+(✓1 ; vec(✓2 )) where ✓1 = ⌃ 1 µ and ✓2 = (1/2)⌃ 1 . In
+particular, the metric distance defining the parameter space
+is given by the Riemannian metric tensor H(✓) (Amari,
+1998) that corresponds to the identity matrix when the Euclidean metric is used. Otherwise, when the parameter
+space implements the symmetrized KL distance, the work
+of Hoffman et al. (2013) has shown that H(✓) is defined by
+the Fisher information matrix (Amari, 1998):
+H(✓) ,
+
+EfU |✓
+
+
+
+@ 2 log q(fU | ✓)
+@✓@✓>
+
+=
+
+@ 2 A(✓)
+.
+@✓@✓>
+
+(19)
+
+The last equality is formally verified in Appendix E.2.
+Let @L/@✓ be the standard gradient of L(q) with respect
+to ✓. Then, its natural gradient is defined as @L/@✓ ,
+H(✓) 1 @L/@✓. To express @L/@✓ in terms of µ and ⌃,
+let ⌘ , [⌘1 ; vec(⌘2 )] where ⌘1 , µ and ⌘2 , µµ> + ⌃. It
+can be verified that E[T(fU )] = ⌘ (Appendix E.1), which
+implies @⌘/@✓ = H(✓) (Appendix E.3). Using this result,
+
+A Unifying Framework of Anytime Sparse Gaussian Process Regression Models
+
+@L
+, H(✓)
+@✓
+
+1 @L
+
+@✓
+
+= H(✓)
+
+1 @⌘
+
+@L
+@L
+=
+. (20)
+@✓ @⌘
+@⌘
+
+The last equality is due to @⌘/@✓ = H(✓). So, the natural
+gradient can be evaluated by taking the derivative of L(q)
+with respect to ⌘ (20). To simplify the derivation, the partial derivatives of L(q) are taken with respect to ⌘1 and ⌘2
+instead of differentiating it with ⌘ directly. To achieve this,
+L(q) is first represented as a function of ⌘1 and ⌘2 :
+✓
+◆
+1
+1 >
+>
+>
+L(q) =
+log |⌘2 ⌘1 ⌘1 | + ⌘1
+P y + ⇤⌫
+2 DU D
+2
+n
+1 >
+1
+⌘ ⌘1
+tr( ⌘2
+⌘1 ⌘1> ) + C 0
+2 1
+2
+which can be straightforwardly verified using (11) and ⌘’s
+definition. The natural gradient of L(q) is then given by
+@L
+1 >
+= (⌘2 ⌘1 ⌘1> ) 1 ⌘1 + 2 PDU
+yD + ⇤⌫ , (21)
+@⌘1
+n
+⌘
+@L
+1⇣
+1
+=
+⌘2 ⌘1 ⌘1>
+.
+(22)
+@⌘2
+2
+Finally, note that if (⌫, ⇤) is chosen to satisfy (12) and (13)
+to guarantee that L(q) is maximized at q(fU ) ⌘ q ⇤ (fU )
+>
+(Theorem 4), then = ⌃⇤ 1 and (1/ n2 )PDU
+yD + ⇤⌫ =
+⇤ 1 ⇤
+⌃ µ . In addition, by definition, ✓1 = (⌘2 ⌘1 ⌘1> ) 1 ⌘1
+and ✓2 = (1/2)(⌘2 ⌘1 ⌘1> ) 1 . Hence, (21) and (22) can
+be rewritten as
+@L
+1 ⇤ 1
+@L
+= ⌃⇤ 1 µ⇤ ✓1 and
+= ✓2
+⌃
+. (23)
+@⌘1
+@⌘2
+2
+So, if (µ⇤ , ⌃⇤ ) satisfies the decomposability conditions
+(15) and (16), then it is possible to derive a stochastic natural gradient that is an unbiased estimator of the exact natural gradient (23), as formalized in the result below:
+Theorem 6 Let S be a set of i.i.d. samples (i.e., |S| > 0)
+drawn from a uniform distribution over {1, 2, . . . , P } and
+b
+@L
+P X
+, G0 (U ) ✓1 +
+G(U , yDs ) ,
+(24)
+@⌘1
+|S|
+s2S
+b
+P X
+@L
+1 0
+, ✓2
+F (U )
+F (U , yDs ) .
+(25)
+@⌘2
+2
+2|S|
+s2S
+
+b
+If (µ⇤ , ⌃⇤ ) satisfies (15) and (16), then E[@ L/@⌘
+1] =
+b
+@L/@⌘1 and E[@ L/@⌘2 ] = @L/@⌘2 .
+
+Its proof is in Appendix B.5. The gradient ascent update in
+(14) can now be revised to
+b
+b
+@L
+@L
+✓1t+1 = ✓1t + ⇢t
+(✓1t , ✓2t ), ✓2t+1 = ✓2t + ⇢t
+(✓t , ✓t )
+@⌘1
+@⌘2 1 2
+(26)
+such that the parameters (µ, ⌃) of q(fU ) can be recovered from its natural parameters ✓ by setting (µt , ⌃t ) =
+( (1/2)(✓2t ) 1 ✓1t , (1/2)(✓2t ) 1 ). Therefore, if q ⇤ (fU ) ,
+N (µ⇤ , ⌃⇤ ) is selected as that of DTC, then (26) recovers
+the SNGA method of Hensman et al. (2013) to produce an
+anytime variant of DTC, which is a special case spanned by
+our unifying framework of anytime SGPR models.
+
+5. Experiments and Discussion
+This section empirically evaluates the predictive performance and time efficiency of anytime SGPR models1 such
+as the anytime variants of PIC and FITC, which we, respectively, call PIC+ and FITC+, and the state-of-the-art
+anytime variant of DTC (Hensman et al., 2013), which we
+name DTC+2 , spanned by our unifying framework on two
+real-world datasets of a few million in size:
+(a) The EMULATE mean sea level pressure (EMSLP)
+dataset (Ansell et al., 2006) of size 1278250 spans a 5 lat.lon. grid bounded within lat. 25-70N and lon. 70W-50E
+from 1900 to 2003. Each input denotes a 6-dimensional
+feature vector of latitude, longitude, year, month, day, and
+incremental day count (starting from 0 on first day). The
+output is the mean sea level pressure (Pa).
+(b) The AIRLINE dataset contains 2055733 records of information about every commercial flight in the USA from
+January to April 2008. The input denotes a 8-dimensional
+feature vector of the age of the aircraft (i.e., no. of years in
+service), travel distance (km), airtime, departure and arrival
+time (min.) as well as day of the week, day of the month,
+and month. The output is the delay time (min.) of the flight.
+Both datasets are modeled using GPs whose prior covariance is defined by the squared exponential covariance function kxx0 , s2 exp( 0.5(x x0 )> ⌥ 2 (x x0 )) with a
+diagonal matrix ⌥ of d length-scale components and signal variance s2 being its defining hyperparameters. These
+hyperparameters together with the noise variance n2 are
+learned by generalizing the distributed, variational DTClike learning framework of Gal et al. (2014) to account for
+the more relaxed structural assumptions of PIC and FITC.
+Such a generalization can then handle massive datasets by
+distributing the computational load of learning the hyperparameters of PIC and FITC among parallel computing
+nodes; its details are deferred to a separate paper since
+the focus of our work here is on scaling up the existing
+SGPR models while assuming that the hyperparameters are
+learned in advance. On a separate note, learning these hyperparameters in an anytime fashion is highly non-trivial
+and beyond the scope of this paper, which we intend to
+pursue in the future as a continuation of our current work.
+For each dataset, 5% is randomly selected and set aside
+as test data S. The remaining data (i.e., training data)
+is partitioned into P blocks using k-means (i.e., k =
+P ). All experiments are run on a Linux system with
+Intelr Xeonr E5-2670 at 2.6GHz with 96 GB memory.
+1
+In the case of performing multiple predictions for single test
+inputs, the predictive means of FITC and DTC coincide with that
+of FIC and SoR, respectively.
+2
+DTC+ coincides with stochastic variational inference for
+GPs in (Hensman et al., 2013), as discussed in Section 3.
+
+A Unifying Framework of Anytime Sparse Gaussian Process Regression Models
+3000
+
+1
+4
+
+Total incurred time (sec.)
+
+10
+
+0.9
+
+PIC+
+PIC
+
+RMSE (Pa)
+
+0.8
+0.7
+
+2000
+
+PE
+
+RMSE (Pa)
+
+2500
+
+1500
+
+0.6
+0.5
+
+PIC+
+
+PIC+
+DTC+
+FITC+
+
+0.4
+
+1000
+
+30
+
+35
+
+40
+
+45
+
+0.2
+0
+
+50
+
+10
+
+30
+
+40
+
+0.8
+
+1500
+
+0.7
+0.6
+0.5
+
+FITC+
+
+1000
+0.4
+
+500
+25
+
+30
+
+35
+
+40
+
+45
+
+0
+
+50
+
+10
+
+20
+
+30
+
+(d)
+
+1
+
+DTC+
+
+0.8
+
+4
+
+10
+
+DTC+
+DTC
+
+0.6
+
+PE
+
+RMSE (Pa)
+
+40
+
+TE
+
+No. t of iterations
+
+(c)
+
+0.4
+
+0.2
+
+3
+
+10
+
+0
+
+200
+
+400
+
+600
+
+800
+
+No. t of iterations
+
+(e)
+
+1000
+
+0
+0
+
+35
+
+40
+
+45
+
+50
+
+20
+
+30
+
+40
+
+50
+
+60
+
+70
+
+No. t of iterations
+
+80
+
+90
+
+100
+
+(b)
+
+Figure 2. Graphs of (a) RMSEs and (b) total incurred times of
+PIC+, FITC+, and DTC+ vs. number t of iterations with |U | =
+512 inducing outputs and P = 1000 blocks for EMSLP dataset.
+
+1
+
+FITC+
+FITC
+
+30
+
+(a)
+
+0.9
+
+2000
+
+25
+
+No. t of iterations
+
+(b)
+
+PE
+
+RMSE (Pa)
+
+20
+
+TE
+
+(a)
+
+2500
+
+PIC+
+DTC+
+FITC+
+
+10
+
+No. t of iterations
+3000
+
+1
+
+10
+
+3
+
+0.3
+
+500
+25
+
+2
+
+10
+
+10
+
+20
+
+30
+
+40
+
+TE
+
+(f)
+
+Figure 1. Graphs of RMSEs achieved by (a) PIC+, (c) FITC+,
+and (e) DTC+ vs. number t of iterations, and graphs of predictive
+efficiency (PE) vs. time efficiency (TE) showing the anytime efficiencies of (b) PIC+, (d) FITC+, and (f) DTC+ with |U | = 512
+inducing outputs and P = 1000 blocks for EMSLP dataset.
+
+Four performance metrics are used to evaluate the anytime
+mean square error (RMSE):
+p SGPR
+P models: (a) Root
+|S| 1 x2S (yx µx|D P
+)2 , (b) mean negative log probability (MNLP): 0.5|S| 1 x2S ((yx µx|D )2 / xx|D +
+log(2⇡ xx|D )), (c) incurred time, and (d) anytime efficiency demonstrating the trade-off between time efficiency
+(TE) vs. predictive efficiency (PE). Formally, TE (PE) is defined as the incurred time (RMSE) of the SGPR model divided by that of its anytime variant. Intuitively, increasing
+TE (i.e., by decreasing the number of iterations of SNGA
+update) reduces the incurred time of an anytime variant of
+the SGPR model at the cost of degrading its PE.
+EMSLP Dataset. Figs. 1 and 2 show results of RMSEs,
+incurred times, and anytime efficiencies of PIC+, FITC+,
+and DTC+ averaged over 5 random instances with varying
+number t of iterations. It can be observed from Figs. 1a, 1c,
+and 1e that the RMSEs of PIC+, FITC+, and DTC+ consistently converge to within 0.75% of that of PIC (RMSE
+of 762.263 Pa), FITC (RMSE of 870.857 Pa), and DTC
+(RMSE of 870.878 Pa), respectively. The results of their
+MNLPs show similar convergence behavior, as detailed in
+
+Appendix A. This corroborates our theoretical results in
+Section 4 that the anytime variants spanned by our unifying framework can achieve asymptotic convergence to the
+predictive distributions of their corresponding SGPR models. In particular, the RMSEs of PIC+ and FITC+ decrease quickly with an increasing number t of iterations
+of SNGA update and converge after 50 iterations, which
+demonstrate their scalability to massive datasets. In fact,
+during these first 50 iterations, the RMSEs achieved by
+PIC+ and FITC+ are significantly lower than that achieved
+by DTC+, as observed in Fig. 2a. On the other hand, the
+RMSE of DTC+ decreases more gradually and can only
+converge after 1000 iterations. This inferior predictive performance of DTC+ may be caused by its more restrictive
+structural assumption of deterministic relation between the
+training and inducing outputs (Appendix D.1), thus making
+it perform less robustly among heterogeneous datasets.
+It can also be observed from Fig. 2a that the superior
+predictive performance (i.e., lower RMSE) of PIC+ over
+FITC+ becomes more pronounced with an increasing
+number t of iterations, which is expected: PIC+ imposes
+a more relaxed structural assumption of conditional independence than FITC+. For example, unlike FITC+, PIC+
+does not assume conditional independence between the test
+and training outputs given the inducing outputs. Fig. 2b
+shows linear increases of total incurred time in the number
+t of iterations for PIC+, FITC+, and DTC+. Our experiments reveal that PIC+, FITC+, and DTC+ incur, respectively, an average of 1.53, 1.15, and 0.32 seconds per update iteration. So, PIC+ and FITC+ take ⇠76.5 and ⇠57.5
+seconds to converge after 50 iterations while DTC+ takes
+⇠320 seconds to converge after 1000 iterations.
+Figs. 1b, 1d, and 1f reveal how the predictive efficiencies
+of the anytime SGPR models can be traded off to improve
+their time efficiencies to meet the real-time requirement
+in time-critical applications. It can be observed that both
+PIC+ and FITC+ can achieve a speedup of 22-24 (i.e., TE
+= 25) while preserving 96% of the predictive efficiencies
+of PIC and FITC (i.e., PE = 0.95); in other words, the RMSEs achieved by PIC+ and FITC+ are only 1/0.95 ⇡ 1.05
+times larger than that achieved by PIC and FITC. On the
+
+A Unifying Framework of Anytime Sparse Gaussian Process Regression Models
+10
+
+RMSE (min.)
+
+PIC+
+
+0.8
+
+PIC+
+PIC
+0.6
+2
+
+10
+
+0.4
+
+Total incurred time (sec.)
+
+1
+
+PE
+
+RMSE (min.)
+
+2
+
+120
+
+3
+
+10
+
+100
+
+80
+
+PIC+
+DTC+
+FITC+
+
+60
+
+40
+
+PIC+
+DTC+
+FITC+
+
+1
+
+10
+
+0
+
+10
+
+0.2
+1
+
+10
+10
+
+20
+
+30
+
+40
+
+50
+
+0
+0
+
+60
+
+20
+10
+
+50
+
+No. t of iterations
+
+100
+
+150
+
+200
+
+250
+
+TE
+
+(a)
+
+40
+
+50
+
+60
+
+−1
+
+10
+
+10
+
+20
+
+FITC+
+
+0.8
+
+FITC+
+FITC
+
+30
+
+40
+
+No. t of iterations
+
+50
+
+60
+
+(b)
+
+Figure 4. Graphs of (a) RMSEs and (b) total incurred times of
+PIC+, FITC+, and DTC+ vs. number t of iterations with |U | =
+100 and P = 2000 for the AIRLINE dataset.
+
+0.6
+
+PE
+
+RMSE (min.)
+
+1
+
+2
+
+10
+
+0.4
+
+0.2
+1
+
+10
+10
+
+20
+
+30
+
+40
+
+50
+
+0
+0
+
+60
+
+50
+
+No. t of iterations
+
+100
+
+150
+
+200
+
+250
+
+TE
+
+(c)
+
+(d)
+
+3
+
+10
+
+1
+
+DTC+
+
+0.8
+
+DTC+
+DTC
+0.6
+
+PE
+
+RMSE (min.)
+
+30
+
+No. t of iterations
+
+(a)
+
+(b)
+
+3
+
+10
+
+20
+
+2
+
+10
+
+0.4
+
+0.2
+1
+
+10
+10
+
+20
+
+30
+
+40
+
+50
+
+No. t of iterations
+
+(e)
+
+60
+
+0
+0
+
+50
+
+100
+
+150
+
+200
+
+250
+
+TE
+
+(f)
+
+Figure 3. Graphs of RMSEs achieved by (a) PIC+, (c) FITC+,
+and (e) DTC+ vs. number t of iterations, and graphs of predictive
+efficiency (PE) vs. time efficiency (TE) showing the anytime efficiencies of (b) PIC+, (d) FITC+, and (f) DTC+ with |U | = 100
+inducing outputs and P = 2000 blocks for AIRLINE dataset.
+
+other hand, with a speedup of 22, DTC+ can only reach
+68% of the predictive efficiency of DTC.
+AIRLINE Dataset. Figs. 3 and 4 show results of RMSEs, incurred times, and anytime efficiencies of PIC+,
+FITC+, and DTC+ averaged over 5 random instances
+with varying number t of iterations. The observations
+are mostly similar to that of the EMSLP dataset: From
+Figs. 3a, 3c, and 3e, the RMSEs of PIC+, FITC+, and
+DTC+ converge to within 0.04% of that of PIC (RMSE of
+33.3515 min.), FITC (RMSE of 39.5302 min.), and DTC
+(RMSE of 39.5310 min.), respectively. The same observation can be made regarding the results of their MNLPs, as
+detailed in Appendix A. The RMSEs of PIC+, FITC+, and
+DTC+ decrease rapidly with an increasing number t of iterations and converge after 60 iterations. During these first
+60 iterations, the RMSE achieved by PIC+ is much lower
+than that achieved by FITC+ and DTC+, as observed in
+Fig. 4a; this was previously explained in the discussion on
+the experimental results for EMSLP dataset. Fig. 4b shows
+linear increases of total incurred time in the number t of
+
+iterations for PIC+, FITC+, and DTC+. Our experiments
+reveal that PIC+, FITC+, and DTC+ incur an average of
+0.97, 0.08, and 0.04 seconds per iteration of SNGA update. So, it takes less than 1 minute for PIC+, FITC+,
+and DTC+ to converge after 60 iterations. Figs. 3b, 3d,
+and 3f reveal that PIC+, FITC+, and DTC+ can achieve a
+speedup of 50 (i.e., TE = 50) while preserving almost 100%
+of the predictive efficiencies of PIC, FITC, and DTC (i.e.,
+PE = 1). But, as observed in Fig. 4a, PIC+ outperforms
+FITC+ and DTC+ by a huge margin; the same observation
+can be made for the EMSLP dataset (Fig. 2a).Hence, PIC+
+offers the best predictive performance, anytime efficiency,
+and robustness in both EMSLP and AIRLINE datasets.
+
+6. Conclusion and Future Work
+This paper describes a novel unifying framework of anytime SGPR models (e.g., PIC+, FITC+, DTC+) that can
+produce good predictive performance fast and trade off
+between predictive performance vs. time efficiency. After applying our reverse variational inference procedure, a
+stochastic natural gradient ascent method can be derived
+that is guaranteed to achieve asymptotic convergence to the
+predictive distribution of any SGPR model of our choice.
+We prove that if the predictive distribution of the chosen
+SGPR model satisfies certain decomposability conditions,
+then the stochastic natural gradient is an unbiased estimator
+of the exact natural gradient and can be computed in constant time at each iteration. Empirical evaluation on two
+real-world million-sized datasets show that PIC+ outperforms FITC+ and state-of-the-art DTC+ (Hensman et al.,
+2013) in terms of predictive performance and anytime efficiency. A limitation of our unifying framework is that
+though it can produce the anytime variants of many existing
+SGPR models (Quiñonero-Candela & Rasmussen, 2005),
+it does not cover some recent ones like (Lázaro-Gredilla
+et al., 2010; Low et al., 2015). So, in our future work, we
+will extend our framework to address this limitation as well
+as to learn the hyperparameters in an anytime fashion.
+
+A Unifying Framework of Anytime Sparse Gaussian Process Regression Models
+
+Acknowledgments. This research work was carried out
+at the NUS-ZJU Sensor-Enhanced Social Media (SeSaMe)
+Centre and supported by Singapore National Research
+Foundation under its International Research Centre @ Singapore Funding Initiative and administered by the Interactive Digital Media Programme Office.
+
+Hensman, J., Fusi, N., and Lawrence, N. D. Gaussian processes for big data. In Proc. UAI, pp. 282–290, 2013.
+
+References
+
+Hoang, T. N., Low, K. H., Jaillet, P., and Kankanhalli, M.
+Nonmyopic ✏-Bayes-optimal active learning of Gaussian
+processes. In Proc. ICML, pp. 739–747, 2014b.
+
+Amari, S. Natural gradient works efficiently in learning.
+Neural Computation, 10:251–276, 1998.
+Ansell et al., T. J. Daily mean sea level pressure reconstructions for the European-North Atlantic region for the
+period 1850-2003. J. Climate, 19(12):2717–2742, 2006.
+Bishop, C. M. Pattern Recognition and Machine Learning.
+Springer, 2006.
+Cao, N., Low, K. H., and Dolan, J. M. Multi-robot informative path planning for active sensing of environmental
+phenomena: A tale of two algorithms. In Proc. AAMAS,
+pp. 7–14, 2013.
+Chen, J., Low, K. H., Tan, C. K.-Y., Oran, A., Jaillet, P.,
+Dolan, J. M., and Sukhatme, G. S. Decentralized data
+fusion and active sensing with mobile sensors for modeling and predicting spatiotemporal traffic phenomena.
+In Proc. UAI, pp. 163–173, 2012.
+Chen, J., Cao, N., Low, K. H., Ouyang, R., Tan, C. K.-Y.,
+and Jaillet, P. Parallel Gaussian process regression with
+low-rank covariance matrix approximations. In Proc.
+UAI, pp. 152–161, 2013a.
+Chen, J., Low, K. H., and Tan, C. K.-Y. Gaussian processbased decentralized data fusion and active sensing for
+mobility-on-demand system. In Proc. RSS, 2013b.
+Chen, J., Low, K. H., Jaillet, P., and Yao, Y. Gaussian process decentralized data fusion and active sensing for spatiotemporal traffic modeling and prediction in mobilityon-demand systems. IEEE Transactions on Automation
+Science and Engineering, 2015.
+Dolan, J. M., Podnar, G., Stancliff, S., Low, K. H., Elfes,
+A., Higinbotham, J., Hosler, J. C., Moisan, T. A., and
+Moisan, J. Cooperative aquatic sensing using the telesupervised adaptive ocean sensor fleet. In Proc. SPIE
+Conference on Remote Sensing of the Ocean, Sea Ice,
+and Large Water Regions, volume 7473, 2009.
+Gal, Y., van der Wilk, M., and Rasmussen, C. E. Distributed variational inference in sparse Gaussian process
+regression and latent variable models. In Proc. NIPS,
+2014.
+
+Hoang, T. N., Low, K. H., Jaillet, P., and Kankanhalli,
+M. Active learning is planning: Nonmyopic ✏-Bayesoptimal active learning of Gaussian processes. In Proc.
+ECML/PKDD Nectar Track, pp. 494–498, 2014a.
+
+Hoffman, M. D., Blei, D. M., Wang, C., and Paisley, J.
+Stochastic variational inference. Journal of Machine
+Learning Research, pp. 1303–1347, 2013.
+Lázaro-Gredilla, M., Quiñonero-Candela, J., Rasmussen,
+C. E., and Figueiras-Vidal, A. R. Sparse spectrum Gaussian process regression. Journal of Machine Learning
+Research, pp. 1865–1881, 2010.
+Low, K. H., Dolan, J. M., and Khosla, P. Adaptive multirobot wide-area exploration and mapping. In Proc. AAMAS, pp. 23–30, 2008.
+Low, K. H., Dolan, J. M., and Khosla, P. Informationtheoretic approach to efficient adaptive path planning for
+mobile robotic environmental sensing. In Proc. ICAPS,
+pp. 233–240, 2009.
+Low, K. H., Dolan, J. M., and Khosla, P. Active Markov
+information-theoretic path planning for robotic environmental sensing. In Proc. AAMAS, pp. 753–760, 2011.
+Low, K. H., Chen, J., Dolan, J. M., Chien, S., and Thompson, D. R. Decentralized active robotic exploration and
+mapping for probabilistic field classification in environmental sensing. In Proc. AAMAS, pp. 105–112, 2012.
+Low, K. H., Chen, J., Hoang, T. N., Xu, N., and Jaillet,
+P. Recent advances in scaling up Gaussian process predictive models for large spatiotemporal data. In Proc.
+DyDESS, 2014a.
+Low, K. H., Xu, N., Chen, J., Lim, K. K., and Özgül, E. B.
+Generalized online sparse Gaussian processes with application to persistent mobile robot localization. In Proc.
+ECML/PKDD Nectar Track, pp. 499–503, 2014b.
+Low, K. H., Yu, J., Chen, J., and Jaillet, P. Parallel Gaussian
+process regression for big data: Low-rank representation
+meets Markov approximation. In Proc. AAAI, pp. 2821–
+2827, 2015.
+Ouyang, R., Low, K. H., Chen, J., and Jaillet, P. Multirobot active sensing of non-stationary Gaussian processbased environmental phenomena. In Proc. AAMAS, pp.
+573–580, 2014.
+
+A Unifying Framework of Anytime Sparse Gaussian Process Regression Models
+
+Podnar, G., Dolan, J. M., Low, K. H., and Elfes, A. Telesupervised remote surface water quality sensing. In Proc.
+IEEE Aerospace Conference, 2010.
+Quiñonero-Candela, J. and Rasmussen, C. E. A unifying
+view of sparse approximate Gaussian process regression.
+Journal of Machine Learning Research, 6:1939–1959,
+2005.
+Rasmussen, C. E. and Williams, C. K. I. Gaussian Processes for Machine Learning. MIT Press, 2006.
+Robbins, H. and Monro, S. A stochastic approximation
+method. Ann. Math. Statist., 22(3):400–407, 1951.
+Schwaighofer, A. and Tresp, V. Transductive and inductive
+methods for approximate Gaussian process regression.
+In Proc. NIPS, pp. 953–960, 2003.
+Seeger, M., Williams, C. K. I., and Lawrence, N. D. Fast
+forward selection to speed up sparse Gaussian process
+regression. In Proc. AISTATS, 2003.
+Smola, A. J. and Bartlett, P. L. Sparse greedy Gaussian
+process regression. In Proc. NIPS, pp. 619–625, 2001.
+Snelson, E. and Gharahmani, Z. Sparse Gaussian processes
+using pseudo-inputs. In Proc. NIPS, pp. 1259–1266,
+2005.
+Snelson, E. L. Flexible and efficient Gaussian process models for machine learning. Ph.D. Thesis, University College London, London, UK, 2007.
+Snelson, E. L. and Ghahramani, Z. Local and global sparse
+Gaussian process approximation. In Proc. AISTATS,
+2007.
+Titsias, M. K. Variational learning of inducing variables in
+sparse Gaussian processes. In Proc. AISTATS, pp. 567–
+574, 2009.
+Xu, N., Low, K. H., Chen, J., Lim, K. K., and Özgül, E. B.
+GP-Localize: Persistent mobile robot localization using
+online sparse Gaussian process observation model. In
+Proc. AAAI, pp. 2585–2592, 2014.
+Yu, J., Low, K. H., Oran, A., and Jaillet, P. Hierarchical Bayesian nonparametric approach to modeling and
+learning the wisdom of crowds of urban traffic route
+planning agents. In Proc. IAT, pp. 478–485, 2012.
+
+

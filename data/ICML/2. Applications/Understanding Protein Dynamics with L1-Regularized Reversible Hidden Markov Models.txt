@@ -1,0 +1,867 @@
+Understanding Protein Dynamics with
+L1 -Regularized Reversible Hidden Markov Models
+
+Robert T. McGibbon
+Department of Chemistry, Stanford University, Stanford CA 94305, USA
+
+RMCGIBBO @ STANFORD . EDU
+
+Bharath Ramsundar
+Department of Computer Science, Stanford University, Stanford CA 94305, USA
+
+RBHARATH @ STANFORD . EDU
+
+Mohammad M. Sultan
+Department of Chemistry, Stanford University, Stanford CA 94305, USA
+
+MSULTAN @ STANFORD . EDU
+
+Gert Kiss
+Department of Chemistry, Stanford University, Stanford CA 94305, USA
+
+GKISS @ STANFORD . EDU
+
+Vijay S. Pande
+Department of Chemistry, Stanford University, Stanford CA 94305, USA
+
+PANDE @ STANFORD . EDU
+
+Abstract
+We present a machine learning framework for
+modeling protein dynamics. Our approach uses
+L1 -regularized, reversible hidden Markov models to understand large protein datasets generated
+via molecular dynamics simulations. Our model
+is motivated by three design principles: (1) the
+requirement of massive scalability; (2) the need
+to adhere to relevant physical law; and (3) the
+necessity of providing accessible interpretations,
+critical for both cellular biology and rational drug
+design. We present an EM algorithm for learning
+and introduce a model selection criteria based on
+the physical notion of convergence in relaxation
+timescales. We contrast our model with standard methods in biophysics and demonstrate improved robustness. We implement our algorithm
+on GPUs and apply the method to two large protein simulation datasets generated respectively
+on the NCSA Bluewaters supercomputer and the
+Folding@Home distributed computing network.
+Our analysis identifies the conformational dynamics of the ubiquitin protein critical to cellular
+signaling, and elucidates the stepwise activation
+mechanism of the c-Src kinase protein.
+
+Proceedings of the 31 st International Conference on Machine
+Learning, Beijing, China, 2014. JMLR: W&CP volume 32. Copyright 2014 by the author(s).
+
+1. Introduction
+Protein folding and conformational change are grand challenge problems, relevant to a multitude of human diseases,
+including Alzheimer’s disease, Huntington’s disease and
+cancer. These problems entail the characterization of the
+process and pathways by which proteins fold to their energetically optimal configuration and the dynamics between
+multiple long-lived, or “metastable,” configurations on the
+potential energy surface. Proteins are biology’s molecular machines; a solution to the folding and conformational change problem would deepen our understanding of
+the mechanism by which microscopic information in the
+genome is manifested in the macroscopic phenotype of organisms. Furthermore, an understanding of the structure
+and dynamics of proteins is increasingly important for the
+rational design of targeted drugs (Wong & McCammon,
+2003).
+Molecular dynamics (MD) simulations provide a computational microscope by which protein dynamics can be studied with atomic resolution (Dill et al., 1995). These simulations entail the forward integration of Newton’s equations
+of motion on a classical potential energy surface. The potential energy functions in use, called forcefields, are semiemprical approximations to the true quantum mechanical
+Born-Oppenheimer surface, designed to reproduce experimental observables (Beauchamp et al., 2012). For moderately sized proteins, this computation can involve the propagation of more than a million physical degrees of freedom.
+Furthermore, while folding events can take milliseconds
+
+Understanding Protein Dynamics with L1 -Regularized Reversible Hidden Markov Models
+
+(10−3 s) or longer, the simulations must be integrated with
+femtosecond (10−15 s) timesteps, requiring the collection
+of datasets containing trillions of data points.
+While the computational burden of performing MD simulations has been a central challenge in the field, significant progress has been achieved recently with the development of three independent technologies: ANTON, a
+special-purpose supercomputer using a custom ASIC to accelerate MD (Shaw, 2007); Folding@Home, a distributed
+computing network harnessing the desktop computers of
+more than 240,000 volunteers (Shirts & Pande, 2000); and
+Google Exacycle, an initiative utilizing the spare cycles on
+Google’s production infrastructure for science (Kohlhoff
+et al., 2014).
+The analysis of these massive simulation datasets now represents a major difficulty: how do we turn data into knowledge (Lane et al., 2013)? In contrast to some other machine
+learning problems, the central goal here is not merely prediction. Instead, we view analysis – often in the form of
+probabilistic models generated from MD datasets – as a
+tool for generating scientific insight about protein dynamics.
+Useful probabilistic models must embody the appropriate
+physics. The guiding physical paradigm by which chemical dynamics are understood is one of states and rates.
+States correspond to metastable regions in the configuration
+space of the protein and can often be visualized as wells
+on the potential energy surface. Fluctuations within each
+metastable state are rapid; the dominant, long time-scale
+dynamics can be understood as a jump process moving
+with various rates between the states. This paradigm motivates probabilistic models based on a discrete-state Markov
+chain. A priori, the location of the metastable states are
+unknown. As a result, each metastable state should correspond to a latent variable in the model. Hidden Markov
+models (HMMs) thus provide the natural framework.
+Classical mechanics at thermal equilibrium satisfy a symmetry with respect to time: a microscopic process and its
+time-reversed version obey the same laws of motion. The
+stochastic analogue of this property is reversibility (also
+called detailed balance): the equilibrium flux between any
+two states X and Y is equal in both directions. Probabilistic models which fail to capture this essential property will
+assign positive probability to systems that violate the second law of thermodynamics (Prinz et al., 2011). Hence, we
+enforce detailed balance in our HMMs.
+In addition to the constraints motivated by adherence to
+physical laws, suitable probabilistic models should, in
+broad strokes, incorporate knowledge from prior experimental and theoretical studies of proteins. Numerous studies indicate that only a subset of the degrees of freedom
+
+are essential for describing the protein’s dominant long
+time-scale dynamics (see Cho et al. (2006) and references
+therein). Furthermore, substantial prior work indicates that
+protein folding occurs via a sequence of localized shifts
+(Maity et al., 2005). Together, these pieces of evidence
+motivate the imposition of L1 -fusion regularization (Tibshirani et al., 2005). The L1 term penalizes deviations
+amongst states along uninformative degrees of freedom,
+thereby suppressing their effect on the model. Furthermore,
+the pairwise structure of the fusion penalty minimizes the
+number of transitions which involve global changes: many
+pairs of states will only differ along a reduced subset of the
+dimensions.
+The main results of this paper are the formulation of the
+L1 -regularized reversible HMM and the introduction of a
+simple and scalable learning algorithm to fit the model. We
+contrast our approach against standard frameworks for the
+analysis of MD data and demonstrate improved robustness
+and physical interpretability.
+This paper is organized as follows. Section 2 describes
+prior work. Section 3 introduces the model and associated
+learning algorithm. Section 4 applies the model to three
+systems: a toy double well potential; ubiquitin, a human
+signaling protein; and c-Src kinase, a critical regulatory
+protein involved in cancer genesis. Section 5 provides discussion and indicates future directions.
+
+2. Prior Work
+Earlier studies have applied machine learning techniques
+to investigate protein structure prediction – the problem
+of discovering a protein’s energetically optimal configuration – using CRFs, belief propagation, deep learning, and
+other general ML methods (Sontag et al., 2012; Di Lena
+et al., 2012; Chu et al., 2006; Baldi & Pollastri, 2003). But
+proteins are fundamentally dynamic systems, and none of
+these approaches offer insight into kinetics; rather, they are
+concerned with extracting static information about protein
+structure.
+The dominant computational tool for studying protein dynamics is MD. Traditional analyses of MD datasets are primarily visual and non-quantitative. Standard approaches
+include watching movies of a protein’s structural dynamics
+along simulation trajectories, and inspecting the time evolution of a small number of pre-specified degrees of freedom (Humphrey et al., 1996; Karplus & Kuriyan, 2005).
+While these methods have been successfully applied to
+smaller proteins, they struggle to characterize the dynamics
+of the large and complex biomolecules critical to biological function. Quantitative methods like PCA can elucidate
+important (high variance) degrees of freedom, but fail to
+capture the rich temporal structure in MD datasets.
+
+Understanding Protein Dynamics with L1 -Regularized Reversible Hidden Markov Models
+
+Markov state models (MSMs) are a simple class of probabilistic models, recently introduced to capture the temporal
+dynamics of the folding process. In an MSM, protein dynamics are modeled by the evolution of a Markov chain on
+a discrete state space. The finite set of states is generated
+by clustering the set of configurations in the MD trajectories (Beauchamp et al., 2011). MSMs can be viewed as
+fully observable HMMs. More recently, HMMs with multinomial emission distributions have been employed on this
+discrete state space (Noé et al., 2013).
+Although MSMs have had a number of notable successes
+(Voelz et al., 2012; Sadiq et al., 2012), they are brittle and
+complex. Traditional MSMs lack complete data likelihood
+functions, and learning cannot be easily characterized by
+a single optimization problem. For these reasons, MSM
+learning requires significant manual tuning. For example,
+because clustering is purely a preprocessing step, the likelihood function contains no guidance on the choice of the
+metastable states. Moreover, the lack of uncertainty in the
+observation model necessitates the introduction of a very
+large number of states, typically more than ten thousand, in
+order to cover the protein’s phase space at sufficient resolution. This abundance of states is statistically inefficient,
+as millions of pairwise transition parameters must be estimated in typically-sized models, and renders interpretation
+of learned MSMs challenging.
+
+3. Fusion L1 -Regularized Reversible HMM
+We introduce the L1 -regularized reversible HMM with
+Gaussian emissions, a generative probabilistic model over
+multivariate discrete-time continuous-space time series. As
+discussed in Section 1, we integrate necessary physical
+constraints on top of the core hidden Markov model (Rabiner, 1989).
+Let {Yt } be the observed time series in RD of length T
+(i.e., the input simulation data), and let {Xt } be the corresponding latent time series in {1, . . . , K}, where K is
+a hyperparameter indicating the number of hidden states
+in the model. Each hidden variable xt corresponds to a
+metastable state of the physical system. The emission distribution given Xt = k is a multivariate normal distribution
+parameterized by mean µk ∈ RD and diagonal covariance
+matrix Diag(σk2 ) ∈ RD·D (where σk2 ∈ RD is the vector of
+diagonal covariance elements). We use the notation (µk )j
+to indicate the jth element of the vector µk .
+Controlling the means {µk } is critical for achieving physically interpretable models. As discussed in Section 1, we
+wish to minimize the differences between µk and µk0 to
+the extent possible. Consequently, we place a fusion L1
+penalty (Tibshirani et al., 2005) on our log likelihood func-
+
+tion, which adds the following pairwise cost:
+X X (j)
+λ
+τk,k0 |(µk )j − (µk0 )j | .
+k,k0
+
+j
+
+Here, λ governs the overall strength of the penalty, while
+(j)
+the adaptive fusion weights, {τk,k0 }, control the contribution from each pair of states (Guo et al., 2010). During
+learning, the adaptive fusion weights are computed as
+(j)
+
+τk,k0 = |(µ̃k )j − (µ̃k0 )j |−1 ,
+where the {µ̃k } are the learned metastable state means in
+the absence of the penalty. The intuition motivating the
+adaptive strength of the penalty is that if degree of freedom
+j is informative for separating states k and k 0 , the corresponding fusion penalty should be applied lightly.
+The reversible time evolution of the model is parameterized by an irreducible, aperiodic, row-normalized K by
+K stochastic matrix T, which satisfies detailed balance.
+Mathematically, the detailed balance constraint is
+∀k, k 0 , πk Tk,k0 = πk0 Tk0 ,k ,
+where row vector π is the stationary distribution of T.
+The stationary distribution π also parameterizes the initial distribution over the metastable states. By the Perron–
+Frobenius theorem, π is the dominant left eigenvector of T
+with eigenvalue 1 and is not an independent parameter in
+this model.
+The initial distributions and evolution of {Xt , Yt } satisfy
+the following equations:
+X0 ∼
+
+K
+X
+
+πk δ k ,
+
+k=1
+
+Xt+1 ∼
+
+K
+X
+
+TXt ,k δk ,
+
+k=1
+2
+Yt ∼ N (µXt , σX
+).
+t
+
+The complete data likelihood {xt , yt } is
+L({xt }, {yt }|T, µ, σ) =
+πx0
+
+TY
+−1
+t=1
+
+Txt−1 ,xt
+
+TY
+−1
+
+N (yt ; µxt , σx2t ).
+
+t=0
+
+The hyperparameter ∆ controls the discretization interval
+at which a protein’s coordinates are sampled to obtain {yt }.
+In the absence of downsampling by ∆, subsequent samples
+yt , yt+1 would be highly correlated. On the other hand,
+subsequent samples from an HMM are conditionally independent given the hidden state. Choice of ∆ large enough
+recovers this conditional independence (vide infra).
+
+Understanding Protein Dynamics with L1 -Regularized Reversible Hidden Markov Models
+
+The model is fit using expectation-maximization. The Estep is standard, while the M-step requires modification to
+enforce the detailed balance constraint on T and the adaptive fusion penalty on the {µk }.
+3.1.1. E- STEP
+Inference is identical to that for the standard HMM, using
+the forward-backward algorithm (Rabiner, 1989) to compute the following quantities:
+γi (t) = P(Xt = i|{yt }),
+ξij (t) = P(Xt = i, Xt+1 = j | {yt }).
+3.1.2. M- STEP
+Both the penalty on {µk } and the reversibility constraint
+affect only the M-step. The M-step update to the means in
+the t-th iteration of EM consists of maximizing the penalized log-likelihood function
+(t+1)
+µk
+
+K
+N X
+X
+
+(xi − µk )2
+= argmin
+γk (i)
+2(σk2 )(t)
+µk
+i
+k
+X X (j)
++λ
+τk,k0 |µk,j − µk0 ,j | .
+k,k0
+
+j
+
+The {µk } update is a quadratic program, which can be
+solved by a variety of methods. We compute {µk } by iterated ridge regression. Following Guo et al. (2010) and
+Fan & Li (2001), we use the local quadratic approximation
+
+
+ (t,s+1)
+(t,s+1) 
+− µk0 ,j  ≈
+ µk,j
+
+2
+(t,s+1)
+(t,s+1)
+
+µk,j
+− µk0 ,j
+1
+(t,s) 
+ +  µ(t,s)
+
+−
+µ
+0 ,j  .
+k,j
+k
+ (t,s)
+(t,s) 
+2
+2 µ
+−µ 0 
+k,j
+
+k ,j
+
+where s is the iteration index for this procedure within the
+t-th M-step. This approximation is based on the identity
+|x − y| =
+
+(x − y)2
+1
++ |x − y|.
+2 |x − y| 2
+
+Under the approximation, we obtain a generalized ridge regression problem which can be solved in closed form during each iteration s. Note that this approximation is only
+(t,s)
+(t,s)
+valid when |µk,j − µk0 ,j | > 0. For numerical stability, we
+(t,s)
+
+(t,s)
+
+threshold |µk,j − µk0 ,j | to zero at values less than 10−10 .
+The variance update is standard:
+P
+γk (t)(yt − µk )T (yt − µk )
+2
+P
+.
+σk = t
+t γk (t)
+
+The transition matrix update is
+X
+X
+T = arg max
+log(Tij )
+ξij (t).
+T
+
+ij
+
+t
+
+Because the Gaussian emission distributions have infinite
+support, T is irreducible and aperiodic by construction.
+However, we must explicitly constrain T to satisfy detailed
+balance.
+Lemma 1. T satisfies detailed balance if and only if Tij =
+PWij , where W = WT .
+Wik
+k
+
+Proof. If T satisfies detailed balance, then let Wij =
+πi Tij = πj Tji = Wji . Then note
+W
+πT
+T
+P ij = P i ij = P ij = Tij
+W
+π
+T
+ik
+i
+ik
+k
+k
+k Tik
+W
+
+ij
+To prove the converse, assume Tij = P W
+, with W =
+ik
+k
+P
+T
+W . Let πi = k Wik . Then πi Tij = Wij = Wji =
+πj Tji .
+
+Substituting the results of Lemma 1, we rewrite the transition matrix update as
+h X
+iX
+
+log(Wij ) − log πi
+W = arg max
+ξij (t) .
+W
+
+ij
+
+t
+
+We compute the derivative of the inner term with respect to
+log Wij and optimize with L-BFGS (Nocedal & Wright,
+2006).
+3.2. Model Selection
+There are two free model parameters: K and ∆. The number of metastable states, K, is expected to be small – at
+most a few dozen. To choose K, we can use the AIC or BIC
+selection criteria, or alternatively enumerate a few small
+values.
+The choice of ∆ is more difficult than the choice of K, as
+changing the discretization interval alters the support of the
+likelihood function. Recall that choosing ∆ too small results in subsequent samples yt , yt+1 becoming highly correlated, while the model satisfies the conditional independence assumption Yt Yt+1 | Xt . Moreover, small ∆ increases data-storage requirements, while ∆ too large will
+needlessly discard data. Thus a balance between these two
+conflicting directives is necessary.
+|=
+
+3.1. Learning
+
+We use the physical criterion of convergence in the relaxation timescales to evaluate when ∆ is large enough. The
+propagation of the dynamics from an initial distribution
+over the hidden states, Xt , can be described by
+P (yt+n | xt ) =
+
+K−1
+X
+k=0
+
+N (yt+n ; µk , σk2 ) xTt Tn
+
+
+k
+
+.
+
+Understanding Protein Dynamics with L1 -Regularized Reversible Hidden Markov Models
+
+Diagonalize T in terms of its left eigenvectors φi , right
+eigenvectors ψi , and eigenvalues λi (such a diagonalization
+is always possible since T is a stochastic matrix).
+"
+! #
+K
+K
+X
+X
+2
+n
+P (yt+n | xt ) =
+N (yt+n ; µk , σk )
+λi hxt , ψi i φi
+i=1
+
+k=1
+
+k
+
+Since π is the stationary left eigenvector of T, and the remaining eigenvalues lie in the interval −1 < λi < 1, the
+collective dynamics can be interpreted as a sum of exponential relaxation processes.
+"
+! #
+K
+K
+X
+X
+−n/τi
+P (yt+n | xt ) =
+fk (yt+n ) π +
+e
+hxt , ψi i φi
+k=1
+
+i=2
+
+N (y; µk , σk2 ).
+
+In the equation, we define fk (y) =
+Each
+eigenvector of T (except the first) describes a dynamical
+mode with characteristic relaxation timescale
+1
+.
+τi = −
+ln λi
+The longest timescales, τi , are of central interest from
+a molecular modeling perspective because they describe
+dynamical modes visible in time-resolved protein experiments (Zhuang et al., 2011) and are robust against perturbations (Weber & Pande, 2012). We choose ∆ large enough
+to converge the τi : for adequately large ∆, we expect τi (∆)
+to asymptotically converge to the true relaxation timescale
+τi∗ . For simple systems, we may evaluate τi∗ explicitly,
+while for larger systems, we choose ∆ large enough so that
+τi (∆) no longer changes with further increase in the discretization interval.
+
+k
+
+Figure 1. Simulations of Brownian dynamics on a double well potential (A) illustrate the advantages of the HMM over the MSM.
+When the dynamics are discretized at a time interval of > 500
+steps, the 2-state HMM, unlike the 2-state MSM achieves a quantitatively accurate prediction of the first relaxation timescale (B).
+The MSM (C) features hard cutoffs between the states wheres the
+HMM (D) each have infinite support.
+
+The speedup using our GPU implementation is 15× compared to our optimized CPU implementation and 75× with
+respect to a standard numpy implementation using K = 16
+states on a NVIDIA GTX TITAN GPU / Intel Core i7 4
+core Sandy Bridge CPU platform. Further scaling of the
+implementation could be achieved by splitting the computation over multiple GPUs with MPI.
+
+4. Experiments
+3.3. Implementation
+
+4.1. Double Well Potential
+
+We implement learning for both multithreaded CPU and
+NVIDIA GPU platforms. In the CPU implementation,
+we parallelize across trajectories during the E-step using
+OpenMP. The largest portion of the run time is spent in
+LOG - SUM - EXP operations, which we manually vectorize
+with SSE2 intrinsics for SIMD architectures. Parallelism
+on the GPU is more fine grained. The E-step populates two
+T × K × K arrays with forward and backwards sweeps respectively. To fully utilize the GPU’s massive parallelism,
+each trajectory has a team of threads which cooperate on
+updating the K × K matrix at each time step. Specialized
+CUDA kernels were written for K = 4, 8, 16 and 32 along
+with a generic kernel for K > 32.
+
+We first consider a one-dimensional diffusion process yt
+governed by Brownian dynamics. The process is described
+by the stochastic differential equation
+
+Even in log space, for long trajectories, the forwardbackward algorithm can suffer from an accumulation of
+floating point errors which lead to catastrophic cancelation
+during the computation of γi (t). This risk requires that the
+forward-backward matrices be accumulated in double precision, whereas the rest of the calculation is safe in single
+precision.
+
+√
+dyt
+= −∇V (yt ) + 2DR(t)
+dt
+where V is the reduced potential energy, D is the diffusion
+constant, and R(t) is a zero-mean delta-correlated stationary Gaussian process. For simplicity, we set D = 1 and
+consider the double well potential
+V (y) = 1 + cos(2y)
+with reflecting boundary conditions at y = −π and y = π.
+Using the Euler-Maruyama method and a time step of
+∆t = 10−3 , we produced ten simulation trajectories of
+length 5 × 105 steps each. The histogrammed trajectories
+are shown in Fig. 1(A). The exact value of the first relaxation timescale was computed by a finite element discretization of the corresponding Fokker-Planck equation
+(Higham, 2001).
+
+Understanding Protein Dynamics with L1 -Regularized Reversible Hidden Markov Models
+
+We applied both a two-state MSM and two-state HMM,
+with fusion L1 regularization parameter λ = 0, to the simulation trajectories. The MSM states were fixed, with a dividing surface at y = 0, as shown in Fig. 1(C). The HMM
+states were learned, as shown in Fig. 1(D). Both the MSM
+and the HMM display some sensitivity with respect to the
+discretization interval, with more accurate predictions of
+the relaxation timescale at longer lag times.
+The two-state MSM is unable to accurately learn the
+longest timescale, τ1 , even with large lag times, while the
+two-state HMM succeeds in identifying τ1 with ∆ ≥ 500
+Fig. 1(B).
+4.2. Ubiquitin
+
+signaling network.
+We obtained a dataset of MD simulations of human Ub
+consisting of 3.5 million data points. The protein, shown
+in Fig. 2, is composed of 75 amino acids. The simulations
+were performed on the NCSA Blue Waters supercomputer.
+The resulting structures were featurized by extracting the
+distance from each amino acid’s central carbon atom to its
+position in the simulations’ starting configurations. HMMs
+were constructed with 2 to 6 states. We chose ∆ by monitoring the convergence of the relaxation timescales as discussed in Sec. 3.2, and set the L1 fusion penalty heuristically to a default value of λ = 0.01. In agreement with existing biophysical data (Zhang et al., 2012), the HMMs correctly determined that Ub was best modeled with 2 states
+(Fig. 2A). For ease of representation, the learned HMM is
+shown projected onto two critical degrees of freedom (discussed below).
+For comparison, we generated MSM models with 500 microstates (Fig. 2B) and projected upon the same critical
+degrees of freedom. We used a standard kinetic lumping post-processing step to identify 3 macrostates (shown
+in green, blue, and yellow respectively); the lumping algorithm collapsed when asked to identify 2 macrostates
+(Bowman, 2012). Contrast the simple, clean output of the
+2 state HMM in Fig. 2(A) with the standard MSM of
+Fig. 2(B). Note how significant post-processing and manual tuning would be required to piece together the true twostate structural dynamics of Ub from the MSM output.
+
+Figure 2. Dynamics of Ub. (A) The HMM identifies the two
+metastable states of Ub, varying primarily in the loop and helix
+regions (axes in yellow and red respectively). (B) The MSM fails
+to cleanly separate the two underlying physical states. Three postprocessed macrostates from the MSM are shown (in blue, green,
+and yellow). (C) A structural rendering of the conformational
+states of the Ub system. S0, shown in grey, binds to the UCH
+family of proteins, and S1 (with characteristic structural differences to S0 in red and yellow) binds to the USP family.
+
+Ubiquitin (Ub) is a regulatory hub protein at the intersection of many signaling pathways in the human body (Hershko & Ciechanover, 1998). Among its many tasks are the
+regulation of inflammation, repair of DNA, and the breakdown and recycling of waste proteins. Ubiquitin interacts
+with close to 5000 human signaling proteins. Understanding the link between structure and function in ubiquitin
+would elucidate the underlying framework of the human
+
+We display a structural rendering of the Ub system in Fig.
+2(C). The imposed L1 penalty of the HMM suppresses
+differences among the uninformative degrees of freedom
+depicted in grey. The remaining portions of the protein
+(shown in color) reveal the two critical axes of motion of
+the Ub system: the hinge dynamics of the loop region displayed in yellow and a kink in the lower helix shown in red.
+We use these axes in the simplified representations shown
+in Figs. 2(A,B).
+The states S0 and S1 identified by the HMM have direct biological interpretations. Comparison to earlier experimental work reveals that configuration S0 binds to the UCH
+family of proteins, while configuration S1 binds to the USP
+family instead (Komander et al., 2009). The families play
+differing roles in the vital task of regenerating active Ub for
+the cell-signaling cycle.
+Together, MD and the HMM analysis provide atomic insight into the effect of protein structure on ubiquitin’s role
+in the signaling network. Our analysis approach may have
+significant value for protein biology and for the further
+study of cellular signaling networks. Although experimental studies of protein signaling provide the gold standard for
+hard data, they struggle to provide structural explanations
+
+Understanding Protein Dynamics with L1 -Regularized Reversible Hidden Markov Models
+
+— knowing why a certain protein is more suited for certain signaling functions is challenging at best. In contrast,
+the MD/HMM approach can provide a direct link between
+structure and function and give a causal basis for observed
+protein activity.
+
+A(
+
+B(
+
+4.3. c-Src Tyrosine Kinase
+Protein kinases are a family of enzymes that are critical
+for regulating cellular growth whose aberrant activation can
+lead to uncontrolled cellular proliferation. Because of their
+central role in cell proliferation, kinases are a critical target
+for anti-cancer therapeutics. The c-Src tyrosine kinase is a
+prominent member of this family that has been implicated
+in numerous human malignancies (Aleshin & Finn, 2010).
+Due to the protein’s size and complexity, performing MD
+simulations of the c-Src kinase is a formidable task. The
+protein, shown in Fig. 3A, consists of 262 amino acids;
+when surrounding water molecules – necessary for accurate simulation – are taken into account, the system has
+over 40,000 atoms. Furthermore, transition between the
+active and inactive states takes hundred of microseconds.
+Adequate sampling of these processes therefore requires
+hundreds of billions of MD integrator steps. Simulations
+of the c-Src kinase were performed on the Folding@Home
+distributed computing network, collecting a dataset of 4.7
+million configurations from 550 µs of sampling, for a total
+of 108 GB of data (Shukla et al., 2014).
+In order to understand the molecular activation mechanism
+of the c-Src kinase, we analyzed this dataset using the L1
+regularized reversible HMM. We featurized the configurations by extracting the distance from each amino acid’s
+central carbon atom to its position in an experimentally determined inactive configuration. We built HMMs with 2 to
+6 states, and singled out the 3 state model for achieving a
+balance of complexity and interpretability. As with Ub, we
+chose ∆ by monitoring the convergence of the relaxation
+timescales, same default L1 fusion penalty of λ = 0.01.
+The L1 -regularized reversible HMM elucidates the c-Src
+kinase activation pathway, revealing a stepwise mechanism
+of the dynamics. A projection of the learned HMM states
+onto two key degrees of freedom is shown in Fig. 3B.
+Fig. 3C shows a structural representation of the means of
+the three states, highlighting a sequential activation mechanism. The transformation from the inactive to the intermediate state occurs first by the unfolding of the A-loop
+(the subsection of the protein highlighted in red). Activation is completed by the inward rotation of the C-helix
+(highlighted in orange) and rupture of a critical side chain
+interaction between two amino acids on the C-helix and the
+A-loop respectively.
+Although the protein structure is complex, the activation
+
+C(
+Inac%ve(
+
+Intermediate(
+
+Ac%ve(
+
+Figure 3. Activation of the c-Src Kinase. (A) Structure of the protein system. (B) The 3 state HMM, projected onto two degrees of
+freedom representing the positions of the A-loop (shown in red)
+and C-helix (shown in orange) respectively. (C) Structural renderings of the means of the hidden states showing atomistic details
+of the activation pathway.
+
+process takes place only in a small portion of the overall
+protein; the random fluctuations of the remaining degrees
+of freedom are largely uncoupled from the activation process. As with Ub, the L1 penalty suppresses the signal from
+unimportant degrees of freedom shown in grey. In contrast
+to the simplicity of HMM approach, a recent MSM analysis
+of this dataset found similar results, but required 2,000 microstastates and significant post-processing of the models
+to generate physical insight into the activation mechanism
+(Shukla et al., 2014).
+The identification of the intermediate state along the activation pathway has substantial implications in the field of rational drug design. Chemotherapy drugs often have harmful side effects because they target portions of proteins that
+are common across entire families, interfering with both
+the uncontrolled behavior of tumor proteins as well as the
+critical cellular function of healthy proteins. Intermediate
+states, such as the one identified by the HMM, are more
+likely to be unique to each kinase protein; future therapeutics that target these intermediate states could have significantly fewer deleterious side effects (Fang et al., 2013).
+
+5. Discussion and Conclusion
+Currently, MSMs are a dominant framework for analyzing protein dynamics datasets. We propose replacing this
+
+Understanding Protein Dynamics with L1 -Regularized Reversible Hidden Markov Models
+
+methodology with L1 -regularized reversible HMMs. We
+show that HMMs have significant advantages over MSMs:
+whereas the MSM state decomposition is a prepreprocessing procedure without guidance from a complete-data likelihood function, the HMM couples the identification of
+metastable states with the estimation of transition probabilities. As such, accurate models require fewer states, aiding
+interpretability from a physical perspective.
+
+References
+
+The switch is not without tradeoffs. MSMs are backed by
+a significant body of theoretical work: the MSM is a direct discretization of an integral operator which formally
+controls the long timescale dynamics known as the transfer operator. This connection enables the quantification of
+approximation error in the MSM framework (Prinz et al.,
+2011). No such theoretical guarantees yet exist for the L1 regularized reversible HMM because the evolution of Yt is
+no longer unconditionally Markovian. However, because
+the HMM can be viewed as a generalized hidden MSM,
+there is reason to believe that analogues of MSM theoretical guarantees extend to the HMM framework.
+
+Beauchamp, Kyle A., Bowman, Gregory R., Lane,
+Thomas J., Maibaum, Lutz, Haque, Imran S., and Pande,
+Vijay S. MSMBuilder2: Modeling conformational dynamics on the picosecond to millisecond scale. J. Chem.
+Theory Comput., 7(10):3412–3419, 2011.
+
+While the L1 -regularized reversible hidden Markov model
+represents an improvement over previous methods for analyzing MD datasets, future work will likely confront a
+number of remaining challenges. For example, the current model does not learn the featurization and treats
+∆ as a hyperparameter. Bringing these two aspects of
+the model into the optimization framework would reduce
+the required amount of manual tuning. Adapting techniques from Bayesian nonparametrics, unsupervised feature learning and linear dynamical systems may facilitate
+the achievement of these goals.
+Our results show that structured statistical analysis of massive protein datasets is now possible. We reduce complex dynamical systems with thousands of physical degrees
+of freedom to simple statistical models characterized by a
+small number of metastable states and transition rates. The
+HMM framework is a tool for turning raw molecular dynamics data into scientific knowledge about protein structure, dynamics and function. Our experiments on the ubiquitin and c-Src kinase proteins extract insight that may further the state of the art in cellular biology and rational drug
+design.
+
+Acknowledgments
+We thank Diwakar Shukla for kindly providing the c-Src
+kinase MD trajectories. B.R. was supported by the Fannie and John Hertz Foundation. G.K and V.S.P acknowledge support from the Simbios NIH Center for Biomedical
+Computation (NIH U54 Roadmap GM072970). V.S.P. acknowledges NIH R01-GM62868 and NSF MCB-0954714.
+
+Aleshin, A. and Finn, R. S. SRC: a century of science
+brought to the clinic. Neoplasia, 12(8):599–607, 2010.
+Baldi, Pierre and Pollastri, Gianluca. The principled design
+of large-scale recursive neural network architectures–
+DAG-RNNs and the protein structure prediction problem. J. Mach, Learn. Res., 4:575–602, 2003.
+
+Beauchamp, Kyle A., Lin, Yu-Shan, Das, Rhiju, and Pande,
+Vijay S. Are protein force fields getting better? A systematic benchmark on 524 diverse NMR measurements.
+J. Chem. Theory Comput., 8(4):1409–1414, 2012.
+Bowman, Gregory R. Improved coarse-graining of markov
+state models via explicit consideration of statistical uncertainty. J. Chem. Phys., 137(13):134111, 2012.
+Cho, Samuel S., Levy, Yaakov, and Wolynes, Peter G. P
+versus Q: Structural reaction coordinates capture protein
+folding on smooth landscapes. Proc. Natl. Acad. Sci.
+U.S.A., 103(3):586–591, 2006.
+Chu, Wei, Ghahramani, Zoubin, Podtelezhnikov, Alexei,
+and Wild, David L. Bayesian segmental models with
+multiple sequence alignment profiles for protein secondary structure and contact map prediction. IEEE/ACM
+Trans. Comput. Biol. Bioinf., 3(2):98–113, 2006.
+Di Lena, Pietro, Baldi, Pierre, and Nagata, Ken. Deep
+spatio-temporal architectures and learning for protein
+structure prediction. In Adv. Neural Inf. Process. Syst.
+25, NIPS ’12, pp. 521–529, 2012.
+Dill, Ken A, Bromberg, Sarina, Yue, Kaizhi, Chan,
+Hue Sun, Ftebig, Klaus M, Yee, David P, and Thomas,
+Paul D. Principles of protein folding – a perspective from
+simple exact models. Protein Sci., 4(4):561–602, 1995.
+Fan, Jianqing and Li, Runze. Variable selection via nonconcave penalized likelihood and its oracle properties. J.
+Am. Stat. Assoc., 96(456):1348–1360, 2001.
+Fang, Zhizhou, Grtter, Christian, and Rauh, Daniel. Strategies for the selective regulation of kinases with allosteric modulators: Exploiting exclusive structural features. ACS Chem. Biol., 8(1):58–70, 2013.
+Guo, Jian, Levina, Elizaveta, Michailidis, George, and
+Zhu, Ji. Pairwise variable selection for high-dimensional
+model-based clustering. Biometrics, 66(3):793–804,
+2010.
+
+Understanding Protein Dynamics with L1 -Regularized Reversible Hidden Markov Models
+
+Hershko, Avram and Ciechanover, Aaron. The ubiquitin
+system. Annu. Rev. Biochem., 67(1):425–479, 1998.
+Higham, Desmond J. An algorithmic introduction to numerical simulation of stochastic differential equations.
+SIAM Rev., 43(3):525–546, 2001.
+Humphrey, William, Dalke, Andrew, and Schulten, Klaus.
+VMD: Visual molecular dynamics. J. Mol. Graphics, 14
+(1):33 – 38, 1996.
+Karplus, M. and Kuriyan, J. Molecular dynamics and protein function. Proc. Natl. Acad. Sci. U.S.A., 102(19):
+6679–6685, 2005.
+Kohlhoff, Kai J, Shukla, Diwakar, Lawrenz, Morgan, Bowman, Gregory R, Konerding, David E, Belov, Dan, Altman, Russ B, and Pande, Vijay S. Cloud-based simulations on Google Exacycle reveal ligand modulation of
+gpcr activation pathways. Nat. Chem., 6(1):15–21, 2014.
+Komander, David, Clague, Michael J, and Urbé, Sylvie.
+Breaking the chains: structure and function of the deubiquitinases. Nat. Rev. Mol. Cell Biol., 10(8):550–563,
+2009.
+Lane, Thomas J, Shukla, Diwakar, Beauchamp, Kyle A,
+and Pande, Vijay S. To milliseconds and beyond: challenges in the simulation of protein folding. Curr. Opin.
+Struct. Biol., 23(1):58 – 65, 2013.
+Maity, Haripada, Maity, Mita, Krishna, Mallela M. G.,
+Mayne, Leland, and Englander, S. Walter. Protein folding: The stepwise assembly of foldon units. Proc. Natl.
+Acad. Sci. U.S.A., 102(13):4741–4746, 2005.
+Nocedal, J. and Wright, S. Numerical Optimization.
+Springer Series in Operations Research and Financial
+Engineering. Springer, New York, 2nd edition, 2006.
+Noé, Frank, Wu, Hao, Prinz, Jan-Hendrik, and Plattner,
+Nuria. Projected and hidden markov models for calculating kinetics and metastable states of complex molecules.
+J. Chem. Phys., 139(18):184114, 2013.
+Prinz, Jan-Hendrik, Wu, Hao, Sarich, Marco, Keller, Bettina, Senne, Martin, Held, Martin, Chodera, John D.,
+Schütte, Christof, and Noé, Frank. Markov models of
+molecular kinetics: Generation and validation. J. Chem.
+Phys., 134(17):174105, 2011.
+Rabiner, Lawrence R. A tutorial on hidden markov models
+and selected applications in speech recognition. Proc.
+IEEE, 77(2):257–286, 1989.
+Sadiq, S. Kashif, Noé, Frank, and De Fabritiis, Gianni. Kinetic characterization of the critical step in HIV-1 protease maturation. Proc. Natl. Acad. Sci. U.S.A., 109(50):
+20449–20454, 2012.
+
+Shaw, David E. et al. Anton, a special-purpose machine for
+molecular dynamics simulation. In ACM Comp. Ar. 34,
+ISCA ’07, pp. 1–12, 2007.
+Shirts, Michael and Pande, Vijay S. Screen savers of the
+world unite! Science, 290(5498):1903–1904, 2000.
+Shukla, Diwakar, Meng, Yilin, Roux, Benoı̂t, and Pande,
+Vijay S. Activation pathway of Src kinase reveals intermediate states as novel targets for drug design. Nat.
+Commun., 5, 2014.
+Sontag, David, Meltzer, Talya, Globerson, Amir, Jaakkola,
+Tommi S, and Weiss, Yair. Tightening LP relaxations for MAP using message passing. arXiv preprint
+arXiv:1206.3288, 2012.
+Tibshirani, Robert, Saunders, Michael, Rosset, Saharon,
+Zhu, Ji, and Knight, Keith. Sparsity and smoothness via
+the fused lasso. J. R. Statistic. Soc. B, 67(1):91–108,
+2005.
+Voelz, Vincent A., Jäger, Marcus, Yao, Shuhuai, Chen, Yujie, Zhu, Li, Waldauer, Steven A., Bowman, Gregory R.,
+Friedrichs, Mark, Bakajin, Olgica, Lapidus, Lisa J.,
+Weiss, Shimon, and Pande, Vijay S. Slow unfoldedstate structuring in Acyl-CoA binding protein folding revealed by simulation and experiment. J. Am. Chem. Soc.,
+134(30):12565–12577, 2012.
+Weber, Jeffrey K and Pande, Vijay S. Protein folding is
+mechanistically robust. Biophys. J., 102(4):859–867,
+2012.
+Wong, Chung F. and McCammon, J. Andrew. Protein flexibility and computer-aided drug design. Annu. Rev. Pharmacol. Toxicol., 43(1):31–45, 2003.
+Zhang, Yingnan, Zhou, Lijuan, Rouge, Lionel, Phillips,
+Aaron H, Lam, Cynthia, Liu, Peter, Sandoval, Wendy,
+Helgason, Elizabeth, Murray, Jeremy M, Wertz, Ingrid E, et al. Conformational stabilization of ubiquitin yields potent and selective inhibitors of USP7. Nat.
+Chem. Biol., 9(1):51–58, 2012.
+Zhuang, Wei, Cui, Raymond Z., Silva, Daniel-Adriano,
+and Huang, Xuhui. Simulating the T-jump-triggered
+unfolding dynamics of trpzip2 peptide and its timeresolved IR and two-dimensional IR signals using the
+markov state model approach. J. Phys. Chem. B, 115
+(18):5415–5424, 2011.
+
+

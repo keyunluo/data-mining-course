@@ -1,0 +1,1250 @@
+Putting MRFs on a Tensor Train
+
+Alexander Novikov1
+Anton Rodomanov1
+Anton Osokin1
+Dmitry Vetrov1,2
+1
+Moscow State University, Moscow, Russia
+2
+Higher School of Economics, Moscow, Russia
+
+Abstract
+In the paper we present a new framework for
+dealing with probabilistic graphical models. Our
+approach relies on the recently proposed Tensor Train format (TT-format) of a tensor that
+while being compact allows for efficient application of linear algebra operations. We present a
+way to convert the energy of a Markov random
+field to the TT-format and show how one can exploit the properties of the TT-format to attack the
+tasks of the partition function estimation and the
+MAP-inference. We provide theoretical guarantees on the accuracy of the proposed algorithm
+for estimating the partition function and compare
+our methods against several state-of-the-art algorithms.
+
+1. Introduction
+Discrete graphical models have become a popular tool for
+many applications in the fields of computer vision, machine
+learning, social networking, etc. One of their advantages is
+the ability to define the (unnormalized) joint distribution of
+thousands of variables in a compact form of the product
+of low-order factors. Such a form allows to model complex dependencies and makes exact or approximate inference possible.
+In this paper we consider undirected graphical models
+(Markov random fields, MRFs) and touch on two inference
+problems: the estimation of the normalization constant
+(the partition function) and the search of the most probable configuration of the variables (the MAP-inference).
+When the factor-graph of dependencies of an MRF contains cycles these problems become challenging. Both
+Proceedings of the 31 st International Conference on Machine
+Learning, Beijing, China, 2014. JMLR: W&CP volume 32. Copyright 2014 by the author(s).
+
+NOVIKOV @ BAYESGROUP. RU
+ANTON . RODOMANOV @ GMAIL . COM
+OSOKIN @ BAYESGROUP. RU
+VETROVD @ YANDEX . RU
+
+problems are of great practical importance, e.g. because
+they are the key elements of the two popular methods that
+obtain the parameters of a graphical model given training
+data. Specifically, structured-output SVMs (Taskar et al.,
+2004; Tsochantaridis et al., 2005) require accurate and fast
+MAP-estimators and maximum likelihood training methods (Nowozin & Lampert, 2010) require good approximations of the partition function. Although a number of approximate methods have been proposed in recent years for
+both problems, they (especially the partition function estimation) are still far from the ultimate solution.
+One way of defining the joint distribution of discrete variables is to express it as a multi-dimensional array of (unnormalized) probabilities. We refer to these arrays as tensors. The problems of the MAP-inference and the partition function estimation are then reduced to the search of
+the maximal element in the tensor and to the summation of
+all the elements of the tensor respectively. Direct storage
+(and processing) of tensors requires exponential amount of
+memory and computational effort. There exist several tensor decomposition methods that allow for storing a tensor
+in a format that requires less memory and provides efficient
+algorithms for performing algebraic operations on tensors.
+In our paper we make use of the recently proposed Tensor
+Train (TT) decomposition approach (Oseledets, 2011). The
+TT-decomposition method converts a tensor into a special
+chain-like TT-format that allows to operate with the tensor
+in an efficient manner. Oseledets & Tyrtyshnikov (2010)
+show that to convert a tensor that is in some sense simple
+(i.e. with low TT-ranks) into the TT-format it suffices to
+process only a small fraction of its elements. In our paper we show that MRF energy tensors (the negative logarithms of the joint distributions) have low TT-ranks but the
+unnormalized distribution tensors do not. Converting the
+energy into the TT-format allows us to perform the MAPinference using the techniques coming from linear algebra.
+To tackle the partition function estimation problem in the
+case when the unnormalized distribution has large TT-ranks
+
+Putting MRFs on a Tensor Train
+
+we exploit the factorization structure of MRFs. We construct the TT-decomposition of each factor individually and
+then combine them in such a way that allows to estimate
+the partition function without explicitly building the TTrepresentation of the unnormalized distribution. Our approach can be generalized for the problem of computing
+the marginal distributions.
+We evaluate our methods on several datasets and compare
+them against several state-of-the-art techniques. We report
+a significant improvement in the problems of the estimation
+of the partition function and the marginal distributions and
+show comparable results in the MAP-inference problem.
+Our main contributions are:
+• The algorithm for obtaining the TT-decomposition of
+the MRF energy (the negative logarithm of the joint
+distribution). We prove that for low-order graphical
+models the energy tensor has a low TT-rank and derive
+upper bounds on it.
+• The algorithm for estimating the partition function
+through the TT-decomposition of the MRF factors.
+The key feature of the algorithm is that it does not
+explicitly construct the TT-representation of the unnormalized joint distribution.
+• Theoretical bounds on the accuracy of the partition
+function estimation.
+The rest of the paper is organized as follows. We start with
+the review of the related works in sec. 2. We introduce our
+notation in sec. 3 and review the TT-decomposition approach in sec. 4. In sec. 5 we apply the TT-decomposition
+to MRFs and in sec. 6 we propose an algorithm for
+computing the partition function. Sec. 7 contains our
+experimental evaluation.
+
+2. Related work
+In this section we briefly review the related works divided
+into three groups: different formats for compact representation of tensors, usage of tensors in graphical models and
+different inference methods.
+Compared to the classical tensor formats (the canonical format (Caroll & Chang, 1970) and the Tucker format (Tucker,
+1966)), the TT-format can be computed via stable and robust algorithms and has no intrinsic curse of dimensionality. The Hierarchical Tucker (HT) format (Hackbusch &
+Kühn, 2009; Grasedyck, 2010) is another stable tensor factorization. The TT-format can be considered as the HTformat with a linear dimension tree, and this comes as an
+advantage from the algorithmic viewpoint: most of the algorithms are much simpler in the TT-format.
+Tensor-based techniques are often mentioned in articles related to graphical models with respect to the problem of un-
+
+covering the unknown structure of the model. Jernite et al.
+(2013); Ishteva et al. (2013) make local decisions based on
+the properties of 4th order tensors (quartets). Song et al.
+(2013) attack the problem using the hierarchical tensor decomposition.
+There are two popular ways of constructing a labeling
+given learned parameters, i.e. performing inference, in a
+graphical model: MAP-inference (mode of the posterior
+distribution) and max-marginal inference (each variable
+is set to the argmax of its marginal distribution). The
+MAP-inference (a.k.a. energy minimization) is rather
+well-studied. Recent experimental results of Kappes et al.
+(2013) show that for many problems current methods give
+satisfying results. Specifically, a lot of attention has been
+given to the case of pairwise Markov random fields. The
+max-marginal inference is based on the computation of
+the marginal distributions. The latter is closely related to
+the task of estimating the normalization constant (i.e. the
+partition function) given the unnormalized distribution of
+an MRF. We can outline several families of methods for the
+computation of the partition function and the marginal distributions: sampling techniques (e.g. Annealed Importance
+Sampling (Neal, 2001; Grosse et al., 2013) for the partition
+function and Gibbs sampling (Wainwright & Jordan, 2008)
+for the marginal distributions), message passing techniques
+(e.g. classic Loopy Belief Propagation (Kschischang et al.,
+2001) and its numerous modifications), KL-minimization
+based methods (e.g. Mean Field (Wainwright & Jordan, 2008) and Expectation Propagation (Minka & Qi,
+2004)), graph decomposition-based techniques (e.g.
+Tree-Reweighted Message-passing (Wainwright et al.,
+2005)), MAP-inference based methods (e.g. randomized
+MAP-predictors (Hazan et al., 2013) and the recent WISH
+system (Ermon et al., 2013)).
+
+3. Notation
+In this paper we extensively use multi-dimensional arrays
+of real numbers. We refer to one-dimensional arrays as
+vectors, two-dimensional arrays as matrices and, finally,
+arrays of higher dimensionality as tensors. We use bold
+upper case letters (e.g. A) for tensors, ordinary upper case
+letters (e.g. A) for matrices, and bold lower case letters
+(e.g. a) for vectors.
+We treat all arrays as functions of their indices: a(i) = ai ,
+A(x1 , x2 ), A(x) = A(x1 , . . . , xn ), where n equals the
+dimensionality of the tensor A.
+By k · kF we denote the matrix Frobenius norm and its
+trivial generalization for tensors:
+
+kAkF =
+
+s X
+x1 ,...,xn
+
+A2 (x1 , . . . , xn ).
+
+Putting MRFs on a Tensor Train
+
+By k · k2 we denote the vector Euclidean norm and the ma2
+trix spectral norm: kAk2 = maxx6=0 kAxk
+kxk2 .
+In our derivations we use several different matrix products.
+The operator “” corresponds to the Hadamard product
+(entrywise product), the operator “⊗” – to the Kronecker
+product, and the operator “·” (which is often omitted) – to
+the regular matrix product.
+
+4. TT-format
+An n-dimensional tensor A is said to be represented in the
+TT-format if for each dimension i = 1, . . . , n and for each
+possible value of the i-th dimension index xi = 1, . . . , di
+(d = maxi=1,...,n di ) there exists a matrix GA
+i [xi ] such that
+all the elements of A can be computed as the following
+matrix product:
+
+Table 1. Efficient operations on tensors in the TT-format. For each
+operation we show its complexity and the maximal TT-rank of the
+result.
+
+O PERATION
+
+O UTPUT RANKS
+
+C OMPLEXITY
+
+C = A · const
+C = A + const
+C=A+B
+C=AB
+c = Mb
+sum A
+kAkF
+C = round(A, ε)
+
+r(C) = r(A)
+r(C) = r(A)+1
+r(C) ≤ r(A)+r(B)
+r(C) ≤ r(A) r(B)
+r(c) ≤ r(M) r(b)
+–
+–
+r(C) ≤ r(A)
+
+O(d r(A))
+O(nd r2(A))
+O(nd r2(C))
+O(nd r2(A) r2(B))
+O(nd2 r2(M)r2(b))
+O(nd r2(A))
+O(nd r3(A))
+O(nd r3(A))
+
+(1)
+
+nikov, 2010) can construct an approximation of a tensor
+using only a small fraction of its elements.
+
+All the matrices GA
+i [xi ] related to the same dimension i
+are restricted to be of the same size ri−1 (A) × ri (A).
+The values r0 (A) and rn (A) equal 1 in order to make
+matrix product (1) a number. In what follows we refer to the representation of a tensor in the TT-format as
+the TT-representation or the TT-decomposition. We ren
+fer to the sequence {ri (A)}i=0 as the TT-ranks of the
+TT-representation of A and to its maximum as the maximal TT-rank of the TT-representation of A: r(A) =
+maxi=0,...,n ri (A).
+The collections of the matrices
+corresponding to the same dimension (technically, 3dimensional arrays) are called the TT-cores.
+
+An attractive property of the TT-format is the ability to efficiently perform several types of operations on tensors if
+they are in the TT-format: basic linear algebra operations,
+such as the addition of a constant and the multiplication
+by a constant, the summation and the entrywise product of
+tensors (the results of these operations are tensors in the
+TT-format generally with the increased TT-ranks); computation of global characteristics of a tensor, such as the sum
+of all elements and the Frobenius norm; and the important
+rounding operation. See table 1 for a review of the operations that we use in this work and the paper (Oseledets,
+2011) for a detailed description.
+
+Oseledets (2011, Th. 2.1) shows that for an arbitrary tensor A a TT-representation exists but is not unique.
+
+The rounding operation builds a lower-rank approximation
+of a tensor. Given a tensor A in the TT-format and a precision parameter ε ≥ 0 the rounding operation (we refer
+to it as the TT-rounding and denote by round(A, ε)) finds
+a tensor Ã that on the one hand is close to the tensor A:
+kA − ÃkF ≤ εkAkF , but on the other hand has minimal
+ε
+TT-ranks among all tensors B : kA−BkF ≤ √n−1
+kAkF .
+Although the TT-rounding is only suboptimal (in a sense
+that there are no guarantees on finding the minimal TTranks within the desired accuracy), in practice it often performs well and allows us to apply multiple operations to
+tensors while controlling the growth of the TT-ranks.
+
+A
+A
+A(x1 , . . . , xn ) = GA
+1 [x1 ]G2 [x2 ] . . . Gn [xn ].
+
+We use the symbols GA
+i [xi ](αi−1 , αi ) to denote the element of the matrix GA
+i [xi ] in the position (αi−1 , αi ).
+Equation (1) can be equivalently rewritten as the sum of
+the products of the elements of the TT-cores:
+X
+A
+GA
+A(x) =
+1 [x1 ](α0 , α1 ) . . . Gn [xn ](αn−1 , αn ). (2)
+α0 ,...,αn
+
+Representation of a tensor A via the
+Qnexplicit enumeration
+of all its elements
+requires
+to
+store
+i=1 di numbers comPn
+pared to i=1 di ri−1 (A) ri (A) numbers if the tensor is
+stored in the TT-format. Thus, the TT-format is very efficient in terms of memory if the corresponding TT-ranks are
+small.
+There exist several algorithms that can compute the TTrepresentation of a tensor. The TT-SVD algorithm (Oseledets, 2011) can find an exact representation but is
+suitable only for small dimensionality n. The recently
+proposed alternating minimal energy (AMEn-cross) algorithm (Dolgov & Savostyanov, 2013; Oseledets & Tyrtysh-
+
+In addition to tensors one can also use the TT-format to
+operate on huge matrices and vectors. For a vector b with
+a mapping from its indices to n-dimensional vectors y =
+(y1 , . . . , yn )1 we define a TT-representation of the vector b
+as a TT-representation of the tensor B where B(y) = by .
+Now we define a TT-representation of a matrix M . Let x
+and y be n-dimensional vectors corresponding to the row
+and column indices of the matrix M respectively. We can
+1
+
+The length of the vector b should be equal to
+
+Qn
+
+i=1
+
+di .
+
+Putting MRFs on a Tensor Train
+
+rearrange the elements of the matrix M into the tensor M
+and convert the latter into the TT-format:
+M((x1 , y1 ), . . . , (xn , yn )) =
+
+x1
+
+x2
+
+xn
+
+M
+GM
+1 [x1 , y1 ] . . . Gn [xn , yn ]
+
+where the matrices GM
+i [xi , yi ], i = 1, . . . , n, serve as the
+TT-cores with compound indices (xi , yi ). In what follows
+we denote the elements of matrices in the TT-format without nested parentheses: M (x1 , . . . , xn ; y1 , . . . , yn ). Note
+that a matrix in the TT-format is not restricted to be square.
+Although index-vectors x and y are of the same length the
+sizes of the domains of the dimensions can vary.
+When both a matrix M and a vector b are represented in the
+TT-format, it is possible to efficiently compute the matrixby-vector product c = M b. The result of this operation
+(the vector c) will be represented in the TT-format as well.
+Matrix operations on top of the TT-representations allow us
+to apply different linear algebra methods on a large scale.
+For example, we can use the DMRG method based on the
+search of the smallest eigenvalue in a matrix (Khoromskij
+& Oseledets, 2010) to do an approximate MAP-inference
+in an MRF.
+
+α0
+
+G1
+
+α1
+
+G2
+
+...
+
+Gn
+
+αn
+
+Figure 1. A graphical model obtained by the TT-decomposition of
+the joint distribution tensor.
+
+whether it is possible to build an accurate TT-representation
+of the unnormalized distribution and the energy of an MRF.
+The TT-representation of the joint distribution tenb has a special interpretation. The inner varisor P = Z1 P
+ables αi , i = 0, . . . , n can be viewed as hidden variables
+in the chain model (see fig. 1). Marginalization w.r.t. them
+gives us the probability distribution w.r.t. the variables x:
+X
+P(x) =
+P(x, α),
+(3)
+α
+
+where P(x, α) is the joint distribution of the variables x
+and α. The domain size of each αi is equal to the corresponding TT-rank ri (P).
+
+5. Markov random fields as tensors
+
+5.1. The TT-format for MRF energy
+
+Let G = (V, E) be a hypergraph. The set of nodes V and
+the set of hyperedges E are both finite. Let all the nodes be
+indexed from 1 to n and all the hyperedges from 1 to m.
+
+In this section we present the general algorithm that converts the energy tensor E into the TT-format. The proposed
+algorithm is much faster and more accurate than the direct
+application of the AMEn algorithm.
+
+With each node i = 1, . . . , n we associate a variable xi that
+takes values from a domain Xi = {1, . . . , di }. For each
+hyperedge ` = 1, . . . , m we denote the tuple of the incident variables by x` . The `-th potential Θ` is a real-valued
+function defined on the joint domain of the variables x` .
+The energy function of the Markov random field (MRF)
+defined on the hypergraph
+G is the sum of all the potenPm
+`
+tials: E(x) =
+Θ
+(x
+). The exponentiation of the
+`
+`=1
+negative energy defines the unnormalized (Gibbs) distribub
+tion P(x)
+= exp(−E(x)). We use the symbol Z to denote
+the normalization constant (which
+P isbfrequently called the
+partition function), i.e. Z =
+x P(x). The functions
+Ψ` (x` ) = exp(−Θ` (x` )) are called the factors of MRF.
+Both the energy and the unnormalized probability can be
+considered as n-dimensional tensors in which the values of
+the variables x act as indices. The potentials and the factors become n-dimensional tensors as well if we add nonessential variables for non-existing dimensions: Θ` , Ψ` .
+UsingPthis notation we can
+write the following identities:
+m
+b = Jm Ψ` .
+E = `=1 Θ` and P
+`=1
+The factors (or the potentials) allow to store the joint distribution (or the energy) in memory in a compact form. The
+TT-format is an alternative way to compactly represent a
+multi-dimensional array. In the next section we explore
+
+The algorithm consists of the following three main steps.
+Step 1. For each potential Θ` (x` ), which we treat as a
+tensor indexed only by the variables x` , we find its TTrepresentation. Potentials are usually tensors of a relatively
+small dimensionality which allows for computing the required TT-decomposition using the TT-SVD algorithm. In
+some cases it is possible to explicitly construct the TTrepresentation for a potential (several examples are provided in the supplementary material).
+Step 2. Once all the potential tensors Θ` are in the TTformat, we add non-essential variables in order to make
+each of them n-dimensional. These non-essential variables
+can be added to TT-representations constructively.
+For clarity we describe this procedure with the following example. Suppose that our MRF has 5 nodes in total with their associated variables x1 , x2 , x3 , x4 , x5 and our
+potential Θ` (x` ) depends only on variables x1 , x2 , x4 (i.e.
+x` = (x1 , x2 , x4 )). After the first step of the algorithm we
+have the following TT-representation of our potential:
+Θ`
+Θ`
+`
+Θ` (x1 , x2 , x4 ) = GΘ
+1 [x1 ]G2 [x2 ]G4 [x4 ],
+`
+GΘ
+1 [x1 ],
+
+`
+GΘ
+2 [x2 ],
+
+`
+GΘ
+4 [x4 ]
+
+(4)
+
+are matrices
+where the cores
+of sizes r0 × r1 , r1 × r2 , r3 × r4 , respectively, and due to
+
+Putting MRFs on a Tensor Train
+
+Step 3. By exploiting the summation operation of the TTformat we combine all the tensors obtained after step 2 into
+the energy tensor
+m
+X
+E=
+Θ` .
+(5)
+`=1
+
+The following theorem provides an upper bound on the
+maximal TT-rank of the tensor constructed by the described
+algorithm (the proof is provided in the supplementary material).
+Theorem 1. If the order of each potential Θ` , ` =
+1, . . . , m does not exceed p, then the aforementioned algorithm constructs a TT-representation for the energy E
+in such a way that its maximal TT-rank is polynomially
+bounded:
+p
+(6)
+r(E) ≤ d 2 · m,
+where each variable xi takes at most d possible values.
+The algorithm often allows us to construct an accurate TTdecomposition of the energy tensor. Generally, after step 3
+we can apply the rounding procedure to the energy tensor E
+in order to reduce its TT-ranks and to get a more compact
+representation, if possible.
+5.2. Probability
+The algorithm described in section 5.1 can easily be modified to construct a TT-representation for the unnormalized
+b
+probability P.
+All the steps of the algorithm are essentially the same as
+those from the previous section. The difference is that instead of the potentials Θ` we operate on the factors Ψ` and
+in step 3 instead of the summation we compute the entrywise product
+m
+K
+b=
+P
+Ψ` .
+(7)
+`=1
+
+Note that this algorithm computes a precise TTb However, the TT-ranks of P
+b are exrepresentation of P.
+ponential in the number of nodes, because the TT-ranks are
+multiplied within the entrywise product operation. Thus,
+b in large
+it becomes impossible to use the TT-format for P
+problems. The TT-ranks remain huge even after applying
+the TT-rounding operation, so an accurate low-rank TTrepresentation of the unnormalized distribution probably
+does not exist. We illustrate this effect experimentally on
+2
+
+By Ik we denote the k × k identity matrix.
+
+1000
+
+maximal TT-rank
+
+the matrix multiplication operation r0 = r4 = 1, r2 = r3 .
+To introduce non-essential variables we need to define the
+`
+missing cores as the identity matrices: GΘ
+3 [x3 ] ≡ Ir2 =
+Θ`
+2
+Ir3 and G5 [x5 ] ≡ Ir4 = I1 . Note that this procedure does
+not increase the maximal TT-rank of Θ` .
+
+P
+round(P, 10−8)
+E
+
+800
+600
+
+round(E, 10−8)
+
+400
+200
+0
+0
+
+2
+
+4
+
+6
+
+8
+
+10
+
+12
+
+size of the Ising grid
+
+Figure 2. The maximal TT-ranks of TT-representations constructed for the energy tensor E and the corresponding unnorb for homogeneous Ising models with
+malized probability tensor P
+temperature 10 and pairwise weight 1. Details are in section 7.1.
+
+fig. 2. See sec. 7.1 for the detailed description of the experiment.
+
+6. Partition function
+A straightforward approach to compute the partition function is to represent the entire unnormalized probability tenb in the TT-format and compute the sum of its elsor P
+b turns out to have huge
+ements. However, the tensor P
+TT-ranks and therefore its TT-representation does not fit
+b
+into memory. An attempt to approximate the tensor P
+with another tensor that has moderate TT-ranks leads to
+large inaccuracies. On the other hand, each individual factor Ψ` has low TT-ranks and can be represented in the TTformat exactly. In this section we propose an algorithm
+that estimates the partition function by using only the TTrepresentations of the factors {Ψ` }m
+`=1 without building the
+TT-representation of the entire unnormalized probability
+b
+tensor P.
+6.1. The algorithm
+We assume that all the factors are already in the TT-format
+(see section 5.2 for details):
+Ψ`
+`
+Ψ` (x` ) = Ψ` (x) = GΨ
+1 [x1 ] . . . Gn [xn ].
+
+(8)
+
+`
+Hereinafter we use G`i [xi ](αi−1
+, αi` ) as a shorthand for
+Ψ`
+Ψ`
+`
+GΨ
+i [xi ](αi−1 , αi ) to lighten the notation.
+
+Recall the definition of the partition function Z:
+
+Z=
+
+m
+XY
+x `=1
+
+Ψ` (x) =
+| {z } x
+∈R
+
+m
+X O
+1 ,...,xn
+
+
+G`1 [x1 ] . . . G`n [xn ] .
+
+`=1
+
+Here we use the fact that the Kronecker product “⊗” and
+the regular product coincide when applied to numbers.
+Using the mixed-product property of the Kronecker prod-
+
+Putting MRFs on a Tensor Train
+
+Algorithm 1 Compute the partition function Z
+Input: factors Ψ1 , . . . , Ψm , rounding precision ε
+Output: Z̃ ≈ Z
+for ` := 1 to m do
+Find TT-cores G`1 , . . . , G`n for Ψ`
+end for
+Initialize fn+1 := 1
+for i := n downto 1 do
+Initialize Bi := 0
+for xi := 1 to di do
+m
+N
+Construct TT-matrix Ai [xi ] =
+G`i [xi ]
+`=1
+Bi := Bi + Ai [xi ]
+end for
+fi := Bi · fi+1
+fi := round(fi , ε)
+end for
+Z̃ := f1
+
+uct AC ⊗ BD = (A ⊗ B)(C ⊗ D) we can rewrite Z as
+X
+
+Z=
+
+
+G11 [x1 ] ⊗ . . . ⊗ Gm
+1 [x1 ] . . .
+
+x1 ,...,xn
+
+
+G1n [xn ] ⊗ . . . ⊗ Gm
+n [xn ] .
+
+We have rewritten Z as a product of n matrices in the TTformat with the maximal TT-rank at most d. Note that
+B1 and Bn are row and column vectors respectively, so
+B1 . . . Bn is a number.
+To compute Z we build the matrices Bi in the TT-format
+and then multiply them one by one. During the process we
+apply the TT-rounding procedure after each multiplication
+to keep the maximal TT-rank of the intermediate product as
+small as possible. The resulting algorithm is summarized
+as algorithm 1. One can vary performance vs. accuracy
+trade-off by changing the rounding precision parameter ε.
+In addition to the partition function Z the described approach allows one to efficiently compute the unnormalized marginal distributions of the variables. Specifically,
+the unnormalized unary marginals p̂i (xi ) can be computed
+as follows: p̂i (xi ) = B1 . . . Bi−1 Ai [xi ]Bi+1 . . . Bn . Note
+that all the products B1 . . . Bi−1 and Bi+1 . . . Bn for i =
+1, . . . , n can be pre-computed with only 2 passes through
+the data. If we additionally pre-compute all the products
+Bi . . . Bj for 1 ≤ i < j ≤ n, we will be able co compute
+the unnormalized marginal distribution for an arbitrary subset of variables.
+6.2. Analysis of the accuracy of algorithm 1
+
+Denote the Kronecker product of matrices G`i [xi ], ` =
+1, . . . , m by Ai [xi ]:
+
+In this section we provide theoretical guaranties on the accuracy of the partition function estimation via algorithm 1.
+
+Ai [xi ] = G1i [xi ] ⊗ . . . ⊗ Gm
+i [xi ].
+
+Denote the approximation of the product of the matrices {Bj }nj=i in the TT-format by fi . We have fn =
+Bn and Z̃ = f1 . Using the matrix-by-vector product and the TT-rounding procedure the algorithm sequentially computes fi = round(Bi fi+1 , ε), where the precision ε of the TT-rounding controls the relative accuracy: kBi fi+1 − fi k2 ≤ ε kBi fi+1 k2 . Note that the TTrounding procedure guarantees the previous inequality for
+the Frobenius norm instead of the 2-norm. However, here
+both Bi fi+1 and fi are vectors and so the Frobenius norm
+and the 2-norm coincide.
+
+The matrix Ai [xi ] for any fixed xi is of size
+(ri−1 (Ψ1 ) . . . ri−1 (Ψm )) × (ri (Ψ1 ) . . . ri (Ψm )) and
+consists of the following elements:
+1
+m
+Ai [xi ](αi−1
+, . . . , αi−1
+; αi1 , . . . , αim ) =
+1
+m
+m
+= G1i [xi ](αi−1
+, αi1 ) . . . Gm
+i [xi ](αi−1 , αi ).
+
+So the matrix Ai [xi ] can be treated as a matrix in the TT`
+format with all TT-ranks equal to 1 (since G`i [xi ](αi−1
+, αi` )
+is a 1 × 1 matrix).
+Now the partition function Z can be expressed as a product
+of n matrices:
+X
+Z=
+A1 [x1 ] . . . An [xn ] =
+x1 ,...,xn
+
+=
+
+X
+
+ X
+
+A1 [x1 ] . . .
+An [xn ] = B1 . . . Bn ,
+
+x1
+
+Pdi
+
+xn
+
+where Bi = xi =1 Ai [xi ]. A matrix Bi can be represented
+in the TT-format as a sum of di matrices of TT-rank 1.
+Therefore the maximal TT-rank of Bi does not exceed di
+and so we can store the TT-representation of the matrix Bi
+in memory.
+
+The next theorem contains the main result on the accuracy
+of algorithm 1. After the theorem we provide a more interpretable corollary.
+Theorem 2. For an MRF and a rounding parameter ε ≥ 0
+the absolute error of the partition function estimation Z̃
+computed by algorithm 1 is bounded as follows:
+
+
+
+
+Z − Z̃  ≤ kB1 k2 . . . kBn−2 k2 · kBn−1 fn − fn−1 k2 +
++ kB1 k2 . . . kBn−3 k2 · kBn−2 fn−1 − fn−2 k2 + . . . +
++ kB1 f2 − f1 k2 .
+
+(9)
+
+The proof of the theorem is provided in the supplementary
+material. Note that all the items on the right-hand side are
+computable.
+
+Putting MRFs on a Tensor Train
+6
+
+log ||Bi||F
+
+4
+
+log ||Bi||2
+
+2
+
+log Ui
+
+0
+0
+
+20
+
+40
+
+60
+
+80
+
+100
+
+node index i = 1, . . . , n
+
+Figure 3. Comparison of the 2-norm and the Frobenius norm of
+the matrix Bi against the upper bound Ui . The plot was constructed for a heterogeneous Ising model of size 10.
+exact value
+
+3
+
+log Z
+
+10
+
+TT estimate
+2
+
+10
+
+−1
+
+10
+
+10
+
+0
+
+1
+
+10
+
+temperature T
+
+Figure 5. Confidence bounds on the computation of the partition
+function Z obtained by theorem 2 and upper bound (11). The
+details are provided in section 7.2.
+
+Corollary 1. For an MRF and a rounding parameter ε ≥ 0
+the absolute error of the partition function estimation Z̃
+computed by algorithm 1 is bounded as follows:
+
+
+
+
+Z − Z̃  ≤ kB1 k2 . . . kBn k2 ((1 + ε)n−1 − 1). (10)
+Although the bound from the corollary is less tight, it allows one to find a sufficient ε for the target accuracy.
+To use theorem 2 we need to evaluate the 2-norms of some
+vectors and matrices in the TT-format. The vector 2-norm
+coincides with the Frobenius norm of the corresponding
+tensor, so one can compute kBi fi+1 − fi k2 using the
+Frobenius norm operation of the TT-format. For matrices
+the direct computation of the 2-norm in the TT-format is
+difficult. However, it can be bounded from above by the
+Frobenius norm or empirically tighter bound that uses the
+specific structure of the matrix Bi :
+X
+
+
+
+1
+m
+ ≤
+kBi k2 = 
+G
+[x
+]
+⊗
+.
+.
+.
+⊗
+G
+[x
+]
+i
+i
+i
+i
+
+
+xi
+
+2
+
+X
+
+G1i [xi ] ⊗ . . . ⊗ Gm
+
+≤
+i [xi ] 2 =
+xi
+
+X
+
+G1i [xi ] . . . kGm
+=
+i [xi ]k2 = Ui .
+2
+
+(11)
+
+xi
+
+Here we have used the following identity: kA ⊗ Bk2 =
+kAk2 kBk2 . Note that here G`i [xi ] for all ` = 1, . . . , m are
+ordinary (small) matrices, so we can easily compute their
+2-norms.
+In fig. 3 we experimentally compare the values of the
+Frobenius norm kBi kF , the 2-norm kBi k2 , and the
+suggested upper bound Ui . For a specific Ising model
+for each node i we report the logarithms of the three values.
+
+7. Experiments
+In all our experiments we use a non-optimized MATLAB
+implementation3 of our methods. For operations related
+to the TT-format we use the TT-Toolbox4 implemented
+in MATLAB as well. In our evaluation we mainly use
+the homogeneous and heterogeneous Ising models, and
+we refer to the supplementary material for the detailed
+description of the experimental setup.
+7.1. TT-ranks of energies and distributions
+In this experiment we illustrate the claims made in sec. 5.1
+and 5.2 about the TT-ranks of the energy and the unnormalized distribution tensors constructed for an MRF. In
+fig. 2 for each size of the Ising model we report the maximal TT-ranks of both the energy and the unnormalized
+probability for the cases when they are represented in the
+TT-format exactly and after the TT-rounding procedure
+with precision 10−8 . As was claimed, for the energies
+the TT-ranks grow slowly with the increase of the size
+of the model as opposed to the probabilities. The exact
+TT-representations of the probability tensors of sizes 11
+and 12 did not fit into 8GB of memory.
+7.2. Partition functions
+In this experiment we evaluate algorithm 1 for computing
+the partition function of an MRF.
+First we compare our method (TT) against the following
+methods implemented in the LibDAI system (Mooij, 2010):
+Belief Propagation (BP) (Kschischang et al., 2001), Tree
+Expectation Propagation (TREEEP) (Minka & Qi, 2004),
+and the Mean Field method (MF) (Wainwright & Jordan,
+2008). In addition, we compare our method against the
+annealed importance sampling method (AIS) (Neal, 2001)
+as a representative of the family of MCMC methods. The
+results are shown in plot 4a. For AIS method we select
+parameters (1000 intermediate distributions, 70 samples
+each) to maximize the accuracy achieved within 60 seconds
+per model. The ground-truth values are computed using the
+junction tree algorithm. For each value of temperature T
+we generate 50 homogeneous 10 × 10 Ising models and
+report the absolute error of the logarithm of the computed
+partition functions (we show the median, lower and upper
+quartiles).
+In the second experiment we compare our method with the
+recently proposed WISH method (Ermon et al., 2013) on
+a dataset taken form their paper. The results of the comparison are presented in plot 4b. Here pairwise weights are
+generated uniformly from [−f, f ] with parameter f varying from 0.25 to 3.
+3
+
+https://github.com/bihaqo/TT-MRF
+http://spring.inm.ras.ru/osel/download/
+tt22.zip
+4
+
+Putting MRFs on a Tensor Train
+2
+
+10
+
+TT
+WISH
+BP
+MF
+TREEEP
+AIS
+
+0
+0
+
+| log Z̃ − log Z|
+
+| log Z̃ − log Z|
+
+10
+
+−5
+
+10
+
+−10
+
+10
+
+10
+
+−2
+
+10
+
+−4
+
+10
+
+−6
+
+10
+−1
+
+0
+
+10
+
+1
+
+10
+
+2
+
+10
+
+10
+
+3
+
+10
+
+temperature T
+
+0.5
+
+1
+
+1.5
+
+2
+
+2.5
+
+3
+
+strength of pairwise weights f
+
+(a)
+
+(b)
+
+Figure 4. The computation of the partition function Z. Plot (a) shows the comparison of our method (TT) against competitors on a set
+of homogeneous Ising models at different values of the temperature. Plot (b) shows the comparison of our method against the WISH
+algorithm on a set of heterogeneous Ising models. In both plots we report the errors, so the lower, the better.
+0
+
+10
+
+−2
+
+10
+
+TT
+BP
+MF
+TREEEP
+Gibbs
+
+error in marginals
+
+−4
+
+10
+
+−6
+
+10
+
+−8
+
+10
+
+−10
+
+Table 2. The relative value of the energy for the MAP-inference
+method based on the TT-decomposition. The lower bound obtained by TRW-S is 0%, the energy of the TRW-S primal solution
+is 100%.
+P ROBLEM
+
+10
+
+n
+
+d
+
+TT E NERGY
+
+320
+348
+187
+125
+19
+
+3
+3
+3
+7
+19
+
+48.41%
+95.83%
+98.69%
+1769.65%
+135.47%
+
+−12
+
+10
+
+−14
+
+10
+
+0
+
+0.5
+
+1
+
+1.5
+
+2
+
+2.5
+
+3
+
+strength of pairwise weights f
+
+Figure 6. The computation of the marginal distributions of the individual variables. We use a set of heterogeneous Ising models
+and report the mean absolute error of the marginal for the “+1”
+class (the lower, the better).
+
+In this experiment the running time of our non-optimized
+MATLAB implementation of the TT method was at most
+53 seconds (32 seconds on average). The running times of
+the BP, MF, and TREEEP methods were 0.018, 0.05, and
+0.1 seconds correspondingly. The WISH system was run
+on a cluster with timeouts of 15 minutes on each core.
+Finally, fig. 5 presents the confidence bounds obtained by
+upper-bounding the result of theorem 2 using eq. (11) and
+taking the logarithm of the inequality.
+7.3. Unary marginals
+In this experiment we evaluate the ability of our method
+to compute the marginal distributions. We compare our
+method (TT) against Belief Propagation (BP) (Kschischang et al., 2001), Tree Expectation Propagation
+(TREEEP) (Minka & Qi, 2004), Mean Field (MF) (Wainwright & Jordan, 2008), and Gibbs sampling (Wainwright
+& Jordan, 2008) all implemented in the LibDAI system.
+The results of the comparison are presented in fig. 6. The
+details of the experimental setup are in the supplementary
+material.
+7.4. MAP
+In this experiment we evaluate the algorithm for finding
+the minimal element in the energy tensor that corresponds
+
+GEO - SURF -3/ GM 6
+GEO - SURF -3/ GM 20
+GEO - SURF -3/ GM 203
+GEO - SURF -7/ GM 11
+MATCHING / MATCHING 1
+
+to MAP-inference. To find the minimal element in a
+tensor, which is in the TT-format, we construct a diagonal
+matrix in the TT-format containing all the elements of the
+tensor and use the DMRG algorithm to find its minimal
+eigenvalue (Khoromskij & Oseledets, 2010). We run the
+method on several real-world problems from a recent
+benchmark (Kappes et al., 2013) and compare it against
+the popular TRW-S algorithm (Kolmogorov, 2006). Some
+of the results are reported in table 2. The DMRG algorithm
+shows comparable results and on geo-surf-3 problems
+almost uniformly outperforms TRW-S.
+
+8. Conclusion
+In the paper we show how the modern tensor decomposition framework can be used for solving important problems
+arising in probabilistic graphical models. Although we
+consider only low-order models, the framework can further
+be generalized for many important high-order cases.
+Another direction for future work could be the search of
+a new parametrization of graphical models, different from
+the state-of-the-art log-linear one, with respect to which the
+derivatives of the log-partition function can be computed
+with high accuracy through the TT-decomposition.
+Acknowledgements. We would like to thank Ivan Oseledets for valuable discussions and Stefano Ermon for providing the results of the WISH method. This work was supported by RFBR (projects 12-01-00938 and 12-01-33085).
+
+Putting MRFs on a Tensor Train
+
+References
+Caroll, J. D. and Chang, J. J. Analysis of individual differences in multidimensional scaling via n-way generalization of Eckart-Young decomposition. Psychometrika,
+35:283–319, 1970.
+Dolgov, S. V. and Savostyanov, D. V. Alternating minimal
+energy methods for linear systems in higher dimensions.
+Part II: Faster algorithm and application to nonsymmetric systems. arXiv preprint 1304.1222, 2013.
+Ermon, S., Gomes, C., Sabharwal, A., and Selman, B.
+Taming the curse of dimensionality: Discrete integration
+by hashing and optimization. In International Conference on Machine Learning (ICML), 2013.
+Grasedyck, L. Hierarchical singular value decomposition
+of tensors. SIAM J. Matrix Anal. Appl., 31:2029–2054,
+2010.
+Grosse, R., Maddison, C., and Salakhutdinov, R. Annealing between distributions by averaging moments. In
+Advances in Neural Information Processing Systems 26
+(NIPS), pp. 2769–2777. 2013.
+Hackbusch, W. and Kühn, S. A new scheme for the tensor representation. J. Fourier Anal. Appl., 15:706–722,
+2009.
+Hazan, T., Maji, S., and Jaakkola, T. On sampling from
+the Gibbs distribution with random maximum a posteriori perturbations. In Advances in Neural Information
+Processing Systems 26 (NIPS), pp. 1268–1276. 2013.
+
+Kolmogorov, V. Convergent tree-reweighted message passing for energy minimization. IEEE Transactions on Pattern Analysis and Machine Intelligence (PAMI), 28(10):
+1568–1583, 2006.
+Kschischang, F. R., Frey, B. J., and Loeliger, H.-A. Factor
+graphs and the sum-product algorithm. IEEE Transactions on Information Theory, 47(2):498–519, 2001.
+Minka, T. and Qi, Y. Tree-structured approximations by expectation propagation. In Advances in Neural Information Processing Systems 16 (NIPS), pp. 193–200. 2004.
+Mooij, J. M. libDAI: A free and open source C++ library
+for discrete approximate inference in graphical models.
+Journal of Machine Learning Research, 11:2169–2173,
+August 2010.
+Neal, R. Annealed importance sampling. Statistics and
+Computing, 11:125–139, 2001.
+Nowozin, S. and Lampert, C. Structured learning and prediction in computer vision. Foundations and Trends in
+Computer Graphics and Vision, 6(3–4):185–365, 2010.
+Oseledets, I. V. Tensor-Train decomposition. SIAM J. Scientific Computing, 33(5):2295–2317, 2011.
+Oseledets, I. V. and Tyrtyshnikov, E. E. TT-cross approximation for multidimensional arrays. Linear Algebra
+Appl., 432(1):70–88, 2010.
+Song, L., Ishteva, M., Parikh, A., Xing, E., and Park, H.
+Hierarchical tensor decomposition of latent tree graphical models. In International Conference on Machine
+Learning (ICML), 2013.
+
+Ishteva, M., Park, H., , and Song, L. Unfolding latent tree
+structures using 4th order tensors. In International Conference on Machine Learning (ICML), 2013.
+
+Taskar, B., Guestrin, C., and Koller, D. Max-Margin
+Markov networks. In Advances in Neural Information
+Processing Systems 16 (NIPS), pp. 25–32. 2004.
+
+Jernite, Y., Halpern, Y., and Sontag, D. Discovering hidden variables in noisy-or networks using quartet tests. In
+Advances in Neural Information Processing Systems 26
+(NIPS), pp. 2355–2363. 2013.
+
+Tsochantaridis, I., Joachims, T., Hofmann, T., and Altun, Y.
+Large margin methods for structured and interdependent
+output variables. Journal of Machine Learning Research
+(JMLR), 6:1453–1484, 2005.
+
+Kappes, J., Andres, B., Hamprecht, F., Schnörr, C.,
+Nowozin, S., Batra, D., Kim, S., Kausler, B., Lellmann,
+J., Komodakis, N., and Rother, C. A comparative study
+of modern inference techniques for discrete energy minimization problems. In IEEE Conference on Computer
+Vision and Pattern Recognition (CVPR), pp. 1328–1335,
+2013.
+
+Tucker, L. R. Some mathematical notes on three-mode factor analysis. Psychometrika, 31(3):279–311, 1966.
+
+Khoromskij, B. N. and Oseledets, I. V. DMRG+QTT
+approach to computation of the ground state for the
+molecular Schrödinger operator. Preprint 69, MPI MIS,
+Leipzig, 2010.
+
+Wainwright, M. J. and Jordan, M. I. Graphical models,
+exponential families, and variational inference. Foundations and Trends in Machine Learning, 1(1–2):1–305,
+2008.
+Wainwright, M. J., Jaakkola, T., and Willsky, A. S. A new
+class of upper bounds on the log partition function. IEEE
+Transactions on Information Theory, 51(7):2313–2335,
+2005.
+
+

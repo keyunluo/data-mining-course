@@ -1,0 +1,1645 @@
+Composite Quantization for Approximate Nearest Neighbor Search
+
+Ting Zhang∗
+University of Science and Technology of China, Hefei, P.R. China
+
+ZTING @ MAIL . USTC . EDU . CN
+
+Chao Du∗
+Tsinghua University, Beijing, P.R. China
+
+DUCHAO 0726@ GMAIL . COM
+
+Jingdong Wang
+Microsoft Research, Beijing, P.R. China
+
+JINGDW @ MICROSOFT. COM
+
+Abstract
+This paper presents a novel compact coding approach, composite quantization, for approximate
+nearest neighbor search. The idea is to use the
+composition of several elements selected from
+the dictionaries to accurately approximate a vector and to represent the vector by a short code
+composed of the indices of the selected elements. To efficiently compute the approximate
+distance of a query to a database vector using the
+short code, we introduce an extra constraint, constant inter-dictionary-element-product, resulting
+in that approximating the distance only using
+the distance of the query to each selected element is enough for nearest neighbor search. Experimental comparison with state-of-the-art algorithms over several benchmark datasets demonstrates the efficacy of the proposed approach.
+
+1. Introduction
+Nearest neighbor (NN) search has been a fundamental research topic in machine learning, computer vision, and information retrieval (Shakhnarovich et al., 2006). The goal
+of NN search, given a query q, is to find a vector NN(q)
+whose distance to the query is the smallest from the N ddimensional database vectors.
+The straightforward solution, linear scan, is to compute the distances to all the database vectors whose time
+∗
+This work was done when Ting Zhang and Chao Du were
+interns at Microsoft Research, Beijing, P.R. China.
+
+Proceedings of the 31 st International Conference on Machine
+Learning, Beijing, China, 2014. JMLR: W&CP volume 32. Copyright 2014 by the author(s).
+
+cost is O(N d) and is not practical for large scale highdimensional cases. Multi-dimensional indexing methods,
+such as the k-d tree (Friedman et al., 1977), have been
+developed to speed up exact search. However, for highdimensional cases it turns out that such approaches are not
+much more efficient (or even less efficient) than linear scan.
+Therefore, there have been a lot of interests in algorithms
+that perform approximate nearest neighbor (ANN) search.
+Many data structures and algorithms are developed to eliminate the number of distance computations. For example, the algorithm with a k-d tree is used to find ANNs
+by limiting the search time. Exploiting random multiple k-d trees and priority search (Silpa-Anan & Hartley,
+2008) result in good performance in terms of accuracy
+and efficiency. FLANN (Muja & Lowe, 2009) finds a
+good configuration of random k-d trees and hierarchial
+k-means trees to optimize the performance. Other tree
+structures, such as the cover tree (Beygelzimer et al., 2006)
+and the trinary-projection tree (Jia et al., 2010; Wang et al.,
+2014), and so on, have also been designed. Neighborhood graph (Arya & Mount, 1993; Wang & Li, 2012;
+Wang et al., 2013b;c) is also adopted for ANN search.
+The algorithms that convert the database vectors into
+short codes have been attracting a lot of attention recently as their storage cost is small, making the inmemory search feasible, and the distance computation cost is also reduced.
+The seminal work on
+locality sensitive hashing (LSH) (Gionis et al., 1999)
+uses random projections to compute Hamming embeddings, and is later followed by a lot of extensions,
+such as Mahalanobis distance (Jain et al., 2008), kernelization (Kulis & Grauman, 2009), complementary hashing (Xu et al., 2011), and so on. Subsequent efforts have
+been devoted to learn good hashing functions, such as
+learnt binary reconstruction (Kulis & Darrells, 2009), semantic hashing (Salakhutdinov & Hinton, 2009), shift kernel hashing (Raginsky & Lazebnik, 2009), spectral hash-
+
+Composite Quantization for Approximate Nearest Neighbor Search
+
+ing (Weiss et al., 2008), graph-based hashing (Liu et al.,
+2011), iterative quantization (Gong & Lazebnik, 2011),
+isotropic hashing (Kong & Li, 2012), minimal loss hashing (Norouzi & Fleet, 2011), order preserving hashing (Wang et al., 2013a), and so on. The Hamming embedding algorithms are only able to produce a few distinct
+distances resulting in limited ability and flexibility of distance approximation.
+Product quantization (PQ), a data compression technique
+in signal processing, is recently used for efficient nearest neighbor search (Jégou et al., 2011a). The idea is to
+decompose the space into a Cartesian product of lowdimensional subspaces and to quantize each subspace separately. A vector is then represented by a short code composed of its subspace quantization indices. The distance
+between a query and a database vector is approximated by
+using the query and the short code corresponding to the
+database vector. Specifically, it first computes the distance
+of the query to the quantized center of the database vector in each subspace, and then sums up the distances together, where the distance lookup table is used for fast distance evaluation. The advantage over Hamming embedding methods is that the number of possible distances is significantly higher and hence the distance approximation is
+more accurate. It is shown in (Jégou et al., 2011a) that PQ
+achieves a much better search performance with comparable efficiency than hamming embedding algorithms. Cartesian k-means (Norouzi & Fleet, 2013) improves product
+quantization by finding better subspace partitioning and
+achieves a better search performance.
+In this paper, we propose a novel approach, composite
+quantization, to convert vectors to compact codes. The idea
+is to approximate a vector using the composition of several
+elements selected from several dictionaries and to represent this vector by a short code composed of the indices
+of the selected elements. The advantage is that the vector approximation, and accordingly the distance approximation of a query to the database vector, is more accurate,
+yielding more accurate nearest neighbor search. To efficiently evaluate the distance between a query and the short
+code representing the database vector, we introduce an
+extra constraint, called constant inter-dictionary-elementproduct, i.e., the summation of the inner products of all
+pairs of elements that are used to approximate the vector
+but from different dictionaries is constant. As a result, the
+approximate distance can be calculated from the distance
+of the query to each selected element, which is efficient by
+using a few distance table lookups. We present an alternative optimization algorithm to simultaneously find the dictionaries and the compact codes. In addition, we show that
+production quantization (Jégou et al., 2011a) and Cartesian
+k-means (Norouzi & Fleet, 2013) can be regarded as constrained versions of our approach. Experimental results
+
+over several datasets demonstrate the proposed approach
+achieves state-of-the-art performances.
+
+2. Formulation
+Given a query vector q ∈ Rd and a set of N d-dimensional
+vectors X = {x1 , . . . , xN }, the nearest neighbor search
+problem aims to find the item NN(q) from X such that
+its distance to the query vector is minimum. In this paper,
+we study the approximate nearest neighbor search problem
+under the Euclidean distance and propose a compact coding
+approach, called composite quantization.
+The idea is to approximate a vector x by the composition
+of several (M ) elements {c1k1 , c2k2 , . . . , cMkM }, each of
+which is selected from a dictionary with K elements, Cm =
+{cm1 , . . . , cmK }, e.g., c1k1 is the k1 th element in dictionary C1 , and to represent a vector by a short code composed
+of the indices of the selected elements, resulting in a compact representation of length M log K with each dictionary
+element coded by log K bits.
+PM
+Let x̄ =
+m=1 cmkm be the approximation of the vector x. The accuracy of nearest neighbor search relies on
+the degree of the distance approximation, i.e., how small
+is the difference between the distance of a vector q to the
+vector x and the distance to the approximation x̄. According to the triangle inequality, |kq − xk2 − kq − x̄k2 | 6
+kx − x̄k2 , minimizing the distance approximation error can
+be transformed to minimizing the vector approximation error, which is formulated as follows,
+XM
+XN
+2
+n k ,
+cmkm
+(1)
+kxn −
+mincmkm
+n ∈Cm
+2
+m=1
+
+n=1
+
+n is the element selected from the dictionary Cm
+where cmkm
+for the nth database vector xn .
+
+Given the approximation x̄, the distanceP
+of a query q to the
+M
+approximation x̄ is kq − x̄k2 = kq − m=1 cmkm k2 . It
+is time-consuming to reconstruct the approximate vector x̄
+(taking O(M d)) and then compute the distance between q
+and x̄ (taking O(d)). Considering the expansion,
+XM
+kq − cmkm k22
+cmkm k22 =
+m=1
+m=1
+XM XM
+cTiki cjkj ,
+− (M − 1)kqk22 +
+
+kq −
+
+XM
+
+i=1
+
+j=1,j6=i
+
+(2)
+
+we can see that, given the query q, the second term −(M −
+1)kqk22 in the right-hand side is constant for all the database
+vectors and hence unnecessary P
+to compute for nearest
+M
+neighbor search. The first term m=1 kq − cmkm k22 is
+the summation of the distances of the query to the selected
+dictionary elements and can be efficiently computed using
+a few (M ) distance table lookups, where the distance table
+is precomputed and stores the distances of the query to the
+dictionary elements. Similarly, we can build a table storing
+
+Composite Quantization for Approximate Nearest Neighbor Search
+
+the inner products between dictionary elements and compute the third term using O(M 2 ) distance table lookups.
+This results in the distance computation cost is changed
+from O(M d) to O(M 2 ), which is still a little large.
+To further reduce the computation cost, we introduce
+an extra
+letting the third term be a constant,
+P constraint,
+PM
+T
+i.e., M
+i=1
+j=1,j6=i ciki cjkj = ǫ, called constant interdictionary-element-product. As a result, we only need to
+compute the first term for nearest neighbor search, and the
+computation cost is reduced to O(M ).
+In summary, the optimization problem is formulated as
+XN
+min
+kxn − [C1 C2 · · · CM ]bn k22 (3)
+{Cm },{bn },ǫ
+
+s. t.
+
+n=1
+
+XM XM
+
+bT CT Cj bnj
+j=1,j6=i ni i
+T
+bn = [bTn1 bTn2 · · · bnM
+]T
+bnm ∈ {0, 1}K , kbnm k1 = 1
+i=1
+
+=ǫ
+
+n = 1, 2, · · · , N, m = 1, 2, · · · , M.
+Here, Cm is a matrix of size d × K, and each column corresponds to an element of the mth dictionary Cm . bn is the
+composition vector, and its subvector bnm is an indicator
+vector with only one entry being 1 and all others being 0,
+showing which element is selected from the mth dictionary
+for composite quantization.
+
+3. Optimization
+The problem formulated in 3 is a mixed-binary-integer program, which consists of three groups of unknown variables: dictionaries {Cm }, composition vectors {bn },
+and ǫ. In addition to the binary-integer constraint over
+{bn }, there are quadratic equality constraints over {Cm },
+PM T T
+We propose to adopt the
+i6=j bni Ci Cj bnj = ǫ.
+quadratic penalty method and add a penalty function that
+measures the violation of the quadratic equality constraints
+into the objective function,
+XN
+
+Cbn k22
+
+kxn −
+φ({Cm }, {bn }, ǫ) =
+n=1
+XN X M
+bTni CTi Cj bnj − ǫ)2 ,
+(
++µ
+n=1
+
+i6=j
+
+(4)
+
+where µ is the penalty parameter, C = [C1 C2 · · · CM ] and
+PM PM
+PM
+j=1,j6=i .
+i=1
+i6=j =
+
+independent to {bt }t6=n for all the other vectors. Then the
+optimization problem is decomposed to N subproblems,
+φn (bn )
+
+XM
+bTni CTi Cj bnj − ǫ)2 , (5)
+= kxn − Cbn k22 + µ(
+i6=j
+
+where there are three constraints: bn is a binary vector,
+kbnm k1 = 1, and bn = [bTn1 bTn2 · · · bTnM ]T . Generally, this optimization problem is NP-hard. We notice that
+the problem is essentially a high-order MRF (Markov random field) problem. We again use the alternative optimization technique like the iterated conditional modes algorithm
+that is widely used to solve MRFs, and solve the M subvectors {bnm } alternatively. Given {bnl }l6=m fixed, we
+update bnm by exhaustively checking all the elements in
+the dictionary Cm , finding the element such that the objective value is minimized, and accordingly setting the corresponding entry of bnm to be 1 and all the others to be 0.
+Update ǫ. We can see that the objective function is a
+quadratic function with respect to ǫ. Given C and {bn }
+fixed, it is easy to get the optimal solution to ǫ,
+ǫ=
+
+1 XN XM T T
+bni Ci Cj bnj .
+i6=j
+n=1
+N
+
+(6)
+
+Update {Cm }. Fixing {bn } and ǫ, the problem is an unconstrained nonlinear optimization problem with respect
+to C. There are many algorithms for such a problem.
+We choose the quasi-Newton algorithm and specifically
+the L-BFGS algorithm, the limited-memory version of the
+Broyden-Fletcher-Goldfarb-Shanno (BFGS) algorithm. It
+only needs a few vectors to represent the approximation of
+the Hessian matrix instead of storing the full Hessian matrix as done in the BFGS algorithm. We adopt the publicly available implementation of L-BFGS† . The partialderivative with respect to Cm , the input to the L-BFGS
+solver, is computed as follows,
+∂
+φ({Cm }, {bn }, ǫ)
+∂Cm
+M
+N
+X
+X
+T
+Cl bnl − xn )bnm
++
+[2(
+=
+n=1
+M
+X
+
+4µ(
+
+l=1
+
+bTni CTi Cj bnj − ǫ)(
+
+i6=j
+
+M
+X
+
+Cl bnl )bTnm ].
+
+(7)
+
+l=1,l6=m
+
+3.1. Algorithm
+We use the alternative optimization technique to iteratively
+solve the problem. Each iteration alternatively updates
+{bn }, ǫ and {Cm }. The details are given below.
+Update {bn }. It can be easily seen that bn , the composition indicator of a vector xn , given {Cm } and ǫ fixed, is
+
+3.2. Implementation details
+The proposed algorithm is warm-started by using the solution of a relatively easy problem, which is formed by dropping the constant inter-dictionary-element-product con†
+
+http://www.ece.northwestern.edu/˜nocedal/lbfgs.html
+
+Composite Quantization for Approximate Nearest Neighbor Search
+
+The penalty method usually needs to solve a series of unconstrained problems by increasing the penalty parameter µ into infinity to make the constraint completely satisfied. In our case, we find that the inter-dictionary-elementproduct is not necessarily exactly constant and the search
+performance is not affected if the deviation of the interdictionary-element-product from a constant is relatively
+small compared with the distortion error. Therefore, our
+algorithm instead relaxes this constraint and selects the parameter µ via validation. The validation dataset is a subset
+of the database (selecting a subset is only for validation efficiency, and it is fine that the validation set is a subset of
+the learning set as the validation criterion is not the objective function value but the search performance). The best
+parameter µ is chosen so that the average search performance by regarding the validation vectors as queries and
+finding {5, 10, 15, · · · , 100} nearest neighbors from all the
+database vectors is the best.
+3.3. Analysis
+We present the time complexity of each iteration. At the
+beginning of each iteration, we first compute inner product tables, {cTir cjs |i 6= j, r, s = 1, 2, · · · , K}, between the
+dictionary elements, taking O(M 2 K 2 d), so that computing bTni CTi CTj bnj can be completed by one table lookup.
+The time complexities of the three updates are given as follows. (1) It takes O(M KdTb ) with Tb being the number
+of iterations (= 3 in our implementation achieving satisfactory results) to update bn , i.e., optimize the objective
+function in 5, and thus the time complexity of updating
+{bn } is O(N M KdTb ). (2) It takes O(N M 2 ) to update
+ǫ, which can be easily seen from Equation 6. (3) The main
+cost of updating {Cm } lies in computing the partial derivatives and the objective function value that are necessary in
+L-BFGS. For clarity, we drop the complexity terms that are
+independent of N and can be neglected for a large N . Then,
+the time complexity for updating {Cm } is O(N M dTl Tc )
+with Tc being the number of iterations (= 10 in our implementation) and Tl (set to 5 in our implementation) being
+the number of line searches in L-BFGS.
+The objective function value at each iteration in the algo-
+
+10
+
+1.8
+objective value
+
+straint, i.e., the problem in Equation 1, for the initialization. The easy problem is also solved by alterative optimization, iteratively updating C and {bn }. The scheme
+of updating {bn } is almost the same to the above scheme
+with dropping ǫ-related terms. Updating C is relatively
+easy. Given {bn } fixed, the objective function is quadratic
+with respect to C, and there is a closed-form solution:
+C = XBT (BBT )−1 , where X is a matrix with each column corresponding to a database vector, and B is a matrix
+composed of the composition vectors of all the database
+vectors, B = [b1 b2 · · · bn ].
+
+x 10
+
+1.75
+1.7
+1.65
+
+0
+
+5
+
+10
+
+15
+Iteration number
+
+20
+
+25
+
+30
+
+Figure 1. Convergence curve of our algorithm. The vertical axis
+represents the objective function value of Equation 4 and the horizontal axis corresponds to the number of iterations. The objective
+function value at the initialization is about 2.3 × 1012 and not
+shown for clarity. The curve is obtained from the result over a
+representative dataset 1M SIFT with 64 bits.
+
+rithm always weakly decreases. It can be validated that
+the objective function value is lower-bounded (not smaller
+than 0). The two points indicate the convergence of our algorithm. The theoretic analysis of the rate of convergence
+is not easy, while the empirical results show that the algorithm takes a few iterations to converge. Figure 1 shows an
+example convergence curve.
+
+4. Discussions
+Relation to k-means and sparse coding. Composite
+quantization, when only one dictionary is used (i.e., M =
+1), is degraded to the k-means approach. Compared with
+k-means, composite quantization is able to produce a larger
+number of quantized centers (K M ) using a few dictionary
+elements (KM ), resulting in that the composite quantizer
+can be indexed in memory for large scale quantized centers.
+Composite quantization is also related to coding with block
+sparsity (Yuan & Lin, 2006), in which the coefficients are
+divided into several blocks and the sparsity constraints are
+imposed in each block separately. Composite quantization
+can be regarded as a sparse coding approach, where the
+coefficients that can be only valued by 0 or 1 are divided
+into M groups, for each group the non-sparsity degree is 1,
+and an extra constraint, constant inter-dictionary-elementproduct, is considered.
+Connection with product quantization and Cartesian kmeans. Product quantization (Jégou et al., 2011a) decomposes the space into M low dimensional subspaces and
+quantizes each subspace separately. A vector x is decomposed into M subvectors, {x1 , · · · , xM }. Let the quantization dictionaries over the M subspaces be C1 , C2 , · · · , CM
+with Cm being a set of centers {cm1 , · · · , cmK }. A vector x is represented by the concatenation of M centers,
+T
+T
+T
+[cT1k∗ cT2k∗ · · · cmk
+is the one
+∗ · · · cMk∗ ] , where cmk∗
+m
+m
+1
+2
+M
+m
+nearest to x in the mth quantization dictionary.
+Rewrite each center cmk as a d-dimensional vector c̃mk so
+
+Composite Quantization for Approximate Nearest Neighbor Search
+64 bits encoding
+
+D IM
+784
+512
+128
+960
+128
+
+average query time / s
+
+10
+
+Table 1. The description of the datasets.
+BASE SET Q UERY SET
+MNIST
+60, 000
+10, 000
+L ABEL M E 22K
+20, 019
+2, 000
+1M SIFT
+1, 000, 000
+10, 000
+1M GIST
+1, 000, 000
+1, 000
+1B SIFT
+1, 000, 000, 000
+10, 000
+
+1
+0.1
+
+ITQ
+PQ
+CKM
+CQ
+
+0.01
+0.005
+0.001
+0.0005
+0
+
+1MSIFT
+
+1MGIST
+
+1BSIFT
+
+Figure 2. Average query time on 1M SIFT, 1M GIST and 1B
+SIFT.
+
+that c̃mk = [0T · · · (cmk )T 0T ]T , i.e., all entries are zero
+except that the subvector corresponding to the mth subspace is equal to cmk . The approximation of a vector x usT
+T
+ing the concatenation x = [cT1k∗ cT2k∗ c · · · cMk
+is then
+∗ ]
+1
+2
+M
+PM
+∗ . Simiequivalent to the composition x =
+m=1 c̃mkm
+larly, it can also be shown that there is a same equivalence
+in Cartesian k-means (Norouzi & Fleet, 2013).
+The above analysis indicates that both product quantization
+and Cartesian k-means can be regarded as a constrained
+version of composition quantization, with the orthogonal
+dictionary constraint: CiT Cj = 0, i 6= j, which guarantees that the constant inter-dictionary-element-product constraint in our approach holds. In addition, unlike product
+quantization and Cartesian k-means in which each dictionary (subspace) is formed by d/M dimensions, our approach when ǫ = 0 is able to automatically decide how
+many dimensions belong to one dictionary.
+An upper-bound minimization view. Let us introduce
+several notations: d(q, x) = kq − xk2 ; d(q, x̄) = kq −
+PM
+˜ x̄) = (PM kq −
+x̄k2 = kq − m=1 cmkm k2 ; d(q,
+m=1
+ˆ x) = (kq − xk2 + (M − 1)kqk2 )1/2
+cmkm k22 )1/2 ; d(q,
+2
+2
+ˆ x̄) = (kq − x̄k2 + (M − 1)kqk2 )1/2 ) which is the
+(d(q,
+2
+2
+square root of the summation of the square of the true (approximate) Euclidean distance and a query-dependent term
+(M − 1)kqk22 that isPa constant for the search with a specific query. Let δ = i6=j cTiki cjkj . By definition, we have
+ˆ x̄) = (d˜2 (q, x̄) + δ)1/2 .
+d(q,
+˜ x̄) as the distance approximation
+Our approach uses d(q,
+ˆ x). Ideand essentially aims to use it to approximate d(q,
+˜ x̄) = d(q,
+ˆ x), the search accuracy would
+ally, if d(q,
+˜ x̄) −
+be 100%. In general, the absolute difference |d(q,
+ˆ
+d(q, x)| is expected to be small to guarantee high search
+accuracy. We have the following theorem:
+Theorem 1. The reconstruction error of the distances is
+˜ x̄) − d(q,
+ˆ x)| ≤ kx − x̄k2 + |δ|1/2 .
+upper-bounded: |d(q,
+This theorem suggests a solution to minimizing the distance reconstruction error by minimizing the upper-bound:
+1/2
+min kx − x̄k2 + |δ| . With the assumption δ = ǫ for
+∀x ∈ X , this minimization problem is transformed to a
+constrained optimization problem: min kx − x̄k2 subject
+to δ = ǫ. Accumulating the distortion errors over all the
+
+database vectors yields formulation 3.
+
+5. Experiments
+We perform the ANN experiments on five datasets:
+MNIST‡ (LeCun et al., 2001), 784D grayscale images of
+handwritten digits; LabelMe22K (Russell et al., 2008) a
+corpus of images expressed as 512D GIST descriptors; 1M
+SIFT (Jégou et al., 2011a), consisting of 1M 128D SIFT
+features as base vectors, 100K learning vectors and 10K
+queries; 1M GIST (Jégou et al., 2011a), containing 1M
+960D global GIST descriptors as base vectors, 500K learning vectors and 1K queries; and 1B SIFT (Jégou et al.,
+2011b), composed of 1B SIFT features as base vectors,
+100M learning vectors and 10K queries. The detailed description is presented in Table 1.
+We compare our approach, composite quantization (CQ),
+with several state-of-the-art methods: product quantization (PQ) (Jégou et al., 2011a), Cartesian k-means
+(CKM) (Norouzi & Fleet, 2013). It is already shown that
+PQ and CKM achieve better search accuracy than hashing algorithms with the same code length and comparable search efficiency. Thus, we report one result from
+a representative hashing algorithm, iterative quantization
+(ITQ) (Gong & Lazebnik, 2011). All the results were obtained with the implementations generously provided by
+their respective authors. Following (Jégou et al., 2011a),
+we use the structured ordering for 1M GIST and the natural ordering for 1M SIFT and 1B SIFT to get the best
+performance for PQ. We choose K = 256 as the dictionary
+size which is an attractive choice because the resulting distance lookup tables are small and each subindex fits into
+one byte (Jégou et al., 2011a; Norouzi & Fleet, 2013).
+To find ANNs, all the algorithms perform linear scan search
+using asymmetric distance: to compare a query with a
+database vector, PQ, CKM and CQ conduct a few distance table lookups and additions, and ITQ uses asymmetric hamming distance for better search accuracy proposed
+in (Gordo & Perronnin, 2011). ITQ, PQ, CKM and CQ
+takes the same time for linear scan. Their costs of computing the distance lookup table are slightly different, and
+‡
+
+http://yann.lecun.com/exdb/mnist/
+
+Composite Quantization for Approximate Nearest Neighbor Search
+1MSIFT, 128 bits encoding
+
+1BSIFT, 128 bits encoding
+
+1
+0.8
+
+(a)
+
+1
+
+CKM
+CQ (ε=0)
+CQ
+
+0.8
+
+0.6
+
+0.6
+
+0.4
+
+0.4
+
+0.2
+
+0.2
+
+0
+
+(1,1)
+
+(1,2)
+
+(1,5)
+
+(10,10)
+
+(10,20)
+
+(10,50)
+
+(50,50)
+
+(50,100)
+
+(50,200)
+
+(b)
+
+0
+
+CKM
+CQ (ε=0)
+CQ
+
+(1,1)
+
+(1,2)
+
+(1,5)
+
+(10,10)
+
+(10,20)
+
+(10,50)
+
+(50,50)
+
+(50,100)
+
+(50,200)
+
+Figure 3. Illustrating the effect of ǫ on (a) 1M SIFT and (b) 1B SIFT. (T, R) means recall@R when searching for T nearest neighbors.
+1MSIFT, 64 bits encoding
+1
+0.8
+
+CKM
+CQ
+CQ
+
+trans
+
+0.6
+0.4
+0.2
+0
+
+(1,1)
+
+(1,10)
+
+(1,50)
+
+(10,10)
+
+(10,50)
+
+(10,100)
+
+(50,50)
+
+(50,100)
+
+(50,200)
+
+Figure 4. Illustrating the effect of translation. (T, R) means
+recall@R when searching for T nearest neighbors.
+
+can be negligible as they are very low compared with the
+cost for linear scan. For instance, the cost of computing the
+distance lookup table in our approach only takes around 2%
+of the cost of linear scan on 1M SIFT. Figure 2 shows the
+average query times on the 1M SIFT, 1M GIST and 1B
+SIFT datasets, from which one can observe that the costs
+are similar for the four methods.
+The search quality is measured using recall@R. For each
+query, we retrieve its R nearest items and compute the ratio of R to T , i.e., the fraction of T ground-truth nearest
+neighbors are found in the retrieved R items. The average recall score over all the queries is used as the measure.
+The ground-truth nearest neighbors are computed over the
+original features using linear scan. In the experiments, we
+report the performance with T being 1, 10, and 50. The
+observed conclusions remain valid for other T .
+5.1. Empirical analysis
+The effect of ǫ. The proposed approach learns the variable
+ǫ, inter-dictionary-element-product. Alternatively, one can
+simply set it to be zero, ǫ = 0, indicating that the dictionaries are mutually orthogonal like splitting the spaces into
+subspaces as done in product quantization and Cartesian kmeans. The average distortion error in the case of learning
+ǫ potentially can be smaller than that in the case of letting
+ǫ = 0 as learning ǫ is more flexible, and thus the search
+performance with learnt ǫ can be better. The experimental results over the 1M SIFT and 1B SIFT datasets under
+the two schemes, shown in Figure 3, validate this point:
+the performances over 1M SIFT are similar and the performance when ǫ is not limited to be zero over 1B SIFT is
+much better.
+
+The effect of translating the vector. One potential extension of our approach is to introduce an offset, denoted t, to translate x. Introducing the offset does not
+increase the storage cost as it is a global parameter.
+The objective function
+PN with such an offset2 is as follows:
+minC,t,b1 ,··· ,bN
+n=1 kxn − t − Cbn k2 . Our experiments indicate that this introduction does not influence the
+performance too much. An example result on 1M SIFT
+with 64 bits is shown in Figure 4. The reason might be that
+the contribution of the offset to the quantization distortion
+reduction is relatively small compared with that from the
+composition of selected dictionary elements.
+5.2. Results
+Figure 5 shows the comparison on MNIST and LabelMe22K. One can see that the vector approximation algorithms, our approach (CQ), CKM, and PQ outperform ITQ.
+It is as expected because the information loss in Hamming
+embedding used in ITQ is much larger. PQ also performs
+not so good because it does not well exploit the data information for subspace partitioning. Our approach performs
+the best, which validates the aforementioned analysis. The
+improvement seems a little small, but it is actually significant as the datasets are relatively small and the search is
+relatively easy.
+Figure 6 shows the results of large scale datasets: 1M
+SIFT and 1M GIST using codes of 64 bits and 128 bits
+for searching 1, 10, and 50 nearest neighbors. It can be
+seen that the gain obtained by our approach (CQ) is significant for 1M SIFT. For example, the recall@10 with T = 1
+for Cartesian k-means and ours are 63.83% and 71.59%
+on 64 bits. In other words, the improvement is 7.76% and
+the relative improvement reaches 12%. The reason of the
+relatively small improvement on 1M GIST over Cartesian
+k-means might be that Cartesian k-means already achieves
+very large improvement over product quantization and the
+improvement space is relatively small.
+Figure 7 shows the performance for a very large dataset,
+1B SIFT. Similar to (Norouzi & Fleet, 2013), we use the
+first 1M learning vectors for efficient training. It can be
+seen that our approach gets the best performance and the
+improvement is consistently significant. For example, the
+recall@100 from our approach on the 1B base set with 64
+
+Composite Quantization for Approximate Nearest Neighbor Search
+CQ 128 bits
+
+CQ 64 bits
+
+CQ 32 bits
+
+CKM 128 bits
+
+CKM 64 bits
+
+PQ 128 bits
+
+CKM 32 bits
+
+0.9
+
+ITQ 64 bits
+
+ITQ 32 bits
+
+LabelMe22K, T = 10
+1
+
+0.9
+
+0.9
+0.8
+
+0.8
+
+0.7
+
+0.7
+recall@R
+
+recall@R
+
+ITQ 128 bits
+
+1
+
+0.8
+
+0.8
+
+0.7
+
+0.6
+0.5
+
+0.6
+
+0.6
+
+0.7
+
+0.5
+
+0.6
+
+0.4
+
+0.4
+
+0.5
+
+0.3
+
+0.5
+
+0.3
+
+(a)
+
+PQ 32 bits
+
+LabelMe22K, T = 1
+
+1
+
+0.9
+
+0.2
+1
+
+PQ 64 bits
+
+MNIST, T = 10
+
+MNIST, T = 1
+1
+
+0.4
+
+0.2
+
+2
+
+5
+
+10
+R
+
+20
+
+50
+
+100
+
+0.4
+10
+
+20
+
+50
+
+100
+
+200
+
+R
+
+0.1
+1
+
+(b)
+
+2
+
+5
+
+10
+R
+
+20
+
+50
+
+0.3
+10
+
+100
+
+20
+
+50
+
+100
+
+200
+
+500
+
+R
+
+Figure 5. The performance for different algorithms on (a) MNIST and (b) LabelMe22K for searching various numbers of ground truth
+nearest neighbors (T = 1, 10).
+
+Table 2. The performance of object retrieval over the holiday data
+set in terms of MAP.
+# BIT
+ITQ
+PQ
+CKM
+CQ
+32
+0.4132 0.5040 0.5373 0.5500
+F ISHER
+64
+0.5334 0.5476 0.5775 0.6221
+128
+0.5883 0.5794 0.5978 0.6339
+32
+0.4378 0.5132 0.5453 0.5777
+VLAD
+64
+0.5371 0.5740 0.5974 0.6320
+128
+0.6074 0.5861 0.6092 0.6442
+
+Table 3. The performance of object retrieval over the UKBench
+data set in terms of scores.
+# BITS
+32
+64
+128
+32
+64
+128
+
+F ISHER
+VLAD
+
+ITQ
+2.1155
+2.6320
+2.8808
+2.0935
+2.6174
+2.8946
+
+PQ
+2.2031
+2.6181
+2.8507
+2.2140
+2.6290
+2.8776
+
+CKM
+2.6060
+2.8943
+3.0387
+2.6312
+2.9246
+3.0688
+
+CQ
+2.7401
+3.0093
+3.1539
+2.7455
+3.0459
+3.1854
+
+1MSIFT
+0.7
+
+Besides, we plot the curve in terms of recall vs. the
+code length, as depicted in Figure 8 on a representative
+dataset, 1M SIFT, to explicitly show how the improvement
+of our approach over other approaches changes under various code lengths. As expected, the performances of all
+the algorithms improve along with the increase of the code
+length. Notably, the improvement of our approach over the
+other methods, gets more significant as the code length is
+larger. In contrast, the improvement of CKM over PQ is reduced when the code becomes longer. This shows that the
+superiority of our approach in the longer code is stronger.
+
+0.6
+0.5
+recall@50
+
+bits for T = 1 is 70.12% while from CKM it is 64.57%.
+Besides the performance over all the 1B database vectors,
+we also show the performance on a subset of 1B base vectors, the first 10M database vectors. As we can see, the
+performance on 1B vectors is worse than that on 10M vectors, which is reasonable as searching over a larger dataset
+is more difficult. The notable observation is that the improvement of our approach over Cartesian k-means on the
+larger dataset, 1B database vectors, is much more significant than that on 10M database vectors.
+
+ITQ
+PQ
+CKM
+CQ
+
+0.4
+0.3
+0.2
+0.1
+0
+16 bits
+
+32 bits
+
+64 bits
+
+128 bits
+
+Figure 8. Illustrating the effect of the code length on 1M SIFT
+when searching for 50 nearest neighbors.
+
+contains 500 query and 991 relevant images, and the UKBench data set (Nistér & Stewénius, 2006) that contains
+2550 groups of 4 images each (totally 10200 images).
+The search performances in terms of mean average precision (MAP) (Jégou et al., 2008) for the holiday data set and
+the score (Nistér & Stewénius, 2006) for the UKBench data
+set are shown in Table 2 and Table 3. It can be seen that our
+method performs the best, which is because our approach
+(CQ) produces better vector approximation.
+
+6. Conclusion
+5.3. Application to object retrieval
+We report the results of the applications to object retrieval.
+In object retrieval, images are represented as an aggregation of local descriptors, often thousands of dimension.
+We evaluate the performances over the 4096-dimensional
+Fisher vectors (Perronnin & Dance, 2007) and the 4096dimensional VLAD vectors (Jégou et al., 2010) extracted
+from the INRIA Holidays data set (Jégou et al., 2008) that
+
+In this paper, we present a compact coding approach,
+composite quantization, to approximate nearest neighbor
+search. The superior search accuracy stems from that it
+exploits the composition of dictionary elements to approximate a vector, yielding smaller distortion errors. The search
+efficiency is guaranteed by making the inter-dictionaryelement-product constant and discarding its computation.
+Empirical results on different datasets suggest that the pro-
+
+Composite Quantization for Approximate Nearest Neighbor Search
+CQ 128 bits
+
+CKM 128 bits
+
+PQ 128 bits
+
+ITQ 128 bits
+
+recall@R
+
+(a)
+
+1
+0.9
+
+0.9
+
+0.9
+
+0.8
+
+0.8
+
+0.8
+
+0.7
+
+0.7
+
+0.7
+
+0.6
+
+0.6
+
+0.6
+
+0.5
+
+0.5
+
+0.5
+
+0.4
+
+0.4
+
+0.4
+
+0.3
+
+0.3
+
+0.3
+
+0.2
+1
+
+0.2
+10
+
+2
+
+5
+
+10
+
+20
+
+50
+
+100 200
+
+500
+
+1K
+
+20
+
+50
+
+100
+200
+R
+1MGIST, T = 10
+
+500
+
+1K
+
+0.2
+50
+
+1
+
+1
+
+1
+
+0.9
+
+0.9
+
+0.9
+
+0.8
+
+0.8
+
+0.8
+
+0.7
+
+0.7
+
+0.7
+
+0.6
+
+0.6
+
+0.6
+
+0.5
+
+0.5
+
+0.5
+
+0.4
+
+0.4
+
+0.4
+
+0.3
+
+0.3
+
+0.3
+
+0.2
+
+0.2
+
+0.2
+
+0.1
+1
+
+0.1
+10
+
+2
+
+5
+
+10 20
+
+PQ 64 bits
+
+50 100 200 500 1K 2K
+R
+
+5K 10K
+
+20
+
+50
+
+100 200
+
+500
+
+ITQ 64 bits
+
+1MSIFT, T = 50
+1
+
+1MGIST, T = 1
+
+recall@R
+
+CKM 64 bits
+
+1
+
+R
+
+(b)
+
+CQ 64 bits
+
+1MSIFT, T = 10
+
+1MSIFT, T = 1
+
+1K
+
+2K
+
+5K
+
+10K
+
+0.1
+50
+
+100
+
+100
+
+200
+R
+1MGIST, T = 50
+
+200
+
+500
+
+R
+
+1K
+
+500
+
+2K
+
+1K
+
+5K
+
+10K
+
+5K
+
+10K
+
+R
+
+Figure 6. The performance for different algorithms on (a) 1M SIFT and (b) 1M GIST (T = 1, 10, 50).
+CQ 1B
+
+CKM 1B
+
+PQ 1B
+
+ITQ 1B
+
+recall@R
+
+0.9
+
+0.9
+
+0.9
+
+0.8
+
+0.8
+
+0.8
+
+0.7
+
+0.7
+
+0.7
+
+0.6
+
+0.6
+
+0.6
+
+0.5
+
+0.5
+
+0.5
+
+0.4
+
+0.4
+
+0.4
+
+0.3
+
+0.3
+
+0.3
+
+0.2
+
+0.2
+
+0.2
+
+0.1
+
+0.1
+
+0.1
+
+2
+
+5
+
+10 20
+
+50 100 200 500 1K 2K
+R
+
+0
+10
+
+5K 10K
+
+20
+
+50
+
+recall@R
+
+100 200
+
+500
+
+1K
+
+2K
+
+5K
+
+10K
+
+0
+50
+
+1
+0.9
+
+0.8
+
+0.8
+
+0.8
+
+0.7
+
+0.7
+
+0.7
+
+0.6
+
+0.6
+
+0.6
+
+0.5
+
+0.5
+
+0.5
+
+0.4
+
+0.4
+
+0.4
+
+0.3
+
+0.3
+
+0.3
+
+0.2
+1
+
+0.2
+10
+
+50
+R
+
+100 200
+
+500
+
+1K
+
+20
+
+50
+
+100
+R
+
+500
+
+1K
+
+2K
+
+R
+
+1
+
+20
+
+ITQ 10M
+
+1BSIFT, 128 bits, T = 50
+
+0.9
+
+10
+
+200
+
+1BSIFT, 128 bits, T = 10
+
+1
+
+5
+
+100
+
+R
+
+0.9
+
+2
+
+PQ 10M
+
+1BSIFT, 64 bits, T = 50
+1
+
+1BSIFT, 128 bits, T = 1
+
+(b)
+
+CKM 10M
+
+1
+
+0
+1
+
+(a)
+
+CQ 10M
+
+1BSIFT, 64 bits, T = 10
+
+1BSIFT, 64 bits, T = 1
+1
+
+200
+
+500
+
+1K
+
+0.2
+50
+
+100
+
+200
+R
+
+500
+
+1K
+
+Figure 7. The performance for different algorithms on 1B SIFT with (a) 64 bits and (b) 128 bits (T = 1, 10, 50).
+
+posed approach outperforms existing methods.
+
+References
+
+Acknowledgements
+
+Arya, S. and Mount, D. M. Approximate nearest neighbor queries in fixed dimensions. In SODA, pp. 271–280,
+1993.
+
+This work was partially supported by the National Basic
+Research Program of China (973 Program) under Grant
+2014CB347600.
+
+Beygelzimer, A., Kakade, S., and Langford, J. Cover trees
+for nearest neighbor. In ICML, pp. 97–104, 2006.
+
+Composite Quantization for Approximate Nearest Neighbor Search
+
+Friedman, J. H., Bentley, J. L., and Finkel, R. A. An algorithm for finding best matches in logarithmic expected
+time. ACM Trans. Math. Softw., 3(3):209–226, 1977.
+Gionis, A., Indyk, P., and Motwani, R. Similarity search
+in high dimensions via hashing. In VLDB, pp. 518–529,
+1999.
+Gong, Y. and Lazebnik, S. Iterative quantization: A procrustean approach to learning binary codes. In CVPR,
+pp. 817–824, 2011.
+Gordo, A. and Perronnin, F. Asymmetric distances for binary embeddings. In CVPR, pp. 729–736, 2011.
+
+Nistér, D. and Stewénius, H. Scalable recognition with a
+vocabulary tree. In CVPR (2), pp. 2161–2168, 2006.
+Norouzi, M. and Fleet, D. J. Minimal loss hashing for compact binary codes. In ICML, pp. 353–360, 2011.
+Norouzi, M. and Fleet, D. J. Cartesian k-means. In CVPR,
+pp. 3017–3024, 2013.
+Perronnin, F. and Dance, C. R. Fisher kernels on visual
+vocabularies for image categorization. In CVPR, 2007.
+Raginsky, M. and Lazebnik, S. Locality sensitive binary
+codes from shift-invariant kernels. In NIPS, 2009.
+
+Jain, P., Kulis, B., and Grauman, K. Fast image search for
+learned metrics. In CVPR, 2008.
+
+Russell, B. C., Torralba, A., Murphy, K. P., and Freeman,
+W. T. Labelme: A database and web-based tool for image annotation. International Journal of Computer Vision, 77(1-3):157–173, 2008.
+
+Jégou, H., Douze, M., and Schmid, C. Hamming embedding and weak geometric consistency for large scale image search. In ECCV (1), pp. 304–317, 2008.
+
+Salakhutdinov, R. and Hinton, G. E. Semantic hashing. Int.
+J. Approx. Reasoning, 50(7):969–978, 2009.
+
+Jégou, H., Douze, M., Schmid, C., and Pérez, P. Aggregating local descriptors into a compact image representation. In CVPR, pp. 3304–3311, 2010.
+Jégou, H., Douze, M., and Schmid, C. Product quantization
+for nearest neighbor search. IEEE Trans. Pattern Anal.
+Mach. Intell., 33(1):117–128, 2011a.
+Jégou, H., Tavenard, R., Douze, M., and Amsaleg, L.
+Searching in one billion vectors: Re-rank with source
+coding. In ICASSP, pp. 861–864, 2011b.
+Jia, Y., Wang, J., Zeng, G., Zha, H., and Hua, Xian-Sheng.
+Optimizing kd-trees for scalable visual descriptor indexing. In CVPR, pp. 3392–3399, 2010.
+Kong, W. and Li, W. Isotropic hashing. In NIPS, pp. 1655–
+1663, 2012.
+Kulis, B. and Darrells, T. Learning to hash with binary
+reconstructive embeddings. In NIPS, pp. 577–584, 2009.
+Kulis, B. and Grauman, K. Kernelized locality-sensitive
+hashing for scalable image search. In ICCV, 2009.
+LeCun, Y., Bottou, L., Bengio, Y., and Haffner, P. Gradientbased learning applied to document recognition. In Intelligent Signal Processing, pp. 306–351. IEEE Press,
+2001.
+
+Shakhnarovich, G., Darrell, T., and Indyk, P. NearestNeighbor Methods in Learning and Vision: Theory and
+Practice. The MIT press, 2006.
+Silpa-Anan, C. and Hartley, R. Optimised kd-trees for fast
+image descriptor matching. In CVPR, 2008.
+Wang, J. and Li, S. Query-driven iterated neighborhood
+graph search for large scale indexing. In ACM Multimedia, pp. 179–188, 2012.
+Wang, J., Wang, J., Yu, N., and Li, S. Order preserving hashing for approximate nearest neighbor search. In
+ACM Multimedia, pp. 133–142, 2013a.
+Wang, J., Wang, J., Zeng, G., Gan, R., Li, S., and Guo, B.
+Fast neighborhood graph search using cartesian concatenation. CoRR, abs/1312.3062, 2013b.
+Wang, J., Wang, J., Zeng, G., Gan, R., Li, S., and Guo, B.
+Fast neighborhood graph search using cartesian concatenation. In ICCV, pp. 2128–2135, 2013c.
+Wang, J., Wang, N., Jia, Y., Li, J., Zeng, G., Zha, H.,
+and Hua, X.-S. Trinary-projection trees for approximate nearest neighbor search. IEEE Trans. Pattern Anal.
+Mach. Intell., 36(2):388–403, 2014.
+Weiss, Y., Torralba, A. B., and Fergus, R. Spectral hashing.
+In NIPS, pp. 1753–1760, 2008.
+
+Liu, W., Wang, J., Kumar, S., and Chang, S. Hashing with
+graphs. In ICML, pp. 1–8, 2011.
+
+Xu, H., Wang, J., Li, Z., Zeng, G., Li, S., and Yu, N.
+Complementary hashing for approximate nearest neighbor search. In ICCV, pp. 1631–1638, 2011.
+
+Muja, M. and Lowe, D. G. Fast approximate nearest neighbors with automatic algorithm configuration. In VISSAPP (1), pp. 331–340, 2009.
+
+Yuan, M. and Lin, Y. Model selection and estimation in
+regression with grouped variables. Journal of the Royal
+Statistical Society, Series B, 68:49–67, 2006.
+
+

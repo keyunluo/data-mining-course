@@ -1,0 +1,1157 @@
+Moderated and Drifting Linear Dynamical Systems
+
+Jinyan Guan 1
+JGUAN 1@ EMAIL . ARIZONA . EDU
+Kyle Simek 1
+KSIMEK @ EMAIL . ARIZONA . EDU
+Ernesto Brau 2
+BRAUAVIL @ BC . EDU
+Clayton T. Morrison 3
+CLAYTONM @ EMAIL . ARIZONA . EDU
+Emily A. Butler 4
+EABUTLER @ EMAIL . ARIZONA . EDU
+Kobus Barnard 1
+KOBUS @ CS . ARIZONA . EDU
+1
+2
+Department of Computer Science, University of Arizona Department of Computer Science, Boston College
+3
+School of Information: Science, Technology, and Arts, University of Arizona
+4
+Norton School of Family and Consumer Sciences, University of Arizona
+
+Abstract
+We consider linear dynamical systems, particularly coupled linear oscillators, where the parameters represent meaningful values in a domain
+theory, and thus learning what affects them contributes to explanation. Rather than allow perturbations of latent states, we assume that temporal
+variation beyond noise is explained by parameter drift, and variation across coupled systems is
+a function of moderating variables. This change
+in model structure reduces opportunities for efficient inference, and we propose sampling procedures to learn and fit the models. We test our
+approach on a real dataset of self-recalled emotional experience measurements of heterosexual
+couples engaged in a conversation about a potentially emotional topic, with body mass index
+(BMI) being considered as a moderator. We evaluate several models on their ability to predict future conversation dynamics (the last 20% of the
+data for each test couple), with shared parameters
+being learned using held out data. We validate
+the hypothesis that BMI affects the conversation
+dynamic in the experimentally chosen topic.
+
+1. Introduction
+In many standard applications of linear dynamical systems
+(LDS), such as tracking an object moving under Newton’s
+laws, the parameters are known, and the latent states (e.g.,
+the true object position) are the target of inference. Further, it may make sense that the latent state is subject to
+Proceedings of the 32 nd International Conference on Machine
+Learning, Lille, France, 2015. JMLR: W&CP volume 37. Copyright 2015 by the author(s).
+
+perturbations (e.g., the object is buffeted by air), in which
+case it is convenient to model the latent state with Gaussian
+perturbations at each time step. In other applications, the
+parameters need to be inferred for a predictive task. In this
+case, the trade-offs in parameter, latent state, and observation errors might be optimized for prediction, and the relation between them may not matter so much. By contrast,
+for the kind of applications considered here, the parameters correspond directly to quantities in a scientific model,
+and therefore understanding what affects those parameters
+across individual examples is important. Here it makes less
+sense to allow latent state noise, especially when observation noise is substantive. Further, given that we consider the
+model itself as indicative of individuals and their circumstances, this suggests that temporal variation beyond noise
+processes might be better explained by changes (drift) in
+the model. Hence, in this paper we force all variation beyond observation noise to be the result of deterministic process with stochastic parameters.
+We take as a motivating example a class of social psychological models aimed at explaining the emotional dynamics of interacting couples. Growing evidence suggests that
+coupled linear oscillators (CLOs), a subset of LDS models,
+are well-suited to model the oscillatory dynamics of emotional interactions. However, most work to-date (Boker &
+Ghisletta, 2001; Boker et al., 2004; Chow et al., 2005; Butner et al., 2005; Boker & Laurenceau, 2006; Finan et al.,
+2010; Ferrer & Steele, 2011; Steele & Ferrer, 2011; Ferrer & Helm, 2013) has been limited to fitting the data using regression methods that rely on necessarily noisy estimates of first and second derivatives of the observations.
+While convenient to implement using common statistical
+packages, there are serious limitations to this regressionbased approach underlying all CLO modeling work in the
+social sciences domain. These limitations include the following: 1) there is a fundamental disconnect between error
+
+Moderated and Drifting Linear Dynamical Systems
+
+as explained by the model and error that is minimized during regression; 2) directly estimating derivatives from noisy
+data leads to poor estimates; LDS derivatives are better applied to estimated latent states; 3) these regression models
+do not fit initial states, which if used at all, are taken from
+the data points or their mean; 4) there is no natural extension to a multivariate observation case; and finally 5) these
+regression approaches are only evaluated based on model
+residual error reduction rather than on predictive power.
+
+We detail a multilevel cross validation scheme in which
+shared parameters are learned and then used to predict near
+future interactions in held-out couples. 4). We introduce a
+new domain for predictive modeling, namely interpersonal
+emotional processes and similar sub-areas of social psychology. This domain has very challenging data and modern machine learning methods for building predictive and
+explanatory models has had limited impact so far.
+
+In this work, we develop a generative Bayesian model and
+inference algorithms for LDS models (instantiated in the
+case of CLO models) that avoids the above limitations. We
+then extend the models in two ways. First, we consider
+that the parameters are a function of moderating variables.
+Second, we allow the model parameters to drift under a
+Gaussian process. These extensions, together with the requirement of flexible models with multiple latent variables,
+rule out analytic solutions, so we develop sampling-based
+inference approaches for learning and fitting these models.
+
+2. Related work
+
+Experimental domain. In the particular application showcased here, the latent variables are the emotional states of
+romantically involved male-female partners during a conversation. Available temporal observations range from
+physiological measurements to self-reported ratings on
+emotional state (see Section 6); we chose the latter for our
+experiments. Potential moderators include body mass index (BMI) for each participant, which we used for the experiments reported here. One hypothesis driving the data
+collection supposes that BMI influences conversation dynamics when the topic of discussion is related to health.
+We consider that all data is generated for each participant
+independently, conditioned on their latent emotion variable. As an LDS, the new states for both partners are a
+linear function of the previous states of both. As we are interested in the nature of the dynamic process, we choose
+to make the state variables deterministic (no latent state
+noise). The parameters for the LDS may be individualistic (which over-fits), shared, or a function of moderators
+such as BMI, reflected by the original experiment design.
+Each of these models are combined with parameter drift
+via a Gaussian process (e.g., increasing anger is reflected
+in changes in reactions to one’s partner).
+Contributions. 1). We introduce Gaussian process parameter drift in coupled LDS models, making it possible for
+model variation within a system over time to be accounted
+for by model parameter changes rather than latent state perturbations. We develop a Gibbs sampler for inference in
+this model. 2). We similarly introduce parameter moderation to explain coupled LDS data over multiple instances
+(e.g., a number of couples), for situations where parameters, as signatures of dynamic behavior, can be linked to
+other data such as health related outcomes (e.g., BMI). 3).
+
+Finding good parameter values for ordinary differential
+equations (ODE) from observables has significant history.
+For example, researchers (Bard, 1973; Varah, 1982; Anger,
+1990; Li et al., 2005) have looked at iterating over parameter sets, integrating the ODE for each set. To reduce the
+computational cost, smoothing estimators of ODEs have
+been proposed (Varah, 1982; Ramsay et al., 2007; Liang
+& Wu, 2008; Dattner & Klaassen, 2013; Hall & Ma, 2013)
+that do not require solving the ODE numerically. However,
+they need reliable estimates of the derivatives of the states,
+which is problematic with noisy and sparse data.
+In the domain of biomedical systems, Gelman et al. propose inferring parameters of the differential equation of
+pharmacokinetic (PK) models using Bayesian posterior
+simulation (1996). They apply priors based on scientific
+theories and estimate the distribution of individual characteristics. Reviews of statistical and computational work in
+PK models are provided by Davidian and Giltinan (2003)
+and Pillai et al. (2005). Li et al. introduce coupling between
+the variables for this domain (2004) and fit parameters using a two step iterative process. They also model parametric change over time but with simple linear or piecewise
+constant models. Subsequently, Li et al. and Yu et al. introduce an MCMC sampling approach for fitting the parameters (2007; 2008). Like our proposed method, all of these
+involve parameter fitting and hierarchical Bayesian modeling. However, the specifics of the domain allow for special relationships between variables and require only first
+derivatives, facts which are exploited for inference. Here
+we develop an approach for arbitrary LDS.
+Calderhead et al. propose a Bayesian statistical approach
+to treat the hidden state variables as random variables
+with Gaussian process (GP) priors (2009). This approach replaces expensive ODE integration with closedform marginalization over the derivative states. Chkrebtii
+et al. extended this idea to a general methodology for general systems of differential equations (2013). This is further
+improved by Dondelinger et al. who sample from the joint
+distribution of the ODE parameters and GP hyperparameters (2013). Wang and Barber improved the GP-based ODE
+models by directly linking the state derivative information
+with the system observations (2014). In general, this body
+
+Moderated and Drifting Linear Dynamical Systems
+
+of work focuses on using GPs for hidden state variation instead of parameter variation as we propose.
+Gaussian processes have also been used to model the latent
+parameters of differential equations (Lawrence et al., 2006;
+Titsias et al., 2008; Gao et al., 2008) with particular forms.
+In system biology, Lawrence et al. treat the concentration
+of a transcription factor as a latent function with a Gaussian
+process prior (2006). When the production rate depends
+linearly on the transcription factor, parameter estimation is
+exact and tractable. When the dependence is not linear,
+they use the functional gradient of the likelihood and prior
+to learn the maximum a posteriori (MAP) solution for the
+transcription factors and other hyper-parameters by MAPLaplace approximation. In a later work, Titsias et al. developed an efficient Markov Chain Monte Carlo (MCMC)
+sampling approach with novel proposal distribution to find
+the MAP estimate of the model parameters (2008). In these
+models, time-varying parameters are confined to the constant coefficient of a linear ODE, whereas our model allows
+all coefficients to drift. These works inspired the Latent
+Force Models (LFMs) for differential equations (Alvarez
+et al., 2009) but coupling is not considered. Significant
+work has been done on modeling phase shift, characterized by inferring discontinuous changes in model parameters (e.g., (S. M. Oh et al., 2008; A. S. Willsky et al., 2009)).
+In contrast, we study progressively and smoothly changing
+parameters.
+In summary, many elements of our work are shared with
+prior efforts. However, the proposed parameter drift model
+for a general LDS and the associated Gibbs sampler are
+new, as is the particular approach to integrating moderation.
+
+3. Model
+We represent each person’s hidden emotional state as a real
+function of time. The observables are self-reported ratings of the person’s hidden emotional state over time. Let
+(xat , xbt ) ∈ R2 be a couple’s hidden emotional state at time
+t ≥ 1. Higher values of xat and xbt represent positive emotion, while lower values represent negative emotion. Because interactions tend to be asymmetric, the ordering of
+couples matters. For example, in the case of heterosexual
+couples used in our experiments, xat and xbt denote the male
+and female partner, respectively. Similarly, parent/child relationships would also be identifiable and asymmetric (our
+models are easily extended to more than two people).
+For an interacting couple, we model their emotional dynamics as a coupled oscillator system, in which an individual’s future emotional state is influenced by her current
+state and the emotional state of her partner. The parameters of this model are different for each couple, but allowing them to be completely free (baseline model CLO-
+
+MLE) leads to over-fitting. Instead, for most models considered, the parameters come from a common distribution,
+with the mean potentially being a function of moderators
+(here, BMI). Finally, we explore a model that allows parameters to drift smoothly over time.
+3.1. Coupled Linear Oscillator
+Damped linear oscillator models have been used to represent the regulatory processes of emotion oscillations of
+an individual (Chow et al., 2005). A coupled linear oscillator (CLO) is an extension of the damped linear model
+to model interactions between two oscillators. It is useful
+to model both intra- and inter-personal characteristics, including frequency, damping, and coupling (Boker & Laurenceau, 2007). In a CLO system, the accelerations of a
+pair of oscillators are a function of their velocities and positions. Specifically, if we let xat and xbt be the positions of
+the oscillators at time t, their dynamics are defined by the
+second-order differential equation
+ẍat = f a xat + da ẋat + ca (xbt − xat )
+
+(1)
+
+ẍbt
+
+(2)
+
+=
+
+f b xbt
+
++
+
+db ẋbt
+
+b
+
++c
+
+(xbt
+
+−
+
+xat ).
+
+2
+
+Here, ẍt = ddt2x denotes acceleration and ẋt = dx
+dt denotes
+velocity at time t, f a and f b are the oscillation frequencies,
+da and db are the linear damping coefficients, and ca and
+cb are the coupling terms between the oscillators.
+3.2. State space representation
+A system that is defined by a set of differential equations
+can be represented in state space (Nise, 2010). Typically,
+a deterministic continuous-time dynamic system is represented by the following equations:
+ẋt = Axt + But
+
+(3)
+
+yt = Cxt + Dut ,
+
+(4)
+
+where x is the vector containing the system’s state variables. Given a state xt1 at time t1 , the future state xt at any
+time t > t1 is completely determined by the system matrix
+A and the optional input matrix B and input/control vector
+ut . The output vector y is determined by the output matrix
+C and optional feed-forward matrix D and ut . In our case,
+B is a zero matrix.
+A stochastic discrete-time dynamic system is defined by a
+stochastic process in which the value of xi at time ti is
+stochastically determined by the value of xi−1 at time ti−1 :
+xi = g(ui , xi−1 , i )
+
+(5)
+
+yi = h(xi , ui , δi ),
+
+(6)
+
+where g is the transition model, h is the observation model,
+i is the system noise at time ti and δi is the observation
+
+Moderated and Drifting Linear Dynamical Systems
+
+noise at time ti (Murphy, 2012). State xi can be obtained
+from xi−1 by numerical integration, using the derivative of
+x defined in equation (3) with a certain step size ∆t. We
+use zero system noise (t ), so that variance is explained
+either by observation noise or parameter drift, in support of
+domain theory.
+We let the state vector xt = (xat , xbt , ẋat , ẋbt )T represent the
+emotion states and their derivatives with respect to time for
+both partners, where (xat , xbt ) ∈ R2 . The derivative of the
+state vector is ẋt = (ẋat , ẋbt , ẍat , ẍbt ). Using (3) to represent
+equations (1) and (2) results in the state equation:
+  a
+ a 
+xt
+ẋt
+0
+0
+1 0
+xbt 
+ẋbt   0
+0
+0 1
+ . (7)
+
+
+ a =  a
+ẍt  f − ca
+ca
+da 0  ẋat 
+cb
+f b − cb 0 db
+ẋbt
+ẍbt
+Given the initial states (xat1 , xbt1 , ẋat1 , ẋbt1 ) we can compute
+the state at any time t > t1 by evolving the differential
+equation forward in time.
+The observations consist of self-rated subjective feelings,
+which we model as the latent emotional state perturbed by
+Gaussian noise. Let the output vector y = (yta , ytb ) be the
+observed state; in the case of univariate output per individual, the observation model (eq. 6) then becomes
+ a
+ a
+ a 
+ xbt
+
+yt
+xt 
+1 0 0 0 
+
+
+(8)
++ bt ,
+=
+0 1 0 0 ẋat 
+t
+ytb
+b
+ẋt
+
+where
+µij = αj + βj · ω i + γj · ω̂i
+(ωia
+
+We develop a Bayesian hierarchical model which allows us
+to estimate the group variability to provide a prior distribution for individuals. While we expect different couples
+to have different emotional dynamics, in similar social settings couples might exhibit common patterns, such as the
+frequencies of the oscillations. Furthermore, it has been
+shown that health indicators such as body weight can influence emotion interaction patterns in couples (Reed et al.,
+2015). Therefore, we define each couple’s CLO parameters as arising from a linear function of both partners’ body
+mass index (BMI) with Gaussian noise. This introduces
+dependence between couples by sharing linear coefficients.
+Specifically, let θi = (fia , fib , dai , dbi , cai , cbi ) be the parameters for couple i, and let (ωia , ωib ) be their BMI values,
+then each element θij is given by:
+θij = µij + j ,
+
+ωib
+
+(9)
+
++
+ω̂i =
+−
+j ∼ N (0, σj2 ).
+and ω i =
+Here, αj , βj , and γj are the shared coefficients of the BMI
+values and σj2 is the variance for the j-th parameter among
+the couples. We define a group-shared CLO model as at
+least one of the CLO parameter having a non-zero α coefficient. By using different combinations of non-zero β
+and γ on different parameters, we can explore various CLO
+models with group-shared and BMI-dependent parameters.
+For example, we can allow the same gender of all the couples to share the same prior distribution for the damping
+value and let each person to have different value for frequency and coupling parameters. We will later show that
+the prior on θj of all the couples forms a Bayesian linear regression model and can be sampled by using Gibbssampling (section 4). We let the joint prior distribution of
+qj = (αj , βj , γj ) and σj2 be the Normal-Inverse-Gamma
+(NIG), i.e., (qj , σj2 ) ∼ N IG(µ0 , Σ0 , a0 , b0 ), and treat
+each (qj , σj2 ) as independent. Figure 1 shows the graphical
+model for group-shared CLO model with BMI-dependent
+means and couple-shared variance.
+
+ωia ;
+
+µ0 , Σ0
+
+a0 , b0
+σ
+
+α
+
+γ
+
+β
+
+φx1
+ωi
+
+where at , bt ∼ N (0, σo2 ). We can easily extend the output
+vector to be multivariate by modifying the output matrix C
+and utilizing a non-zero feed-forward matrix D to include
+other components of observed emotion states, such as heart
+rate and facial expressions.
+3.3. Bayesian hierarchical model
+
+ωib )/2;
+
+µi
+
+θi
+
+xi1
+yi1
+
+xi2
+yi2
+
+xit
+yit
+N
+
+Figure 1. A graphical model of the state space model for the jth
+parameter (index j is omitted for clarity) with BMI-dependent
+Gaussian prior. Here, the jth CLO parameter θij for couple i is a
+random variable generated from distribution N (µij , σj2 ). Groupshared BMI-coefficients αj , βj and γj and shared variance σj2
+are random variables generated from the joint prior distributions
+(αj , βj , γj , σj2 ) ∼ N IG(µ0 , Σ0 , a0 , b0 ).
+
+3.4. Time-varying CLO parameters
+By letting the CLO parameters change over time, we can
+model emotion dynamics in longer period of social interactions where the interaction dynamics vary over time. Recall that the elements of A are the CLO parameters. In a
+
+Moderated and Drifting Linear Dynamical Systems
+
+system with fixed dynamics, the state matrix A in equation 3 are constants. By letting A change over time, we
+can model a system with changing dynamics. To ensure
+smooth changes of the dynamics, we define a Gaussian process prior over sequences of CLO parameters.
+Gaussian process prior A Gaussian process (GP) is a
+generalization of the Gaussian distribution that defines a
+probability distribution over the space of of continuous
+functions (Rasmussen & Williams, 2006). A Gaussian process is specified by a mean function m(t) and a covariance
+function k(t, t0 ). If a random function f : R → R is GPdistributed, then every finite subset (f (t1 ), . . . , f (tJ )) ∼
+N ((m(t1 ), . . . , m(tJ )), Kij = k(ti , tj ))). Let θ(t) =
+(f b (t), f a (t), db (t), da (t), cb (t), ca (t)) be the CLO parameters for some couple as a function of time; for simplicity we omit the couple’s subscript. Each parameter θj (t) is
+an independent random function with distribution
+θj (t) ∼ GP(mj (t), kj (t, t0 )).
+
+(10)
+
+We define the mean mj (t) = µj as defined in equation (9). The covariance is the squared-exponential func0 2
+)
+), which generates smooth
+tion kj (t, t0 ) = σj2 exp(− (t−t
+2s2j
+functions. It is defined by two parameters that are shared
+across couples: a variance parameter σj2 that controls the
+overall scale of variations, and a scale parameter sj , which
+controls the smoothness. The graphical model with Gaussian process prior on the parameters θi is shown in Fig. 2.
+µ0 , Σ0 , a0 , b0
+
+as , bs
+
+σ
+
+α, β, γ
+
+s
+
+yi1
+
+p(yi,1:Ti |xi,1 , θi,1:Ti ) = p(yi,1 |xi,1 )
+
+Ti
+Y
+
+p(yi,t |xi,1 , θi,t ),
+
+t=2
+
+(11)
+where yi,1 |xi,1 ∼ N (xi,1 , σo2 ), and yi,t |xi,1 , θi,t ∼
+N (f (xi,1 , θi,t , t), σo2 ), where σo2 is the variance in the observations. The value of function f is the numerical solution of the ODE defined by the state equation 7. Since all
+the couples are conditionally independent given the model
+parameters, the likelihood of all the couples is:
+p(Y1:T |X1 , Θ) =
+
+N
+Y
+
+p(yi,t=1 |xi,1 )
+
+i=1
+
+Ti
+Y
+
+!
+p(yi,t |xi,1 , θi,t ) .
+
+t=2
+
+(12)
+
+4. Parameter learning
+Let Q = {q1 , q2 , . . . , q6 } be the set of BMI coefficients
+for all six model parameters. When the CLO parameters
+Θ do not change over time, we learn the group-shared
+Q and σ by drawing samples from the joint distribution
+p(Q, σ, Θ, X1 |Y1:T ) under the hierarchical model using
+MH-Gibbs sampling (Alg. 1). For the time-varying CLO
+model, we also learn the length-scale parameter s by drawing samples from p(Q, σ, s, Θ, X1 |Y1:T ) (Alg. 2).
+Algorithm 1 Sample procedure from p(Q, σ, Θ, X1 |Y)
+Initialize Θ(1) , X1 , Q(1) and σ (1) .
+repeat
+(m)
+X1 ∼ p(X1 |Θ(m−1) , Q(m−1) , σ (m−1) , Y)
+(m)
+Θ(m) ∼ p(Θ|Q(m−1) , σ (m−1) , X1 , Y)
+(m)
+{Q(m) , σ (m) } ∼ p(Q, σ|Θ(m) , X1 , Y)
+until p(Θ, Q, σ, X1 |Y) converges
+
+µi
+
+θ i,1..Ti
+
+xi1
+
+Given the hidden emotional states of a couple and the values of its CLO parameters, the observed states at each discrete time t are conditionally independent. Since the hidden emotional states are deterministically determined by
+the CLO parameters and the initial values, for each couple
+i, the likelihood of the observed data yi,1:Ti conditioned on
+the CLO parameters θi and the initial state xi,1 is given by:
+
+(1)
+
+ωi
+
+φx1
+
+3.5. Likelihood
+
+xi2
+yi2
+
+xit
+yit
+N
+
+Figure 2. A graphical model of the state space model for the jth
+parameter (index j is omitted for clarity) with Gaussian process
+prior on the CLO parameters θi,1..Ti , where Ti is the time-length
+of couple i. The mean function m is defined by µi and covariance
+function k(t, t0 ) is defined by the shared signal variance σ and
+scale parameters s. Here, sj ∼ IG(asj , bsj ) where sj is the
+length-scale of the jth CLO parameter.
+
+For the model with fixed CLO parameters, we use randomwalk Metropolis-Hastings (MH) to sample the initial states
+of each couple from p(X1 |Θ, Y) and p(Θ|Q, σ, X1 , Y).
+For the model with time-varying parameters, we use MH
+to sample Θ with a proposal distribution constructed from
+a set of control points of the GP process as proposed
+by (Titsias et al., 2008). For updating group-shared parameters Q and σ, we use Gibbs to sample from joint
+posterior distribution p(Q, σ|Θ) and p(Q, σ|Θ, s) (in the
+time-varying case) by using a conjugate NIG prior dis-
+
+Moderated and Drifting Linear Dynamical Systems
+
+Algorithm 2 Sample procedure from p(Q, σ, s, Θ, X1 |Y)
+(1)
+
+Initialize Θ(1) , X1 , Q(1) , σ (1) , and s(1) .
+repeat
+(m)
+X1 ∼ p(X1 |Θ(m−1) , Q(m−1) , σ (m−1) , s(m−1) , Y)
+(m)
+Θ(m) ∼ p(Θ|Q(m−1) , σ (m−1) , s(m−1) , X1 , Y)
+(m)
+{Q(m) , σ (m) } ∼ p(Q, σ|Θ(m) , s(m−1) , X1 , Y)
+(m)
+s(m) ∼ p(s|Q(m) , σ (m) , Θ(m) , X1 , Y)
+until p(Θ, Q, σ, s, X1 |Y) converges
+
+tribution on p(Q, σ). Furthermore, we use Hamiltonian
+Monte Carlo (also called Hybrid Monte Carlo) (HMC)
+sampling technique (Duane et al., 1987; Neal, 1997) to
+sample the scale parameters s from its conditional posterior p(s|Q, σ, Θ) ∝ p(s)p(Θ|s, Q, σ) where p(s) =
+IG(as , bs ). Since we have minimal prior knowledge about
+how fast the parameters changes over time, we use a vague
+Inverse Gamma prior for s by setting both the shape as and
+the scale bs of all the six CLO parameters to be 0.001.
+4.1. Gibbs sampling for Q and σ when θ are constant
+In the model with constant CLO parameters, the jth CLO
+parameter for the ith couple has Gaussian prior distribution
+θij |qj ∼
+
+N (ωi> qj , σj2 ),
+
+(13)
+
+>
+
+>
+
+where ωi = (1, ω̄i , ω̂i ) . Let θj = (θ1j , θ2j , . . . , θN j )
+be the jth CLO parameters for all couples; its joint prior is
+θj |qj ∼ N (Ωqj , σj2 I),
+
+(14)
+
+dependence between couples via shared α, β, γ, and σ 2 .
+This requires us to model parameters jointly over times and
+couples. For notational simplicity, we omit the subscript j
+over θ and q for the remainder of this section; all CLO
+parameters follow the same derivation.
+Let θ = (θ1,1 , θ1,2 , · · · , θi,t , · · · , θN,TN )> be the concatenation of all couples’ parameters at all time-steps into a
+column vector. Let ki be the covariance matrix for couple
+i obtained by evaluating the covariance function k at every
+pair of time inputs. Then,
+θ|q, σ, s ∼ N (Ω† q, σ 2 K),
+
+(20)
+
+where
+
+ω1> ⊗ 1T1
+ ω2> ⊗ 1T2 
+,
+Ω† = 
+
+
+...
+>
+ωN
+⊗ 1TN
+
+
+
+
+K=
+
+
+
+k1
+..
+
+
+.
+
+.
+kN
+
+Here, 1k is a column vector with k ones, Ti is the time
+length of couple i, and ⊗ is the Kronecker product.
+Using the same conjugate N IG prior as in section 4.1, we
+have q, σ 2 |θ, s ∼ N IG(µ∗ , Σ∗ , a∗ , b∗ ), where
+
+−1 
+
+†> −1
+µ∗ = Ω†> K−1 Ω† + Σ−1
+Σ−1
+K θ ,
+0
+0 µ0 + Ω
+(21)
+
+−1
+Σ∗ = Ω†> K−1 Ω† + Σ−1
+,
+(22)
+0
+
+
+PN
+a∗ = 2a0 + i=1 Ti /2,
+(23)
+
+
+−1
+b∗ = b0 + θ > K−1 θ + µ0 Σ−1
+0 µ0 − µ∗ Σ∗ µ∗ /2. (24)
+
+where Ω = (ω1 , ω2 , . . . , ωN )> .
+The full conditional distribution over BMI weights qj and
+noise variance σj2 is given by standard Bayesian linear regression, with the likelihood in (14) and conjugate prior
+(qj , σj2 ) ∼ N IG(µ0 , Σ0 , a0 , b0 ):
+qj , σj2 |θj ∼ N IG(µ∗ , Σ∗ , a∗ , b∗ ),
+
+(15)
+
+where
+µ∗ = Ω> Ω + Σ−1
+0
+
+−1
+
+>
+(Σ−1
+0 µ0 + Ω θ),
+
+(16)
+
+−1
+Σ∗ = Ω> Ω + Σ−1
+,
+0
+
+(17)
+
+a∗ = a0 + N/2,
+>
+
+b∗ = b0 + θ θ +
+
+(18)
+µ0 Σ−1
+0 µ
+
+−
+
+µ∗ Σ−1
+∗ µ∗
+
+
+
+/2.
+
+(19)
+
+4.2. Gibbs sampling Q and σ when θ has GP prior
+In the model with time-varying CLO parameters, we model
+the changing parameters with the GP prior in equation (10).
+The covariance function k() introduces time-correlations,
+while the mean equation and the signal variance introduces
+
+5. Model evaluation
+We develop a multi-stage evaluation procedure to learn the
+shared model parameters Q, σ and s and evaluate the predictive power of the learned models using 9-fold cross validation. First, we randomly divide the couples into nine
+groups. We get the MAP estimates of the shared parameters using the couples in eight out of the nine groups by
+algorithms developed in section 4. We then estimate the
+predictive errors using the couples in the nineth group by
+integrating out couple-specific parameters Θ and the initial
+values X1 . In particular, we use 100 samples from the posterior for the first 80% of time to compute 100 estimates
+for each time point in the next 20% (held out) of time for
+each testing couple. We use these estimates to provide a
+Monte Carlo estimate of the expected squared error with
+respect to the posterior distribution, and report the square
+root as RMSE. In the non-drift case, the prediction into the
+last 20% for each estimate is simply from the time evolution of the ODE and initial values. In the drift case, we
+use the samples of the CLO parameters for the first 80% to
+
+Moderated and Drifting Linear Dynamical Systems
+
+compute the mean of the GP predictive distribution for the
+CLO parameters. We then evolve that ODE into the last
+20% for prediction.
+Specifically, RMSE of the predictions of the last 20% time
+points (t0 to T ) for couple i with observations yi,t0 :T is:
+v
+u T
+uX
+0
+RMSE(yi,t :T ) = t (E[f (t; xi1 , θit )] − yit )2 /T ,
+t=t0
+
+where E[f (t; xi1 , θit )] is the expected value of yit by involving ODE from time 1 forward to time t by equation 3
+with samples of initial state xi1 and CLO parameters θit .
+We then repeat this step nine times by using each group
+as a testing data in turn and learn the shared parameters in
+the rest corresponding eight groups. We record the fitting
+and predicting RMSE of each couple in the testing group
+of each fold and compute the mean of the errors and the
+standard error of the mean.
+
+Table 1. RMSE of fitting and predicting on synthetic data. The
+average of both partner’s RMSE is reported ± the error in the estimate. The first three rows are results of three base line models:
+average, line, and maximum likelihood estimation CLO model.
+Results in row with θ ∼ N (α, σ) is obtained by treating θ
+constant and learning the couple-shared α and σ from sampling
+p(α, σ, θ, x1 |y). Results in row with θ ∼ GP(mα , kσ,s ) is obtained by treating θ ∼ GP(m(t), k(t, t0 )), in which m(t) = α,
+0 2
+)
+and k(t, t0 ) = σ 2 exp(− (t−t
+). The values of α, σ, and s are
+2s2
+learned by sampling from the joint distribution p(α, σ, s, x1 |y).
+Finally, the last row is obtained by using the optimal scale parameter s∗ in data generation and learning the values of α and σ from
+the MAP of p(α, σ, x1 |s∗ , y).
+M ODEL
+AVERAGE
+LINE
+MLE - CLO
+
+θ ∼ N (α, σ)
+θ ∼ GP(mα , kσ,s )
+θ ∼ GP(mα , kσ,s∗ )
+
+F ITTING
+
+P REDICTING
+
+0.72 ± 0.04
+0.62 ± 0.02
+0.51 ± 0.01
+0.57 ± 0.02
+0.52 ± 0.08
+0.48 ± 0.01
+
+0.90 ± 0.09
+1.12 ± 0.14
+1.05 ± 0.15
+0.86 ± 0.12
+0.80 ± 0.10
+0.76 ± 0.07
+
+6. Experiments
+We tested our models and inference processes both on synthetic data generated from the model and real data that collected in a social psychology experiment.
+Experiments with synthetic data. The synthetic data is
+composed of 50 couples with observations at 50 time points
+for each. The observations of each couple were generated
+by using ancestral sampling from the graphical model defined in Fig. 2. Specifically, the CLO parameters of all the
+couples share the same prior distribution defined by α, σ,
+which were generated from N IG(α0 , Σ0 , a0 , b0 ), and s,
+which were generated from IG(as , bs ). The noise sigma
+in both data generation and fitting was 0.5. The number
+of sampling iterations was 30,000 for parameter learning
+and 100,000 for parameter fitting. For model comparison,
+we provide the fitting and prediction errors for three base
+line models: predicting the last 20% of each couple by 1)
+a line that fitted to each partner’s first 80% observations;
+2) the average of the first 80% observations; and 3) a fitted
+CLO model by maximum likelihood estimation (MLE) of
+p(Y|Θ) over the first 80% time points.
+The results show that the hierarchical model with learned
+shared parameters α, σ, and s can predict much better than
+MLE estimation of the parameters from observations.
+Experiments with real data. The real data is composed of
+recalled self-rating emotion experience of 38 heterosexual
+couples with different joint weight status during an emotional conversation in a social experiment lab setting as reported by Reed et al. (2015). During that experiment, couples were engaged in a video-taped conversation of up to
+20 minutes on the importance of living a healthy lifestyle
+and the positive and negative impacts they have on each
+
+other’s health behaviors. Right after the conversation, both
+partners were asked to watch their own video recordings
+separately and rate how they remembered feeling during
+the conversation using a rating dial. In particular, the couples were asked to rate their emotions continuously second
+by second through the whole conversation. Following Reed
+et al., we averaged this data into 10 second intervals to reduce noise. The number of resulting time points ranges
+from 5 to 99, with 48 being the average. The rating dial
+measurements ranged from -2.0 (very negative experience)
+to 2.0 (very positive experience). We somewhat arbitrarily
+set 0.5 as the sigma of the observation noise during both
+parameter learning and fitting.
+Table 2 shows the mean and the standard deviation of
+RMSE of the three base line models on this data set. Table 3 shows the results of the stationary CLO with priors
+defined by group-shared parameters with different combinations of moderators. Finally, table 4 shows the results for
+the time-varying CLO models.
+Table 2. RMSE of fitting and predicting on real emotion data of
+three baseline models ± the error in the estimate. Not surprisingly, the fitting error of MLE-CLO model has the smallest fitting
+error and the largest predicting error due to over-fitting.
+M ODEL
+AVERAGE
+LINE
+MLE - CLO
+
+F ITTING
+
+P REDICTING
+
+0.52 ± 0.03
+0.47 ± 0.03
+0.39 ± 0.03
+
+0.70 ± 0.05
+0.76 ± 0.08
+1.10 ± 0.19
+
+Moderated and Drifting Linear Dynamical Systems
+Table 3. RMSE of fitting and predicting of stationary CLO with
+group-shared priors ± the error in the estimate. The model with
+θ ∼ N (α, σ) has all couples share the same mean of the CLO
+parameters. For subsequent models, the prior distribution of θ
+for the CLO model depends on the couples’ average BMI (second row), difference in BMI (third row), and both average and
+difference (last row).
+M ODEL
+
+F ITTING
+
+P REDICTING
+
+0.44 ± 0.03
+0.42 ± 0.03
+0.43 ± 0.03
+0.41 ± 0.02
+
+0.68 ± 0.06
+0.64 ± 0.06
+0.61 ± 0.05
+0.59 ± 0.05
+
+ω = 25.4, ω̂ = 8.5
+0.1
+
+ω = 25.4, ω̂ = -7.5
+xa
+xb
+
+xa
+xb
+
+0.05
+
+x
+
+0
+
+−0.05
+−0.1
+
+20
+
+40
+
+60
+
+80 100 120
+
+20
+
+t
+
+(a) Heavier woman
+θ
+θ
+θ
+θ
+
+∼ N (α, σ)
+∼ N (α + ω̄β, σ)
+∼ N (α + ω̂γ, σ)
+∼ N (α + ω̄β + ω̂γ, σ)
+
+Table 4. RMSE of fitting and predicting of time-varying CLO parameters with group-shared GP priors ± the error in the estimate.
+The mean function of the GP is shared across all couples for the
+model in the first row. For subsequent models, the mean function depends on couples’ average BMI (second row), difference
+in BMI (third row), and both average and difference (last row).
+M ODEL
+θ
+θ
+θ
+θ
+
+∼ GP(mα , kσ,s )
+∼ GP(mα+ω̄β , kσ,s )
+∼ GP(mα+ω̂γ , kσ,s )
+∼ GP(mα+ω̄β+ω̂γ , kσ,s )
+
+F ITTING
+
+P REDICTING
+
+0.46 ± 0.03
+0.46 ± 0.03
+0.45 ± 0.03
+0.46 ± 0.03
+
+0.62 ± 0.06
+0.61 ± 0.06
+0.61 ± 0.06
+0.62 ± 0.06
+
+The results in Table 3 show that the group-shared CLO
+model, where emotion patterns come from a distribution
+learned from the training couples, better predicts the emotion states of unseen couples than individual CLO models
+fit to the observations. Furthermore, the BMI moderator
+improved prediction accuracy to some extent, which supports the findings suggested in (Reed et al., 2015).
+To see how couples with different BMI values exhibit different emotional dynamic patterns, we plot the predicted
+emotional state under different BMI moderators (Figure 3).
+We can see that couples in which the woman is heavier than
+the man may be emotionally disconnected and the woman
+may show increasingly volatile emotional responses. This
+could contribute to poorly modulated emotion responses
+when discussing health and lifestyle choice.
+When we let the CLO parameters of the real data drift over
+time, it improves prediction accuracy, reducing the RMSE
+from 0.68 to 0.62 when moderators are not present. However, when the moderators are used, we did not observe
+much difference in prediction accuracy. One possible explanation is that the participants did not have significant
+changes in their emotion dynamics during the short conversation of the experiment, at least to the extent that can be
+extracted from this data which is very noisy. Alternatively,
+
+40
+
+60
+
+80 100 120
+
+t
+(b) Heavier man
+
+Figure 3. Visualizing the predicted emotional states over time
+with the same initial state but differing BMI moderator values.
+xa is the emotional state for the male partner, and xb is for the
+female partner. Figure (a) shows the emotional states for couples
+in which the woman is heavier than the man. Figure (b) shows the
+emotional states for couples in which the man is heavier than the
+woman.
+
+the effect of drift could be correlated with the moderator.
+
+7. Discussion and Conclusion
+We have developed models and inference methods to endow linear dynamical systems with parameter drift, and parameters that are moderated by other variables. We focus
+on the case where it is assumed that the parameters are scientifically interesting, and thus we purposely exclude latent
+state perturbations as is more common. While including
+latent state perturbation in the models is not difficult, doing so would relax the pressure to fit the parameters, which
+might be troublesome with data sets where there is significant unexplained variance such as ours. We have applied
+our modeling and inference approach to a challenging social interaction data set, and were able to confirm a previous
+result which was based on regression methods. By contrast
+to the approach taken in that work, which is standard in the
+social sciences, we developed a cross-validation approach
+around the ability of the models to predict conversation patterns into the near future.
+There is much left to do. Currently our learning algorithms
+are slow — on the order of hours for the 36 couple data
+set due to the large number of samples that are needed for
+learning. Further, we have only explored coupled oscillators in detail. We are planning to consider other LDS
+models on other data such, as well as modeling triads (e.g.,
+mom, dad, child). However, our methods are now at the
+state where we can provide them to the social science community via web services (Predoehl et al., 2015).
+
+Acknowledgments
+Research reported in this publication was supported by the
+National Science Foundation under Award Number BCS-
+
+Moderated and Drifting Linear Dynamical Systems
+
+1322940 and the National Heart, Lung, And Blood Institute
+of the National Institutes of Health under Award Number
+R21HL109746.
+
+References
+A. S. Willsky, E. B. Sudderth, M. I. Jordan, and E. B. Fox.
+Nonparametric Bayesian learning of switching linear dynamical systems. In Advances in Neural Information
+Processing Systems, pp. 457–464, 2009.
+Alvarez, M. A., Luengo, D., and Lawrence, N. D. Latent
+force models. In International Conference on Artificial
+Intelligence and Statistics, pp. 9–16, 2009.
+Anger, G. Inverse Problems in Differential Equations.
+Springer, 1990.
+Bard, Y. Nonlinear Parameter Estimation.
+Press, 4th edition, 1973.
+
+Academic
+
+Boker, S., Neale, M., and Rausch, J. Latent differential
+equation modeling with multivariate multi-occasion indicators. In Recent Developments on Structural Equation Models, volume 19 of Mathematical Modelling:
+Theory and Applications, pp. 151–174. Springer Netherlands, 2004.
+Boker, S. M. and Ghisletta, P. Random coefficients models
+for control parameters in dynamical systems. Multilevel
+Modelling Newsletter, 13(1):10–17, 2001.
+Boker, S. M. and Laurenceau, J. P. Dynamical systems
+modeling: An application to the regulation of intimacy
+and disclosure in marriage. In Models for intensive longitudinal data, pp. 195–218. Oxford University Press,
+New York, 2006.
+
+Chow, S. M., Ram, N., Boker, S. M., Fujita, F., and Clore,
+G. Emotion as a thermostat: Representing emotion regulation using a damped oscillator model. Emotion, 5(2):
+208–225, 2005.
+Dattner, I. and Klaassen, C. AJ. Estimation in systems of
+ordinary differential equations linear in the parameters.
+arXiv:1305.4126, 2013.
+Davidian, M. and Giltinan, D. M. Nonlinear models for
+repeated measurement data: An overview and update.
+Journal of Agricultural, Biological, and Environmental
+Statistics, 8(4):387–419, 2003.
+Dondelinger, F., Husmeier, D., Rogers, S., and Filippone,
+M. ODE parameter inference using adaptive gradient
+matching with Gaussian processes. In Proceedings of
+the Sixteenth International Conference on Artificial Intelligence and Statistics, pp. 216–228, 2013.
+Duane, S., Kennedy, A. D., Pendleton, B. J., and Roweth,
+D. Hybrid monte carlo. Physics letters B, 195(2):216–
+222, 1987.
+Ferrer, E. and Helm, J. L. Dynamical systems modeling of
+physiological coregulation in dyadic interactions. International Journal of Psychophysiology, 88(3):296–308,
+2013.
+Ferrer, E. and Steele, J. S. Dynamic systems analysis of
+affective processes in dyadic interactions using differential equations. In Advances in longitudinal methods
+in the social and behavioral sciences. Information Age
+Publishing, 2011.
+
+Boker, S. M. and Laurenceau, J. P. Coupled dynamics
+and mutually adaptive context. Lawrence Erlbaum Associates Publishers, pp. 299–324, 2007.
+
+Finan, P. H., Hessler, E. E., Amazeen, P. G., Butner, J., Zautra, A. J., and Tennen, H. Nonlinear oscillations in pain
+prediction accuracy: A dynamical systems approach to
+understanding daily pain prediction. Nonlinear dynamics, psychology, and life sciences, 14(1):27, 2010.
+
+Butner, J., Amazeen, P. G., and Mulvey, G. M. Multilevel
+modeling of two cyclical processes: Extending differential structural equation modeling to nonlinear coupled
+systems. Psychological Methods, 10(2):159–177, 2005.
+
+Gao, P., Honkela, A., Rattray, M., and Lawrence, N. D.
+Gaussian process modelling of latent chemical species:
+applications to inferring transcription factor activities.
+Bioinformatics, 24(16):70–75, 2008.
+
+Calderhead, B., Girolami, M., and Lawrence, N. D. Accelerating Bayesian inference over nonlinear differential
+equations with Gaussian Processes. In Advances in Neural Information Processing Systems 21, pp. 217–224.
+Curran Associates, Inc., 2009.
+
+Gelman, A., Bois, F., and Jiang, J. Physiological pharmacokinetic analysis using population modeling and informative prior distributions. Journal of the American
+Statistical Association, 91:1400–1412, 1996.
+
+Chkrebtii, O. A., Campbell, D. A., Girolami, M. A., and
+Calderhead, B. Bayesian uncertainty quantification for
+differential equations. arXiv:1306.2365v2, 2013.
+
+Hall, P. and Ma, Y. Quick and easy one-step parameter
+estimation in differential equations. Journal of the Royal
+Statistical Society: Series B (Statistical Methodology),
+2013.
+
+Moderated and Drifting Linear Dynamical Systems
+
+Lawrence, N. D, Sanguinetti, G., and Rattray, M. Modelling transcriptional regulation using Gaussian Processes. In Advances in Neural Information Processing
+Systems, pp. 785–792, 2006.
+Li, L., Lin, X., Brown, M. B., Gupta, S., and Lee, K. A
+population pharmacokinetic model with time-dependent
+covariates measured with errors. Biometrics, 60(2):451–
+460, 2004.
+Li, L., Yu, M., Chin, R., Lucksiri, A., Flockhart, D. A., and
+Hall, S. D. Drug–drug interaction prediction: a Bayesian
+meta-analysis approach. Statistics in Medicine, 26(20):
+3700–3721, 2007.
+Li, Z., Osborne, M. R., and Trvan, T. Parameter estimation of ordinary differential equations. IMA Journal of
+Numerical Analysis, 25(2):264–285, 2005.
+Liang, H. and Wu, H. Parameter estimation for differential equation models using a framework of measurement
+error in regression models. Journal of the American Statistical Association, 103(484):1570–1583, 2008.
+Murphy, K. P. 18. state space models. In Machine Learning: a Probabilistic Perspective, Adaptive computation
+and machine learning series, pp. 631–660. The MIT
+Press, 2012. ISBN 0262018020.
+Neal, R. M. Monte Carlo implementation of Gaussian Process models for Bayesian regression and classification.
+Technical Report 9702, Department of Statistics, University of Toronto, 1997.
+Nise, N. S. The general state-space representation. In Control Systems Engineering, chapter 3.3, pp. 123–124. John
+Wiley & Sons, Inc., 6 edition, 2010.
+Pillai, G., Mentré, F., and Steimer, J. Non-linear mixed effects modeling – from methodology and software development to driving implementation in drug development
+science. Journal of Pharmacokinetics and Pharmacodynamics, 32(2):161–183, 2005.
+Predoehl, Andrew, Guan, Jinyan, Butler, Emily, and
+Barnard, Kobus. CompTies web app, 2015. URL
+http://www.compties.org/COM.html.
+Ramsay, J. O., Hooker, G., Campbell, D., and Cao, J. Parameter estimation for differential equations: a generalized smoothing approach. Journal of the Royal Statistical Society: Series B (Statistical Methodology), 69(5):
+741–796, 2007.
+Rasmussen, C. E. and Williams, C. K. I. Gaussian Processes for Machine Learning. MIT Press, 2006.
+
+Reed, Rebecca, Barnard, Kobus, and Butler, Emily. Distinguishing emotional co-regulation from co-dysregulation:
+An investigation of emotional dynamics and bodyweight in romantic couples. Emotion, 15(1):45–60,
+2015.
+S. M. Oh, J. M. Rehg, T. Balch, and F. Dellaert. Learning and inferring motion patterns using parametric segmental switching linear dynamic systems. International
+Journal of Computer Vision, 77(1-3):103–124, 2008.
+Steele, J. S. and Ferrer, E. Latent differential equation modeling of self-regulatory and coregulatory affective processes. Multivariate Behavioral Research, 46(6):956–
+984, 2011.
+Titsias, M. K., Lawrence, N. D., and Rattray, M. Efficient
+sampling for Gaussian Process inference using control
+variables. In Advances in Neural Information Processing
+Systems, volume 21, pp. 1681–1688, Vancouver, British
+Columbia, Canada, 2008. Curran Associates, Inc.
+Varah, J. M. A spline least squares method for numerical parameter estimation in differential equations. SIAM
+Journal on Scientific and Statistical Computing, 3(1):
+28–46, 1982.
+Wang, Y. and Barber, D. Gaussian Processes for Bayesian
+estimation in ordinary differential equations. In Proceedings of the 31st International Conference on Machine
+Learning (ICML-14), Beijing, 2014. JMLR Workshop
+and Conference Proceedings.
+Yu, M., Kim, S., Wang, Z., Hall, S., and Li, L. A
+Bayesian meta-analysis on published sample mean and
+variance pharmacokinetic data with application to drug–
+drug interaction prediction. Journal of Biopharmaceutical Statistics, 18(6):1063–1083, 2008.
+
+

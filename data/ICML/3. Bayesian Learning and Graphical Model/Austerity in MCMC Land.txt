@@ -1,0 +1,1237 @@
+Austerity in MCMC Land: Cutting the Metropolis-Hastings Budget
+Anoop Korattikara
+School of Information & Computer Sciences, University of California, Irvine, CA 92617, USA
+Yutian Chen
+Department of Engineering, University of Cambridge, Cambridge CB2 1PZ, UK
+
+AKORATTI @ UCI . EDU
+
+YUTIAN . CHEN @ ENG . CAM . EDU
+
+Max Welling
+WELLING @ ICS . UCI . EDU
+Informatics Institute, University of Amsterdam, Science Park 904 1098 XH, Amsterdam, Netherlands
+
+Abstract
+Can we make Bayesian posterior MCMC sampling more efficient when faced with very large
+datasets? We argue that computing the likelihood
+for N datapoints in the Metropolis-Hastings
+(MH) test to reach a single binary decision is
+computationally inefficient. We introduce an approximate MH rule based on a sequential hypothesis test that allows us to accept or reject samples
+with high confidence using only a fraction of the
+data required for the exact MH rule. While this
+method introduces an asymptotic bias, we show
+that this bias can be controlled and is more than
+offset by a decrease in variance due to our ability
+to draw more samples per unit of time.
+
+1. Introduction
+Markov chain Monte Carlo (MCMC) sampling has been
+the main workhorse of Bayesian computation since the
+1990s. A canonical MCMC algorithm proposes samples
+from a distribution q and then accepts or rejects these proposals with a certain probability given by the MetropolisHastings (MH) formula (Metropolis et al., 1953; Hastings,
+1970). For each proposed sample, the MH rule needs to
+examine the likelihood of all data-items. When the number
+of data-cases is large this is an awful lot of computation for
+one bit of information, namely whether to accept or reject
+a proposal.
+In today’s Big Data world, we need to rethink our Bayesian
+inference algorithms. Standard MCMC methods do not
+meet the Big Data challenge for the reason described above.
+Researchers have made some progress in terms of making
+Proceedings of the 31 st International Conference on Machine
+Learning, Beijing, China, 2014. JMLR: W&CP volume 32. Copyright 2014 by the author(s).
+
+MCMC more efficient, mostly by focusing on parallelization. Very few question the algorithm itself: is the standard
+MCMC paradigm really optimally efficient in achieving its
+goals? We claim it is not.
+Any method that includes computation as an essential ingredient should acknowledge that there is a finite amount
+of time, T , to finish a calculation. An efficient MCMC
+algorithm should therefore decrease the “error” (properly
+defined) maximally in the given time T . For MCMC algorithms, there are two contributions to this error: bias and
+variance. Bias occurs because the chain needs to burn in
+during which it is sampling from the wrong distribution.
+Bias usually decreases fast, as evidenced by the fact that
+practitioners are willing to wait until the bias has (almost)
+completely vanished after which they discard these “burnin samples”. The second cause of error is sampling variance, which occurs because of the random nature of the
+sampling process. The retained samples after burn-in will
+reduce the variance as O(1/T ).
+However, given a finite amount of computational time, it is
+not at all clear whether the strategy of retaining few unbiased samples and accepting an error dominated by variance
+is optimal. Perhaps, by decreasing the bias more slowly we
+could sample faster and thus reduce variance faster? In this
+paper we illustrate this effect by cutting the computational
+budget of the MH accept/reject step. To achieve that, we
+conduct sequential hypothesis tests to decide whether to
+accept or reject a given sample and find that the majority
+of these decisions can be made based on a small fraction
+of the data with high confidence. A related method was
+used in Singh et al. (2012), where the factors of a graphical
+model are sub-sampled to compute fixed-width confidence
+intervals for the log-likelihood in the MH test.
+Our “philosophy” runs deeper than the algorithm proposed
+here. We advocate MCMC algorithms with a “bias-knob”,
+allowing one to dial down the bias at a rate that optimally
+
+Austerity in MCMC Land: Cutting the Metropolis-Hastings Budget
+
+balances error due to bias and variance. We only know
+of one algorithm that would also adhere to this strategy:
+stochastic gradient Langevin dynamics (Welling & Teh,
+2011) and its successor stochastic gradient Fisher scoring
+(Ahn et al., 2012). In their case the bias-knob was the stepsize. These algorithms do not have an MH step which resulted in occasional samples with extremely low probability. We show that our approximate MH step largely resolves this, still avoiding O(N ) computations per iteration.
+In the next section we introduce the MH algorithm and discuss its drawbacks. Then in Section 3, we introduce the
+idea of approximate MCMC methods and the bias variance
+trade-off involved. We develop approximate MH tests for
+Bayesian posterior sampling in Section 4 and present a theoretical analysis in Section 5. Finally, we show our experimental results in Section 6 and conclude in Section 7.
+
+2. The Metropolis-Hastings algorithm
+MCMC methods generate samples from a distribution
+S0 (✓) by simulating a Markov chain designed to have
+stationary distribution S0 (✓). A Markov chain with a
+given stationary distribution can be constructed using the
+Metropolis-Hastings algorithm (Metropolis et al., 1953;
+Hastings, 1970), which uses the following rule for transitioning from the current state ✓t to the next state ✓t+1 :
+1. Draw a candidate state ✓0 from a proposal distribution
+q(✓0 |✓t )
+2. Compute the acceptance probability:
+
+S0 (✓0 )q(✓t |✓0 )
+Pa = min 1,
+S0 (✓t )q(✓0 |✓t )
+3. Draw u ⇠ Uniform[0, 1]. If u < Pa set ✓t+1
+otherwise set ✓t+1
+✓t .
+
+(1)
+✓0 ,
+
+Following this transition rule ensures that the stationary
+distribution of the Markov chain is S0 (✓). The samples
+from the Markov chain are usually used to estimate the expectation of a function f (✓) with respect to S0 (✓). To do
+this we collect T samples
+approximate the expectation
+Pand
+T
+I = hf iS0 as Iˆ = T1 t=1 f (✓t ). Since the stationary
+distribution of the Markov chain is S0 , Iˆ is an unbiased
+estimator of I (if we ignore burn-in).
+PT
+1
+2
+The variance of Iˆ is V = E[(hf iS0
+t=1 f (✓t )) ],
+T
+where the expectation is over multiple simulations of the
+2
+Markov chain. It is well known that V ⇡ f,S
+⌧ /T , where
+0
+2
+is
+the
+variance
+of
+f
+with
+respect
+to
+S
+and
+⌧ is the in0
+f,S0
+tegrated auto-correlation time, which is a measure of the interval between independent samples (Gamerman & Lopes,
+2006). Usually, it is quite difficult to design a chain that
+
+mixes fast and therefore, the auto-correlation time will be
+quite high. Also, for many important problems, evaluating
+S0 (✓) to compute the acceptance probability Pa in every
+step is so expensive that we can collect only a very small
+number of samples (T ) in a realistic amount of computational time. Thus the variance of Iˆ can be prohibitively
+high, even though it is unbiased.
+
+3. Approximate MCMC and the
+Bias-Variance Tradeoff
+Ironically, the reason MCMC methods are so slow is that
+they are designed to be unbiased. If we were to allow
+a small bias in the stationary distribution, it is possible
+to design a Markov chain that can be simulated cheaply
+(Welling & Teh, 2011; Ahn et al., 2012). That is, to estimate I = hf iS0 , we can use a Markov chain with stationary
+distribution S✏ where ✏ is a parameter that can be used to
+control the P
+bias in the algorithm. Then I can be estimated
+T
+as Iˆ = T1 t=1 f (✓t ), computed using samples from S✏
+instead of S0 .
+As ✏ ! 0, S✏ approaches S0 (the distribution of interest)
+but it becomes expensive to simulate the Markov chain.
+Therefore, the bias in Iˆ is low, but the variance is high because we can collect only a small number of samples in
+a given amount of computational time. As ✏ moves away
+from 0, it becomes cheap to simulate the Markov chain but
+the difference between S✏ and S0 grows. Therefore, Iˆ will
+have higher bias, but lower variance because we can collect
+a larger number of samples in the same amount of computational time. This is a classical bias-variance trade-off and
+can be studied using the risk of the estimator.
+ˆ
+The risk can be defined as the mean squared error in I,
+2
+ˆ
+i.e. R = E[(I I) ], where the expectation is taken over
+multiple simulations of the Markov chain. It is easy to show
+that the risk can be decomposed as R = B 2 + V , where
+B is the bias and V is the variance. If we ignore burnin, it can be shown that B = hf iS✏
+hf iS0 and V =
+2
+E[(hf iS✏ T1 f (✓t ))2 ] ⇡ f,S
+⌧
+/T
+.
+✏
+
+The optimal setting of ✏ that minimizes the risk depends on
+the amount of computational time available. If we have an
+infinite amount of computational time, we should set ✏ to
+0. Then there is no bias, and the variance can be brought
+down to 0 by drawing an infinite number of samples. This
+is the traditional MCMC setting. However, given a finite
+amount of computational time, this setting may not be optimal. It might be better to tolerate a small amount of bias
+in the stationary distribution if it allows us to reduce the
+variance quickly, either by making it cheaper to collect a
+large number of samples or by mixing faster.
+It is interesting to note that two recently proposed algorithms follow this paradigm: Stochastic Gradient Langevin
+
+Austerity in MCMC Land: Cutting the Metropolis-Hastings Budget
+
+Dynamics (SGLD) (Welling & Teh, 2011) and Stochastic Gradient Fisher Scoring (SGFS) (Ahn et al., 2012).
+These algorithms are biased because they omit the required
+Metropolis-Hastings tests. However, in both cases, a knob
+✏ (the step-size of the proposal distribution) is available
+to control the bias. As ✏ ! 0, the acceptance probability Pa ! 1 and the bias from not conducting MH
+tests disappears. However, when ✏ ! 0 the chain mixes
+very slowly and the variance increases because the autocorrelation time ⌧ ! 1. As ✏ is increased from 0, the
+auto-correlation, and therefore the variance, reduces. But,
+at the same time, the acceptance probability reduces and
+the bias from not conducting MH tests increases as well.
+In the next section, we will develop another class of approximate MCMC algorithms for the case where the target
+S0 is a Bayesian posterior distribution given a very large
+dataset. We achieve this by developing an approximate
+Metropolis-Hastings test, equipped with a knob for controlling the bias. Moreover, our algorithm has the advantage that it can be used with any proposal distribution. For
+example, our method allows approximate MCMC methods
+to be applied to problems where it is impossible to compute gradients (which is necessary to apply SGLD/SGFS).
+Or, we can even combine our method with SGLD/SGFS, to
+obtain the best of both worlds.
+
+4. Approximate Metropolis-Hastings Test for
+Bayesian Posterior Sampling
+An important method in the toolbox of Bayesian inference is posterior sampling. Given a dataset of N independent observations XN = {x1 , . . . , xN }, which we model
+using a distribution p(x; ✓) parameterized by ✓, defined
+on a space ⇥ with measure ⌦, and a prior distribution
+⇢(✓), the task is to sample from the posterior distribution
+QN
+S0 (✓) / ⇢(✓) i=1 p(xi ; ✓).
+
+If the dataset has a billion datapoints, it becomes very
+painful to compute S0 (.) in the MH test, which has to
+be done for each posterior sample we generate. Spending O(N ) computation to get just 1 bit of information, i.e.
+whether to accept or reject a sample, is likely not the best
+use of computational resources.
+But, if we try to develop accept/reject tests that satisfy detailed balance exactly with respect to the posterior distribution using only sub-samples of data, we will quickly see the
+no free lunch theorem kicking in. For example, the pseudo
+marginal MCMC method (Andrieu & Roberts, 2009) and
+the method developed by Lin et al. (2000) provide a way
+to conduct exact accept/reject tests using unbiased estimators of the likelihood. However, unbiased estimators of the
+likelihood that can be computed from mini-batches of data,
+such as the Poisson estimator (Fearnhead et al., 2008) or
+
+the Kennedy-Bhanot estimator (Lin et al., 2000) have very
+high variance for large datasets. Because of this, once we
+get a very high estimate of the likelihood, almost all proposed moves are rejected and the algorithm gets stuck.
+Thus, we should be willing to tolerate some error in the
+stationary distribution if we want faster accept/reject tests.
+If we can offset this small bias by drawing a large number
+of samples cheaply and reducing the variance faster, we can
+establish a potentially large reduction in the risk.
+We will now show how to develop such approximate
+tests by reformulating the MH test as a statistical decision problem. It is easy to see that the original MH test
+(Eqn. 1) is equivalent to the following procedure: Draw
+u ⇠ Uniform[0, 1] and accept the proposal ✓0 if the average
+difference µ in the log-likelihoods of ✓0 and ✓t is greater
+than a threshold µ0 , i.e. compute
+
+1
+⇢(✓t )q(✓0 |✓t )
+µ0 =
+log u
+, and
+(2)
+N
+⇢(✓0 )q(✓t |✓0 )
+µ=
+
+N
+1 X
+li where li = log p(xi ; ✓0 )
+N i=1
+
+log p(xi ; ✓t )
+(3)
+
+Then if µ > µ0 , accept the proposal and set ✓t+1
+✓0 .
+If µ  µ0 , reject the proposal and set ✓t+1
+✓t . This
+reformulation of the MH test makes it very easy to frame
+it as a statistical hypothesis test. Given µ0 and a random
+sample {li1 , . . . , lin } drawn without replacement from the
+population {l1 , . . . , lN }, can we decide whether the population mean µ is greater than or less than the threshold µ0 ?
+The answer to this depends on the precision in the random
+sample. If the difference between the sample mean ¯l and
+µ0 is significantly greater than the standard deviation s of
+¯l, we can make the decision to accept or reject the proposal
+confidently. If not, we should draw more data to increase
+the precision of ¯l (reduce s) until we have enough evidence
+to make a decision.
+More formally, we test the hypotheses H1 : µ > µ0 vs H2 :
+µ < µ0 . To do this, we proceed as follows: We compute
+¯
+the
+q sample mean l and the sample standard deviation sl =
+n
+(l2 (¯l)2 )
+. Then the standard deviation of ¯l can be
+estimated as:
+
+n 1
+
+sl
+s= p
+n
+
+r
+
+n
+N
+
+1
+
+1
+1
+
+(4)
+
+q
+n 1
+where 1 N
+1 , the finite population correction term,
+is applied because we are drawing the subsample without
+replacement from a finite-sized population. Then, we compute the test statistic:
+t=
+
+¯l
+
+µ0
+s
+
+(5)
+
+Austerity in MCMC Land: Cutting the Metropolis-Hastings Budget
+
+If n is large enough for the central limit theorem (CLT) to
+hold, the test statistic t follows a standard Student-t distribution with n 1 degrees of freedom, when µ = µ0
+(see Fig. 7 in supplementary for an empirical verification).
+Then, we compute = 1
+n 1 (|t|) where n 1 (.) is the
+cdf of the standard Student-t distribution with n 1 degrees
+of freedom. If < ✏ (a fixed threshold) we can confidently
+say that µ is significantly different from µ0 . In this case, if
+¯l > µ0 , we decide µ > µ0 , otherwise we decide µ < µ0 . If
+✏, we do not have enough evidence to make a decision.
+In this case, we draw more data to reduce the uncertainty, s,
+in the sample mean ¯l. We keep drawing more data until we
+have the required confidence (i.e. until < ✏). Note, that
+this procedure will terminate because when we have used
+all the available data, i.e. n = N , the standard deviation
+s is 0, the sample mean ¯l = µ and = 0 < ✏. So, we
+will make the same decision as the original MH test would
+make. Pseudo-code for our test is shown in Algorithm 1.
+Here, we start with a mini-batch of size m for the first test
+and increase it by m datapoints when required.
+The advantage of our method is that often we can make
+confident decisions with n < N datapoints and save on
+computation, although we introduce a small bias in the stationary distribution. But, we can use the computational
+time we save to draw more samples and reduce the variance. The bias-variance trade-off can be controlled by adjusting the knob ✏. When ✏ is high, we make decisions
+without sufficient evidence and introduce a high bias. As
+✏ ! 0, we make more accurate decisions but are forced to
+examine more data which results in high variance.
+Our algorithm will behave erratically if the CLT does not
+hold, e.g. with very sparse datasets or datasets with extreme
+outliers. The CLT assumption can be easily tested empiri-
+
+0.4
+
+Simulation with 68% CI
+Theoretical
+Upper Bound
+
+0.3
+
+P(Error)
+
+Algorithm 1 Approximate MH test
+Require: ✓t , ✓0 , ✏, µ0 , XN , m
+Ensure: accept
+1: Initialize estimated means ¯
+l
+0 and l2
+0
+2: Initialize n
+0, done
+false
+3: Draw u ⇠ Uniform[0,1]
+4: while not done do
+5:
+Draw mini-batch X of size min (m, N n) without
+replacement from XN and set XN
+XN \ X
+6:
+Update ¯l and l2 using X , and n
+n + |X |
+7:
+Estimate std s using Eqn.✓4
+¯l µ0 ◆
+8:
+Compute
+1
+n 1
+s
+9:
+if < ✏ then
+10:
+accept
+true if ¯l > µ0 and false otherwise
+11:
+done
+true
+12:
+end if
+13: end while
+
+0.2
+0.1
+0
+0.1
+0.05
+0.01
+
+!
+
+−20
+
+−10
+
+0
+
+10
+
+20
+
+Standardized Mean, µstd
+
+Figure 1. Error E estimated using simulation (blue cross with 1
+error bar) and dynamic programming (red line). An upper bound
+(black dashed line) is also shown.
+
+cally before running the algorithm to avoid such pathological situations. The sequential hypothesis testing method
+can also be used to speed-up Gibbs sampling in densely
+connected Markov Random Fields. We explore this idea
+briefly in Section F of the supplementary.
+
+5. Error Analysis and Test Design
+In 5.1, we study the relation between the parameter ✏, the
+error E of the complete sequential test, the error in the
+acceptance probability and the error in the stationary distribution. In 5.2, we describe how to design an optimal test
+that minimizes data usage given a bound on the error.
+5.1. Error Analysis and Estimation
+The parameter ✏ is an upper-bound on the error of a single test and not the error of the complete sequential test.
+To compute this error, we assume a) n is large enough
+that the t statistics can be approximated with z statistics, and b) the joint distribution of the ¯l’s corresponding
+to different mini-batches used in the test is multivariate
+normal. Under these assumptions, we can show that the
+test statistic at different stages of the sequential test follows a Gaussian Random Walk process. This allows us
+to compute the error of the sequential test E(µstd , m, ✏),
+and the expected proportion of the data required to reach
+a decision ⇡
+¯ (µstd , m, ✏), using an efficient dynamic programming algorithm. Note that E and ⇡
+¯ depend on ✓,
+✓0 and u only through the ‘standardized mean’
+p defined as
+0
+0
+(µ(✓,
+✓
+)
+µ
+(✓,
+✓
+,
+u))
+N 1
+def
+0
+µstd (u, ✓, ✓0 ) =
+where
+0)
+(✓,
+✓
+l
+l is the true standard deviation of the li ’s. See Section A
+of the supplementary for a detailed derivation and an empirical validation of the assumptions.
+Fig. 1 shows the theoretical and actual error of 1000 sequential tests for the logistic regression model described
+in Section 6.1. The error E(µstd , m, ✏) is highest in the
+worst case when µ = µ0 . Therefore, E(0, m, ✏) is an upper-
+
+Austerity in MCMC Land: Cutting the Metropolis-Hastings Budget
+
+bound on E. Since the error decreases sharply as µ moves
+away from µ0 , we can get a more useful estimate of E if we
+have some knowledge about the distribution of µstd ’s that
+will be encountered during the Markov chain simulation.
+Now, let Pa,✏ (✓, ✓0 ) be the actual acceptance probability of
+def
+
+our algorithm and let (✓, ✓0 ) = Pa,✏ (✓, ✓0 ) Pa (✓, ✓0 ) be
+the error in Pa,✏ . In Section B of the supplementary, we
+show that for any (✓, ✓0 ):
+Z 1
+Z Pa
+=
+E(µstd (u))du
+E(µstd (u))du (6)
+Pa
+
+0
+
+Thus, the errors corresponding to different u’s partly cancel each other. As a result, although | (✓, ✓0 )| is upperbounded by the worst-case error E(0, m, ✏) of the sequential test, the actual error is usually much smaller. For
+any given (✓, ✓0 ),
+can be computed easily using 1dimensional quadrature.
+Finally, we show that the error in the stationary distribution
+is bounded linearly by max = sup✓,✓0 | (✓, ✓0 )|. As noted
+above, max  E(0, m, ✏) but is usually much smaller.
+Let dv (P, Q) denote the total variation distance1 between
+two distributions, P and Q. If the transition kernel T0 of
+the exact Markov chain satisfies the contraction condition
+dv (P T0 , S0 )  ⌘dv (P, S0 ) for all probability distributions
+P with a constant ⌘ 2 [0, 1), we can prove (see supplementary Section C) the following upper bound on the error in
+the stationary distribution:
+Theorem 1. The distance between the posterior distribution S0 and the stationary distribution of our approximate
+Markov chain S✏ is upper bounded as:
+dv (S0 , S✏ ) 
+
+max
+
+1
+
+⌘
+
+of the exact transition kernel, which is difficult to compute.
+A more practical choice is a bound on the error in the acceptance probability, since the error in S✏ increases linearly
+with . Since is a function of (✓, ✓0 ), we can try to control the average value of over the empirical distribution
+of (✓, ✓0 ) that would be encountered while simulating the
+Markov chain. Given a tolerance ⇤ on this average error,
+we can find the optimal m and ✏ by solving the following
+optimization problem (e.g. using grid search) to minimize
+the average data usage :
+min E✓,✓0 [Eu ⇡
+¯ (µstd (u, ✓, ✓0 ), m, ✏)]
+m,✏
+
+s.t. E✓,✓0 | (m, ✏, ✓, ✓0 )| 
+
+⇤
+
+(7)
+
+In the above equation, we estimate the average data usage,
+Eu [¯
+⇡ ], and the error in the acceptance probability, , using dynamic programming with one dimensional numerical
+quadrature on u. The empirical distribution for computing
+the expectation with respect to (✓, ✓0 ) can be obtained using a trial run of the Markov chain. Without a trial run the
+best we can do is to control the worst case error E(0, m, ✏)
+(which is also an upper-bound on ) in each sequential test
+by solving the following minimization problem:
+min ⇡
+¯ (0, m, ✏) s.t. E(0, m, ✏) 
+m,✏
+
+⇤
+
+(8)
+
+But this leads to a very conservative design as the worst
+case error is usually much higher than the average case error. We illustrate the sequential design in Experiment 6.5.
+More details and a generalization of this method is given in
+supplementary Section D.
+
+6. Experiments
+
+5.2. Optimal Sequential Test Design
+
+6.1. Random Walk - Logistic Regression
+
+We now briefly describe how to choose the parameters of
+the algorithm: ✏, the error of a single test and m, the minibatch size. A very simple strategy we recommend is to
+choose m ⇡ 500 so that the Central Limit Theorem holds
+and keep ✏ as small as possible while maintaining a low
+average data usage. This rule works well in practice and is
+used in Experiments 6.1 - 6.4.
+
+We first test our method using a random walk proposal
+2
+q(✓0 |✓t ) = N (✓t , RW
+). Although the random walk proposal is not efficient, it is very useful for illustrating our
+algorithm because the proposal does not contain any information about the target distribution, unlike Langevin or
+Hamiltonian methods. So, the responsibility of converging
+to the correct distribution lies solely with the MH test. Also
+since q is symmetric, it does not appear in the MH test and
+we can use µ0 = N1 log [u⇢(✓t )/⇢(✓0 )].
+
+The more discerning practitioner can design an optimal test
+that minimizes the data used while keeping the error below
+a given tolerance. Ideally, we want to do this based on a tolerance on the error in the stationary distribution S✏ . Unfortunately, this error depends on the contraction parameter, ⌘,
+1
+The total variation distance between two distributions P and
+Q, that are absolutely continuous w.r.t. measure ⌦, is defined as
+R
+def
+dv (P, Q) = 12 ✓2⇥ |fP (✓) fQ (✓)|d⌦(✓) where fP and fQ
+are their respective densities (or Radon-Nikodym derivatives to
+be more precise).
+
+The target distribution in this experiment was the posterior for a logistic regression model trained on the MNIST
+dataset for classifying digits 7 vs 9. The dataset consisted
+of 12214 datapoints and we reduced the dimensionality
+from 784 to 50 using PCA. We chose a zero mean spherical
+Gaussian prior with precision = 10, and set RW = 0.01.
+In Fig. 2, we show how the logarithm of the risk in estimating the predictive mean, decreases as a function of wall
+
+Austerity in MCMC Land: Cutting the Metropolis-Hastings Budget
+0
+
+ε =0.00, T = 75484
+ε =0.01, T = 133069
+ε =0.05, T = 200672
+ε =0.10, T = 257897
+ε =0.20, T = 422978
+
+−4
+
+0.5
+
+−0.5
+
+−6
+−8
+−10
+−12
+0
+
+50
+
+100
+
+150
+
+200
+
+250
+
+300
+
+350
+
+ε = 0, T = 5992
+ε = 0.01, T = 11320
+ε = 0.05, T = 40973
+ε = 0.1, T = 171917
+ε = 0.2, T = 1894000
+
+0
+
+Log (Risk)
+
+Log (Risk)
+
+−2
+
+400
+
+Wall Clock Time (secs)
+
+Figure 2. Logistic Regression: Risk in predictive mean.
+
+−1
+−1.5
+−2
+−2.5
+−3
+−3.5
+0
+
+1000
+
+2000
+
+3000
+
+4000
+
+5000
+
+6000
+
+7000
+
+Wall Clock Time (secs)
+
+clock time. The predictive mean of a test point x⇤ is defined as Ep(✓|XN ) [p(x⇤ |✓)]. To calculate the risk, we first
+estimate the true predictive mean using a long run of Hybrid Monte Carlo. Then, we compute multiple estimates of
+the predictive mean from our approximate algorithm and
+obtain the risk as the mean squared error in these estimates.
+We plot the average risk of 2037 datapoints in the test set.
+2
+Since the risk R = B 2 + V = B 2 + Tf , we expect it to
+decrease as a function of time until the bias dominates the
+variance. The figure shows that even after collecting a lot
+of samples, the risk is still dominated by the variance and
+the minimum risk is obtained with ✏ > 0.
+6.2. Independent Component Analysis
+Next, we use our algorithm to sample from the posterior
+distribution of the unmixing matrix in Independent Component Analysis (ICA) (Hyvärinen & Oja, 2000). When
+using prewhitened data, the unmixing matrix W 2 RD⇥D
+is constrained to lie on the Stiefel manifold of orthonormal matrices. We choose a prior that is uniform over
+the manifold and zero
+elsewhere.
+We model
+⇥
+⇤ 1the data as
+QD
+p(x|W ) = |det(W )| j=1 4 cosh2 ( 12 wjT x)
+where wj
+are the rows of W . Since the prior is zero outside the manifold, the same is true for the posterior. Therefore we use
+a random walk on the Stiefel manifold as a proposal distribution (Ouyang, 2008). Since this is a symmetric proposal
+distribution, it does not appear in the MH test and we can
+use µ0 = N1 log [u].
+To perform a large scale experiment, we created a synthetic
+dataset by mixing 1.95 million samples of 4 sources: (a)
+a Classical music recording (b) street / traffic noise (c) &
+(d) 2 independent Gaussian sources. To measure the correctness of the sampler, we measure the risk in estimating
+I = Ep(W |X) [dA (W, W0 )] where the test function dA is
+the Amari distance (Amari et al., 1996) and W0 is the true
+unmixing matrix. We computed the ground truth using a
+long run (T = 100K samples) of the exact MH algorithm.
+Then we ran each algorithm 10 times, each time for ⇡ 6400
+secs. We calculated the risk by averaging the squared er-
+
+Figure 3. ICA: Risk in mean of Amari distance
+
+ror in the estimate from each Markov chain, over the 10
+chains. This is shown in Fig. 3. Note that even after 6400
+secs the variance dominates the bias, as evidenced by the
+still decreasing risk, except for the most biased algorithm
+with ✏ = 0.2. Also, the lowest risk at 6400 secs is obtained
+with ✏ = 0.1 and not the exact MH algorithm (✏ = 0). But
+we expect the exact algorithm to outperform all the approximate algorithms if we were to run for an infinite time.
+6.3. Variable selection in Logistic Regression
+Now, we apply our MH test to variable selection in a logistic regression model using the reversible jump MCMC
+algorithm of Green (1995). We use a model that is similar to the Bayesian LASSO model for linear regression described in Chen et al. (2011). Specifically, given D input
+features, our parameter ✓ = { , } where is a vector
+of D regression coefficients and is a D dimensional binary vector that indicates whether a particular feature is included in the model or
+n not. The
+o prior we choose for is
+| j|
+1
+p( j | , ⌫) = 2⌫ exp
+if j = 1. If j = 0, j
+⌫
+does not appear in the model. Here ⌫ is a shrinkage parameter that pushes j towards 0, and we choose a prior
+p(⌫) / 1/⌫. We also place a right truncated Poisson prior
+k
+
+p( | ) /
+PD
+k = j=1
+
+on to control the size of the model,
+k!
+We set = 10 10 in this experiment.
+
+D
+k
+j
+
+Denoting the likelihood of the data by lN ( , ),
+the posterior distribution after integrating out ⌫ is
+p( , |XN , yN , ) / lN ( , )k k1 k k B(k, D k + 1)
+where B(., .) is the beta function. Instead of integrating
+out , we use it as a parameter to control the size of the
+model. We use the same proposal distribution as in (Chen
+et al., 2011) which is a mixture of 3 type of moves that are
+picked randomly in each iteration: an update move, a birth
+move and a death move. A detailed description is given in
+
+Austerity in MCMC Land: Cutting the Metropolis-Hastings Budget
+
+✓
+
+−5
+−6
+−7
+−8
+−9
+0
+
+1000
+
+2000
+
+3000
+
+4000
+
+Wall Clock Time (secs)
+
+Figure 4. RJMCMC: Risk in predictive mean
+
+Supplementary Section E.
+We applied this to the MiniBooNE dataset from the UCI
+machine learning repository(Bache & Lichman, 2013).
+Here the task is to classify electron neutrinos (signal) from
+muon neutrinos (background). There are 130,065 datapoints (28% in +ve class) with 50 features to which we
+add a constant feature of 1’s. We randomly split the data
+into a training (80%) and testing (20%) set. To compute
+ground truth, we collected T=400K samples using the exact reversible jump algorithm (✏ = 0). Then, we ran the
+approximate MH algorithm with different values of ✏ for
+around 3500 seconds. We plot the risk in predictive mean
+of test data (estimated from 10 Markov chains) in Fig. 4.
+Again we see that the lowest risk is obtained with ✏ > 0.
+The acceptance rates for the birth/death moves starts off
+at ⇡ 20% but dies down to ⇡ 2% once a good model is
+found. The acceptance rate for update moves is kept at
+⇡ 50%. The model also suffers from local minima. For
+the plot in Fig. 4, we started with only one variable and
+we ended up learning models with around 12 features, giving a classification error ⇡ 15%. But, if we initialize the
+sampler with all features included and initialize to the
+MAP value, we learn models with around 45 features, but
+with a lower classification error ⇡ 10%. Both the exact reversible jump algorithm and our approximate version suffer
+from this problem. We should bear this in mind when interpreting “ground truth”. However, we have observed that
+when initialized with the same values, we obtain similar
+results with the approximate algorithm and the exact algorithm (see e.g. Fig. 13 in supplementary).
+6.4. Stochastic Gradient Langevin Dynamics
+Finally, we apply our method to Stochastic Gradient Langevin Dynamics(Welling & Teh, 2011).
+In
+each iteration, we randomly draw a mini-batch
+Xn of size n, and propose ✓0 ⇠ q(.|✓, Xn ) =
+
+As an example, consider an L1-regularized linear regresN
+sion model. Given a dataset {xi , yi }i=1 where xi are predictors and yi are targets, we use a Gaussian error model
+p(y|x, ✓) / exp
+✓T x)2 and choose a Laplacian
+2 (y
+prior for the parameters p(✓) / exp( 0 k✓k1 ). For pedagogical reasons, we will restrict ourselves to a toy version
+of the problem where ✓ and x are one dimensional. We use
+a synthetic dataset with N = 10000 datapoints generated
+as yi = 0.5xi + ⇠ where ⇠ ⇠ N (0, 1/3). We choose = 3
+and 0 = 4950, so that the prior is not washed out by the
+likelihood. The posterior density and the gradient of the log
+posterior are shown in figures 5(a) and 5(b) respectively.
+80
+
+10000
+
+70
+
+8000
+
+∇θ log p(θ|Data)
+
+−4
+
+60
+50
+40
+30
+20
+
+6000
+4000
+2000
+0
+
+10
+0
+
+0
+
+0.01
+
+0.02
+
+0.03
+
+0.04
+
+0.05
+
+−2000
+
+0.06
+
+0
+
+0.01
+
+0.02
+
+0.03
+
+θ
+
+0.04
+
+(a) Posterior density
+
+0.06
+
+(b) Gradient of log posterior
+
+80
+
+80
+SGLD
+
+70
+
+ε = 0.5
+
+70
+
+True
+
+True
+
+60
+
+60
+
+50
+40
+30
+20
+
+50
+40
+30
+20
+
+10
+0
+
+0.05
+
+θ
+
+p(θ|Data)
+
+Log (Risk)
+
+−3
+
+p(θ|Data)
+
+ε = 0, T = 24583
+ε = 0.01, T = 137375
+ε = 0.05, T = 245906
+ε = 0.1, T = 419090
+
+−2
+
+p(θ|Data)
+
+−1
+
+⇢
+◆
+↵
+NP
+N ✓ + r✓
+log p(x|✓) + log ⇢(✓) , ↵ .
+2
+n x2Xn
+0
+The proposed state ✓ is always accepted (without conducting any MH test). Since the acceptance probability
+approaches 1 as we reduce ↵, the bias from not conducting
+the MH test can be kept under control by using ↵ ⇡ 0.
+However, we have to use a reasonably large ↵ to keep
+the mixing rate high. This can be problematic for some
+distributions, because SGLD relies solely on gradients of
+the log density and it can be easily thrown off track by
+large gradients in low density regions, unless ↵ ⇡ 0.
+
+10
+0
+
+0.01
+
+0.02
+
+0.03
+
+0.04
+
+θ
+
+(c) SGLD
+
+0.05
+
+0.06
+
+0
+
+0
+
+0.01
+
+0.02
+
+0.03
+
+0.04
+
+0.05
+
+0.06
+
+θ
+
+(d) SGLD + MH, ✏ = 0.5.
+
+Figure 5. Pitfalls of using uncorrected SGLD
+
+An empirical histogram of samples obtained by running
+SGLD with ↵ = 5 ⇥ 10 6 is shown in Fig. 5(c). The effect of omitting the MH test is quite severe here. When the
+sampler reaches the mode of the distribution, the Langevin
+noise occasionally throws it into the valley to the left, where
+the gradient is very high. This propels the sampler far off
+to the right, after which it takes a long time to find its way
+back to the mode. However, if we had used an MH acceptreject test, most of these troublesome jumps into the valley
+
+Austerity in MCMC Land: Cutting the Metropolis-Hastings Budget
+
+would be rejected because the density in the valley is much
+lower than that at the mode.
+To apply an MH test, note that the SGLD proposal
+q(✓0 |✓) can be considered a mixture of component kernels
+q(✓0 |✓, Xn ) corresponding to different mini-batches. The
+mixture kernel will satisfy detailed balance with respect to
+the posterior distribution if the MH test enforces detailed
+balance between the posterior and each of the component
+kernels q(✓0 |✓,
+we can use an MH test with
+ Xn ). Thus,
+1
+⇢(✓t )q(✓0 |✓t , Xn )
+µ0 =
+log u
+.
+N
+⇢(✓0 )q(✓t |✓0 , Xn )
+
+Test Average Error
+
+The result of running SGLD (keeping ↵ = 5 ⇥ 10 6
+as before) corrected using our approximate MH test, with
+✏ = 0.5, is shown in Fig. 5(d). As expected, the MH test
+rejects most troublesome jumps into the valley because the
+density in the valley is much lower than that at the mode.
+The stationary distribution is almost indistinguishable from
+the true posterior. Note that when ✏ = 0.5, a decision is always made in the first step (using just m = 500 datapoints)
+without querying additional data sequentially.
+
+−2
+
+10
+
+−4
+
+10
+
+Avg−Design
+Avg−Design Fix m
+WC−Design
+Target
+−3
+
+10
+
+−2
+
+10
+Target Average Error
+
+−1
+
+10
+
+(a) Test Average Error
+0
+
+Average Data Usage
+
+10
+
+−1
+
+10
+
+−2
+
+Avg−Design
+
+10
+
+Avg−Design Fix m
+WC−Design
+−3
+
+10
+
+−3
+
+10
+
+−2
+
+10
+Target Average Error
+
+−1
+
+10
+
+(b) Average Data Usage
+Figure 6. Test average error in Pa and data usage Eu [¯
+⇡ ] for the
+ICA experiment using average design over both m and ✏ ( ),
+with fixed m = 600 (4), and worst-case design (⇤).
+
+6.5. Optimal Design of Sequential Tests
+We illustrate the advantages of the optimal test design proposed in Section 5.2 by applying it to the ICA experiment
+described in Section 6.2. We consider two design methods:
+
+the ‘average design’ (Eqn. 7) and the ‘worst-case design’
+(Eqn. 8). For the average design, we collected 100 samples
+of the Markov chain to approximate the expectation of the
+error over (✓, ✓0 ). We will call these samples the training
+set. The worst case design does not need the training set as
+it does not involve the distribution of (✓, ✓0 ). We compute
+the optimal m and ✏ using grid search, for different values of the target training error, for both designs. We then
+collect a new set of 100 samples (✓, ✓0 ) and measure the
+average error and data usage on this test set (Fig. 6).
+For the same target error on the training set, the worst-case
+design gives a conservative parameter setting that achieves
+a much smaller error on the test set. In contrast, the average
+design achieves a test error that is almost the same as the
+target error (Fig. 6(a)). Therefore, it uses much less data
+than the worst-case design (Fig. 6(b)).
+We also analyze the performance in the case where we fix
+m = 600 and only change ✏. This is a simple heuristic we
+recommended at the beginning of Section 5.2. Although
+this usually works well, using the optimal test design ensures the best possible performance. In this experiment,
+we see that when the error is large, the optimal design uses
+only half the data (Fig. 6(b)) used by the heuristic and is
+therefore twice as fast.
+
+7. Conclusions and Future Work
+We have taken a first step towards cutting the computational budget of the Metropolis-Hastings MCMC algorithm, which takes O(N ) likelihood evaluations to make
+the binary decision of accepting or rejecting a proposed
+sample. In our approach, we compute the probability that a
+new sample will be accepted based on a subset of the data.
+We increase the cardinality of the subset until a prescribed
+confidence level is reached. In the process we create a bias,
+which is more than compensated for by a reduction in variance due to the fact that we can draw more samples per
+unit time. Current MCMC procedures do not take these
+trade-offs into account. In this work we use a fixed decision threshold for accepting or rejecting a sample, but in
+theory a better algorithm can be obtained by adapting this
+threshold over time. An adaptive algorithm can tune bias
+and variance contributions in such a way that at every moment our risk (the sum of squared bias and variance) is as
+low as possible. We leave these extensions for future work.
+
+Acknowledgments
+We thank Alex Ihler, Daniel Gillen, Sungjin Ahn, Babak
+Shahbaba and the anonymous reviewers for their valuable suggestions. This material is based upon work supported by the National Science Foundation under Grant No.
+1216045.
+
+Austerity in MCMC Land: Cutting the Metropolis-Hastings Budget
+
+References
+Ahn, S., Korattikara, A., and Welling, M. Bayesian posterior sampling via stochastic gradient Fisher scoring. In
+International Conference on Machine Learning, 2012.
+Amari, Shun-ichi, Cichocki, Andrzej, Yang, Howard Hua,
+et al. A new learning algorithm for blind signal separation. Advances in neural information processing systems, pp. 757–763, 1996.
+
+Ouyang, Zhi. Bayesian Additive Regression Kernels. PhD
+thesis, Duke University, 2008.
+Pocock, Stuart J. Group sequential methods in the design
+and analysis of clinical trials. Biometrika, 64(2):191–
+199, 1977.
+
+Andrieu, Christophe and Roberts, Gareth O. The pseudomarginal approach for efficient Monte Carlo computations. The Annals of Statistics, 37(2):697–725, 2009.
+
+Singh, Sameer, Wick, Michael, and McCallum, Andrew.
+Monte Carlo MCMC: efficient inference by approximate
+sampling. In Proceedings of the 2012 Joint Conference
+on Empirical Methods in Natural Language Processing and Computational Natural Language Learning, pp.
+1104–1113. Association for Computational Linguistics,
+2012.
+
+Bache, K. and Lichman, M. UCI machine learning repository, 2013. URL http://archive.ics.uci.
+edu/ml.
+
+Wang, Samuel K and Tsiatis, Anastasios A. Approximately
+optimal one-parameter boundaries for group sequential
+trials. Biometrics, pp. 193–199, 1987.
+
+Brémaud, P. Markov chains: Gibbs fields, Monte Carlo
+simulation, and queues, volume 31. Springer, 1999.
+
+Welling, M. and Teh, Y.W. Bayesian learning via stochastic
+gradient Langevin dynamics. In Proceedings of the 28th
+International Conference on Machine Learning (ICML),
+pp. 681–688, 2011.
+
+Chen, Xiaohui, Jane Wang, Z, and McKeown, Martin J.
+A Bayesian Lasso via reversible-jump MCMC. Signal
+Processing, 91(8):1920–1932, 2011.
+Fearnhead, Paul, Papaspiliopoulos, Omiros, and Roberts,
+Gareth O. Particle filters for partially observed diffusions. Journal of the Royal Statistical Society: Series B
+(Statistical Methodology), 70(4):755–777, 2008.
+Gamerman, Dani and Lopes, Hedibert F. Markov chain
+Monte Carlo: stochastic simulation for Bayesian inference, volume 68. Chapman & Hall/CRC, 2006.
+Green, Peter J. Reversible jump Markov chain Monte
+Carlo computation and Bayesian model determination.
+Biometrika, 82(4):711–732, 1995.
+Hastings, W Keith. Monte Carlo sampling methods using
+Markov chains and their applications. Biometrika, 57(1):
+97–109, 1970.
+Hyvärinen, Aapo and Oja, Erkki. Independent component
+analysis: algorithms and applications. Neural networks,
+13(4):411–430, 2000.
+Lin, L, Liu, KF, and Sloan, J. A noisy Monte Carlo algorithm. Physical Review D, 61(7):074505, 2000.
+Metropolis, Nicholas, Rosenbluth, Arianna W, Rosenbluth,
+Marshall N, Teller, Augusta H, and Teller, Edward.
+Equation of state calculations by fast computing machines. The journal of chemical physics, 21:1087, 1953.
+O’Brien, Peter C and Fleming, Thomas R. A multiple testing procedure for clinical trials. Biometrics, pp. 549–
+556, 1979.
+
+

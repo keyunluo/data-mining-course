@@ -1,0 +1,1082 @@
+A Linear Dynamical System Model for Text
+David Belanger
+College of Information and Computer Sciences, University of Massachusetts Amherst
+
+BELANGER @ CS . UMASS . EDU
+
+Sham Kakade
+Microsoft Research
+
+SKAKADE @ MICROSOFT. COM
+
+Abstract
+Low dimensional representations of words allow
+accurate NLP models to be trained on limited
+annotated data. While most representations ignore words’ local context, a natural way to induce context-dependent representations is to perform inference in a probabilistic latent-variable
+sequence model. Given the recent success of
+continuous vector space word representations,
+we provide such an inference procedure for continuous states, where words’ representations are
+given by the posterior mean of a linear dynamical system. Here, efficient inference can be
+performed using Kalman filtering. Our learning algorithm is extremely scalable, operating
+on simple cooccurrence counts for both parameter initialization using the method of moments
+and subsequent iterations of EM. In our experiments, we employ our inferred word embeddings as features in standard tagging tasks, obtaining significant accuracy improvements. Finally, the Kalman filter updates can be seen as a
+linear recurrent neural network. We demonstrate
+that using the parameters of our model to initialize a non-linear recurrent neural network language model reduces its training time by a day
+and yields lower perplexity.
+
+1. Introduction
+In many NLP applications, there is limited available labeled training data, but tremendous quantities of unlabeled, in-domain text. An effective semi-supervised learning technique is to learn word embeddings on the unlabeled
+data, which map every word to a low dimensional dense
+vector (Bengio et al., 2006; Mikolov et al., 2013; PenningProceedings of the 32 nd International Conference on Machine
+Learning, Lille, France, 2015. JMLR: W&CP volume 37. Copyright 2015 by the author(s).
+
+ton et al., 2014), and then use these as features for supervised training on the labeled data (Turian et al., 2010; Passos et al., 2014; Bansal et al., 2014). Furthermore in many
+deep architectures for NLP, the first layer maps words to
+low-dimensional vectors, and these parameters are initialized with unsupervised embeddings (Collobert et al., 2011;
+Socher et al., 2013; Vinyals et al., 2014).
+Most of these methods embed word types, i.e., words independent of local context, as opposed to work tokens, i.e.,
+instances of words within their context. Ideally we would
+have a different representation per token. For example, depending on the context, “bank” is the side of a river or a
+financial institution. Furthemore, we would like such embeddings to come from a probablistic sequence model that
+allows us to study the transition dynamics of text generation in low dimensional space.
+We present a method for obtaining such context-dependent
+token embeddings, using a generative model with a vectorvalued latent variable per token and performing posterior
+inference for each sentence. Specifically, we employ a
+Gaussian linear dynamical system (LDS), with efficient inference from a Kalman filter. To learn the LDS parameters,
+we use a two-stage procedure, initializing with the method
+of moments, and then performing EM with the approximate second order statistics (ASOS) technique of Martens
+(2010). Overall, after taking a single pass over the training corpus, the runtime of our approximate maximumlikelihood estimation (MLE) procedure is independent of
+the amount of training data since it operates on aggregate
+co-occurrence counts. Furthermore, performing inference
+to obtain token embeddings has the same time complexity
+as widely-used discrete first-order sequence models.
+We fit the LDS to a one-hot encoding of each token in the
+input text sequence. Therefore, the LDS is a mis-specified
+generative model, since draws from it are not proper indicator vectors. However, we embrace this multivariate Gaussian model instead of a continuous-state dynamical system
+with a multinomial link function because the Gaussian LDS
+offers several desirable scalability properties: (1) Kalman
+
+A Linear Dynamical System Model for Text
+
+filter inference is simple and efficient (2) using ASOS, the
+cost of our learning iterations does not scale with the corpus
+size, (3) we can initialize EM using a method-of-moments
+estimator that requires a single SVD of a co-occurrence matrix, (4) our M-step updates are simple least-squares problems, solvable in closed form, (4) if we had used a multinomial link function, we would have performed inference
+using extended Kalman filtering, which makes a secondorder approximation of the log-likelihood, and thus leads
+to a Gaussian LDS anyway (Ghahramani & Roweis, 1999),
+and (5) by using EM, we avoid stochastic-gradient-based
+optimization, which requires careful tuning for nonconvex
+problems. A naive application of our method scales to
+large amounts of training data, but not high-dimensional
+observations. In response, the paper contributes a variety
+of novel methods for scaling up our learning techniques to
+handle large input vocabularies.
+We employ our inferred token embeddings as features for
+part of speech (POS) and named entity recognition (NER)
+taggers. For POS, we obtain a 30% relative error reduction
+when applying a local classifier to our context-dependent
+embeddings rather than Word2Vec context-independent
+embeddings (Mikolov et al., 2013). When using our token embeddings as additional features in lexicalized POS
+and NER taggers, which already have explicit features and
+test-time inference for context-dependence, we obtain signficant gains over the baseline, performing as well as using Word2Vec embeddings. We also present experiments
+demonstrating that the transition dynamics of the LDS capture salient patterns, such as transforming first names into
+last names.
+Finally, the functional form of the Kalman filter update
+equations for our LDS are identical to the updates of a
+recurrent neural network (RNN) language model without
+non-linearities (Mikolov, 2012). A key difference between
+the LDS and an RNN, however, is that the LDS provides
+a natural backwards pass, using Kalman smoothing, where
+a token’s embedding depends on text to both the right and
+left. Drawing on the parallelism between filtering and the
+RNN, we use the LDS parameters, which can be estimated
+very quicky using our techniques, to initialize gradientbased optimization of a nonlinear RNN. This yields a signficant decrease in perplexity vs. the baseline RNN, and only
+requires 70% as many training epochs, saving 1 day on a
+single CPU core.
+
+2. Related Work
+We provide a continuous analog of popular discrete-state
+generative models used in NLP for inducing class membership for tokens, including class-based language models (Brown et al., 1992; Chelba & Jelinek, 2000) and induction of POS tags (Christodoulopoulos et al., 2010). In par-
+
+ticular, Brown clusters (Brown et al., 1992) are commonly
+used by practioners with lots of unlabeled in-domain data.
+Our learning algorithm is very scalable because it operates on aggregate count matrices, rather than individual tokens. Similar algorithms have been proposed for obtaining
+type-level embeddings via matrix factorization (Pennington et al., 2014; Levy & Goldberg, 2014). However, these
+are context-independent and ignore the transition dynamics that link tokens’ embeddings. Furthermore, they require careful tuning of stochastic gradient methods. Previous methods for token-level embeddings either use a rigid
+set of prototypes (Huang et al., 2012; Neelakantan et al.,
+2014) or embed the token’s context, ignoring the token itself (Dhillon et al., 2011).
+For learning discrete-state latent variable models, spectral
+learning methods also use count matrices, and thus are similarly scalable (Anandkumar et al., 2014). However, an
+LDS offers key advantages: we do not use third-order moments, which are difficult to estimate, and we perform approximate MLE, rather than the method of moments, which
+exhibits poor statistical efficiency.
+Recently, RNNs have been used to provide impressive results in NLP applications including translation (Sutskever
+et al., 2014), language modeling (Mikolov et al., 2015), and
+parsing (Vinyals et al., 2014). We do not attempt to replace
+these with a Kalman filter, as we expect non-linearities are
+crucial for capturing long-term interactions and rigid, combinatorial constraints in the outputs. However, RNNs training can take days, even on GPUs, and requires careful tuning of stochastic gradient step sizes. Given the scalability
+of our parameter-free training algorithm, and our favorable
+preliminary results using the LDS to initialize a nonlinear RNN, we encourage further work on using linear latent
+variable models and the Gaussian approximations of multinomial data to develop sophisticated initialization methods.
+Already, practitioners have started using such techniques
+for initializing simple nonlinear deep neural networks using the recommendations of Saxe et al. (2014). Finally,
+our work differs from Pasa & Sperduti (2014), who initialize an RNN using spectral techniques, in that we perform
+maximum-likelihood learning. We found this crucial for
+good performance in our NLP experiments.
+
+3. Background: Gaussian Linear Dynamical
+Systems
+We consider sequences of observations w1 , . . . , wn , where
+each wi is a V -dimensional vector. A Gaussian LDS
+follows the following generative model (Kalman, 1960;
+Roweis & Ghahramani, 1999):
+xt
+wt
+
+= Axt
+
+1
+
++⌘
+
+= Cxt + ✏,
+
+(1)
+(2)
+
+A Linear Dynamical System Model for Text
+
+where h < V is the dimensionality of the hidden states xt
+and ✏ ⇠ N (0, D), ⌘ ⇠ N (0, Q). For simplicity, we assume
+x0 is constant.
+
+steady state, a property of the posterior, is unrelated to the
+stationary distribution of the LDS, which is unconditional
+on observations.
+
+The latent space for x is completely unobserved and we
+could choose any coordinate system for it while maintaining the same likelihood value. Therefore, without loss of
+generality, we can either fix A = I or Q = I, and we fix
+Q. Furthermore, note that the magnitude of the maximum
+eigenvalue of A must be no larger than 1 if the system is
+stable. We assume that the data we fit to has been centered,
+in which case the maximum eigenvalue is strictly less than
+1, since this implies xt is asymptotically mean zero (independent of x0 ), so that xt is also asymptotically mean zero.
+
+Under, the steady state assumption, we can perform filtering and smoothing using substantially more efficient updates. We have:
+
+Finally, define the covariance at lag k to be
+
+where we define
+
+k
+
+= E[wt+k wt> ],
+
+(3)
+
+which is valid because we assume the data to be mean zero.
+Our learning algorithms require only a few k (up to about
+k = 10 in practice) as input. These matrices can be gathered using a single pass over the data, and their size does
+not depend on the amount of data. Furthermore, constructing these matrices can be accelerated by splitting the data
+into chunks, and aggregating separate matrices afterwards.
+
+x̂t = (A
+
+KCA)x̂t
+
+x̄t = J x̄t+1 + (I
+
+1
+
++ Kwt
+
+JA)x̂t
+
+(4)
+(5)
+
+Here, the steady-state Kalman gain matrix is:
+K = ⌃1 C > Sss1 2 Rh⇥V ,
+Sss = C⌃1 C > + D,
+
+(6)
+
+(7)
+
+the unconditional prior covariance for w under the model.
+Note that (A KCA) is data-independent and can be precomputed, as can the smoothing matrix J = ⌃0 A> (⌃1 ) 1 .
+For long sequences, steady-state filtering provides asymptotically exact inference. However, for short sequences it is
+an approximation.
+3.2. Learning: Expectation-Maximization
+
+3.1. Inference
+The xt are distributed as a multivariate Gaussian under
+both the LDS prior and posterior (conditional on observations w), so they can be fully characterized by a mean
+and variance. We use x̂t and St for the mean and covariance under the posterior for xt given w1:(t 1) , computed
+using Kalman filtering, and x̄t and ST when considering
+the posterior for xt given all the data w1:T , computed using Kalman smoothing. In Appendix B.1 we provide the
+full filtering and smoothing updates, which compute different means and variances for every timestep. Note that the
+updates require inverting a V ⇥ V matrix in every step.
+We employ the widely-used ’steady-state’ approximation,
+which yields substantially more efficient filtering and
+smoothing updates (Rugh, 1996). A key property of filtering and smoothing is that the updates to St and ST
+do not depend on the actual observations, but only on
+the model’s parameters. Furthermore, they will converge
+quickly to time-independent ‘steady-state’ values. Define
+⌃1 = E[x̂t x̂>
+t |w1:(t 1) ] to be the aymptotic limit of the covariance St under the posterior for each xt given its history
+(at steady state, this is shared for all t). Here, expectation
+is taken with respect to both time and the posterior for the
+latent variables. This satisfies
+⌃1 = A⌃1 A> + Q,
+which can be solved for quickly using fixed point iteration.
+Similarly, we can solve for ⌃0 = E[x̂t x̂>
+t |w1:t ]. Note that
+
+See Ghahramani & Hinton (1996) for a full exposition on
+learning the parameters of an LDS using EM. Under the
+steady-state assumption, the M step requires:
+>
+>
+E[x̄t x̄>
+t ], E[x̄t x̄t+1 ], E[x̄t wt ],
+
+(8)
+
+where the expectation is taken with respect to time and the
+posterior for the latent variables. This can be computed using Kalman smoothing and then averaging over time. The
+M step can then be done in closed form, since it is solving
+least-squares regressions for xt+1 against xt and wt against
+xt to obtain A and C. Lastly, D can be recovered using:
+⇥
+⇤
+D = 0 CE x̄t wt>
+⇥
+⇤ >
+⇥ >⇤ >
+E wt x̄>
+(9)
+t C + CE x̄x̄t C
+3.3. Learning: EM with ASOS (Martens, 2010)
+
+EM requires recomputing the second order statistics (8)
+in every iteration. While these can be computed using
+Kalman smoothing on the entire training set, we are interested in datasets with billions of timesteps. Fortunately,
+we can avoid smoothing by employing the ASOS (approximate second order statistics) method of Martens (2010),
+which directly performs inference about the time-averaged
+second order statistics.
+Under the steady-state assumption, this is doable because
+we can recursively define relationships between second order statistics at lag k and at lag k + 1 using the recursive
+
+A Linear Dynamical System Model for Text
+
+relationships of the underlying dynamical system. Namely,
+rather than performing posterior inference by recursively
+applying the linear operations (4) and (5), and then averaging over time, we switch the order of these operations and
+apply the linear operators to time-averaged second order
+statistics. For example, the following equality is an immediate consequences of the filtering equation (4) (where
+expectation is with respect to t and the posterior for x):
+E[x̂tt wt> ] = (A
+
+KCA)E[x̂tt
+
+1 >
+1 wt ]
+
++ KE[wt wt> ] (10)
+
+ASOS uses a number of such recursions, along with methods for estimating covariances at a time horizon r. These
+covariances can be approximated by assuming that they are
+exactly described by the current estimate of the model parameters. Therefore, unlike standard EM, performing EM
+with ASOS allows us to precompute an empirical estimate
+of the k at various lags (up to about r = 10) and then
+never touch the data again. Furthermore, (Martens, 2010)
+demonstrates that the ASOS approximation is consistent.
+Namely, the error in approximating the time-averaged second order statistics vanishes with infinite data when evaluated at the MLE parameters. Overall, ASOS scales linearly
+with r and the cost of multiplying by the k .
+3.4. Learning: Subspace Identification
+We initialize EM using Subspace Identification (SSID), a
+family of method-of-moments estimators that use spectral
+decomposition to recover LDS parameters (Van Overschee
+& De Moor, 1996). The rationale for such a combination
+is that the method of moments is statistically consistent, so
+performing it on reasonably-sized datasets will yield parameters in the neighborhood of the global optimum, and
+then EM will perform local hill climbing to find a local optimum of the marginal likelihood. For LDS, this combination yields empirical accuracy gains in Smith et al. (1999).
+A related two-stage estimator, where the local search of EM
+is replaced with a single Newton step on the local likelihood surface, is known to be minimax optimal, under certain local asymptotic normality conditions (Le Cam, 1974).
+For our particular application, we use SSID as an approximate method, where it is not statistically consistent, due
+to the mis-specification of fitting indicator-vector data as a
+multivariate Gaussian. In our experiments, we discuss the
+superiority of SSID+EM rather than just SSID. We do not
+present results using EM initialized randomly rather than
+with SSID, since we found it very difficult for our high dimensional problems to generate initial parameters that allowed EM to reach high likelihoods.
+We employ the ‘n4sid’ algorithm of Van Overschee &
+De Moor (1994). Define⇥r to be a small integer. Define the
+⇤
+(rV ) ⇥ h matrix r = C ; CA ; CA2 ; . . . ; CAr 1 ,
+where ‘;’ denotes vertical concatenation. Also define the
+
+Algorithm 1 Learning an LDS for Text
+Input:
+Text Corpus, approximation horizon r (e.g., 10)
+Output:
+LDS parameters and filtering matrices: (A, C, D, K, J)
+Gather the matrices
+
+k
+
+1
+2
+
+= E[wt+k wt> ] (k < r)
+
+(diagonal whitening matrix)
+0
+W k W > (whitening)
+Params
+Subspace ID( 0 , . . . , r )
+Params
+ASOS EM(Params, 0 , . . . , r )
+W
+
+k
+
+x-w covariance
+0: G = E[xt+1 wt> ]⇤and the h ⇥ (rV )
+⇥ atr lag
+1
+matrix r = A G Ar 2 G . . . AG G .
+Next, define the Hankel matrix
+0
+B
+Hr = B
+@
+
+r
+
+r 1
+
+r 2
+
+r+1
+
+r
+
+r 1
+
+...
+...
+
+2r 2
+
+r 3
+
+...
+
+1
+2
+
+...
+
+2r 1
+
+Then, we have Hr =
+
+r
+
+r
+
+1
+
+C
+C.
+A
+
+(11)
+
+r.
+
+Let (U, S, V ) result from a rank-h SVD of an empiri1
+cal estimate of Hr , from which we set r = U S 2 and
+1
+>
+r = S 2 V . To recover the LDS parameters, we first de1:(r 1)
+fine r
+to be the submatrix of r corresponding to
+the first (r 1) blocks. Similarly, define 2:r
+r . From the
+1:(r 1)
+2:r
+definition of r , we have that A r = r
+, so we
+1:(r 1)
++
+can estimate A as A = r
+( 2:r
+)
+.
+Next,
+one
+can
+r
+read off an estimate for C as the first block of r . Alternatively, since the previous step gives us a value for A one
+can set up a regression problem similar to the previous step
+to solve for C by invoking the block structure in r .
+Finally, we need to recover the covariance matrix D. We
+first find the asymptotic latent covariance ⌃1 using fixedpoint iteration ⌃1 = A⌃1 A> + Q. From this, we set D
+using a similar update as (12), which uses statistics of the
+LDS posterior, except here ⌃1 is unconditional on data and
+is purely a function of the LDS parameters.
+D=
+
+0
+
+C⌃1 C > .
+
+(12)
+
+4. Linear Dynamical Systems for Text
+We fit an LDS to text using SSID to initialize EM, where
+the E step is performed using ASOS. A summary of the
+procedure is provided in Algorithm 1. SSID and ASOS
+scale to extremely large training sets, since they only require the k matrices, for small k. However, they can not
+directly handle the very high dimensionality of text observations (vocabulary size V ⇡ 105 ). In this section, we first
+
+A Linear Dynamical System Model for Text
+
+describe particular properties of the data distribution. Then,
+we describe novel techniques for leveraging these properties to yield scalable learning algorithms.
+Define w̃t as an indicator vector that is 1 in the index of
+the word at time t and define µi to be the corpus frequency
+of word type i. We fit to the mean-zero observations wt =
+w̃t µ. Note that the LDS will not generate observations
+with the structure of a one-hot vector shifted by a constant
+mean, so we cannot use it directly as a generative language
+model. On the other hand, we can still fit models to training
+data with this structure, perform posterior inference given
+observations, assess the likelihood of a corpus, etc. In our
+experiments, we demonstrate the usefulness of these in a
+variety of applications. We have:
+0
+
+= E[wt wt> ] = E[w̃t w̃t> ]
+
+µµ> = diag(µ)
+
+while at higher lags,
+k
+
+>
+>
+= E[wt wt+k
+] = E[w̃t w̃t+k
+]
+
+µµ> ,
+(13)
+
+µµ> .
+
+(14)
+
+Approximating these covariances from a length-T corpus:
+µi = Ex[w̃t ] =
+
+1
+#(word i appears),
+T
+
+(15)
+
+where #() denotes the count of an event. We also have
+>
+E[w̃t w̃t+k
+]i,j =
+(16)
+1
+#(word i appears with word j k positions to the right).
+T
+
+For real-world data, (16) will be extremely sparse, with
+the number of nonzeros substantially less than both V 2 and
+the length of the corpus. The fact that (14) is sparse-minuslow-rank and (13) is diagonal-minus-low-rank is critical for
+scaling up the learning algorithms. First of all, we do not
+instantiate these as V ⇥ V dense matrices, but operate directly on their factorized structure. Second, in Sec. 4.2 we
+show how the structure of (13) allows us to model full-rank
+V ⇥ V noise covariance matrices implicitly. Strictly speaking, the number of nonzeros in (16) will increase as the corpus size increases, due to heavy-tailed word co-occurence
+statistics. However, this growth is sublinear in T and can
+be mitigated by ignoring rare words.
+Unfortunately, each k is rank-deficient. Not only is
+E[wt ] = 0, but also the sum of every wt is zero (because w̃t
+is a one-hot vector and µ is a vector of word frequencies).
+Define 1 to be the length-V vector of ones. Then, our data
+lives on 1? , the d 1 dimensional subspace, orthogonal
+to 1. Doing maximum likelihood in RV instead of 1? will
+lead to a degenerate likelihood function, since the empirical variance in the 1 direction is 0. However, projecting
+
+the data to this subspace breaks the special structure described above, so we instead work in RV and perform projections onto 1? implicitly as-needed. Fortunately, both
+SSID and EM find C that lies in the column space of the
+data, so iterations of our learning algorithm will maintain
+that 1 2
+/ col(C). In Appendix A.2, we describe how to handle this rank deficiency when computing the Kalman gain.
+Note that we could have used pretrained type-level embeddings to project our corpus and then train an LDS on lowdimensional dense observations. However, this is vulnerable to the subspace of the type-level embeddings, which are
+not trained to maximize the likelihod of a sequence model,
+and thus might not capture proper syntactic and semantic
+information. We will release the code of our implementation. SSID requires simple scripting on top of a sparse
+linear algebra library. Our EM implementation consists of
+small modifications to Martens’ public ASOS code.
+4.1. Scalable Spectral Decomposition
+SSID requires a rank-h SVD of the very large block Hankel
+matrix Hr (11). We employ the randomized approximate
+SVD algorithm of Halko et al. (2011). To factorize a matrix X, this requires repeated multiplication by X and by
+X > . All the submatrices in Hr are sparse-minus-low-rank,
+so we handle the sparse and low-rank terms individually
+within the multiplication subroutines.
+4.2. Modeling Full-Rank Noise Covariance
+The noise covariance matrix D is V ⇥ V , which is unmanageably large for our application, and thus it is reasonable to employ a spherical D = dI or diagonal
+D = diag(d1 , . . . , dV ) approximation. For our problem, however, we found that these approximations performed poorly. Because of the property 1> wt = 0, offdiagonal elements of D are critical for modeling the anticorrelations between coordinates. This would have been
+captured if we passed wt through a logistic multinomial
+link function. However, this prevents simple inference using Kalman filter. To maintain conjugacy, practitioners
+sometimes employ the quadratic upper bound to a logistic multinomial likelihood introduced in Böhning (1992),
+which hard-codes
+the coordinate-wise
+anticorrelations via
+h
+i
+D = 12 I V 1+1 11> . However, we found this dataindependent estimator performed poorly.
+Instead, we exploit a particular property of the SSID and
+EM estimators for D in (12) and (9). Namely, both set D to
+0 minus a low-rank matrix, and thus D is diagonal-minuslow-rank, due to the structure in (13). For the LDS, we
+mostly seek to manipulate the precision matrix D 1 . While
+instantiating this dense V ⇥ V matrix is infeasible, multiplication by D 1 and evaluation of det(D 1 ) can both
+
+A Linear Dynamical System Model for Text
+
+be done efficiently using the ShermanWoodbury-Morrison
+formula (Appendix B.2). In Appendix A.3, we also leverage the formula to efficiently evaluate the training likelihood. These uses of the formula differ from its common
+usage for LDS, when not using the steady-state assumption
+and the posterior precision matrix needs to be updated using rank one updates to the covariance. Our technique is
+particular to fitting indicator-vector data as a multivariate
+Gaussian.
+4.3. Whitening
+Before applying our learning algorithms, we first whiten
+the matrices with the diagonal transformation.
+W =
+
+0
+
+1
+2
+
+1
+
+1
+
+= diag(µ1 2 , . . . , µV 2 ).
+
+(17)
+
+Fitting to W k W > , rather than k , maintains the
+data’s sparse-minus-low-rank and diagonal-minus-lowrank structures. Furthermore, EM is unaffected, i.e., applying EM to linearly-transformed data is equivalent to learning on the original data and then transforming post-hoc.
+On the other hand, the SSID output is affected by whitening, since the squared reconstruction loss that SVD implicitly minimizes depends on the coordinate system of
+the data. We found such whitening crucial for obtaining
+high-quality initial parameters. Whitening for SSID, which
+is recommended by Van Overschee & De Moor (1996),
+solves a very similar factorization problem as canonical correlation analysis between words and their contexts,
+which has been used successfully to learn word embeddings (Dhillon et al., 2011; 2012) and identify the parameters of class-based language models (Stratos et al., 2014)).
+In Appendix A.1 we also provide an algorithm, which relies on whitening, for manually ensuring the D returned by
+SSID is PSD, without needing to factorize a V ⇥ V matrix.
+Such manual correction is unnecessary during EM, since
+the estimator (9) is guaranteed to be PSD.
+
+5. Embedding Tokens using the LDS
+The only data-dependent term in the steady-state filtering
+and smoothing equations (4) and (5) is Kwt . Since wt
+can take on only V possible values, we precompute these
+word-type-level vectors. The computational cost of filtering/smoothing a length T sequence is O(T h2 ), which is
+identical to the cost of inference on a discrete first-order
+sequence model. (6) is not directly usable to obtain K, due
+to the data’s rank-deficiency, and we provide an efficient
+alternative in Appendix A.2. This also requires the matrix
+inversion lemma to avoid instantiating S 1 in (6).
+In our experiments we use the latent space to define features for tokens. However, distances in this space are not
+
+well-defined, since the likelihood is invariant to any linear transformation of the latent variables. To place xt in
+reasonable coordinates, we compute the empirical posterior covariance M = E[x̄x̄> ] on the training data (using
+1
+ASOS). Then, we whiten xt using M 2 and project the
+result onto the unit sphere.
+
+6. Relation to Recurrent Neural Networks
+We now highlight the similarity between the parametrization of an RNN architecture commonly used for language
+modeling and our Kalman filter. This allows us to use our
+LDS as a novel method for initializing the parameters of
+a non-linear RNN, which we explore in Sec. 7.4. Following (Mikolov, 2012) we consider the network structure:
+ht
+
+=
+
+wt
+
+⇠
+
+(Aht
+
+1
+
++ Bwt
+
+SoftMax(Cht ),
+
+1)
+
+(18)
+(19)
+
+Here, we employ the
+P SoftMax transformation of a vector v
+as vi ! exp(vi )/ k exp(vk ). The coordinate-wise nonlinearity (·) is, for example, a sigmoid, and the network is
+initialized with some fixed vector h0 .
+Consider the use of the steady-state Kalman filter (4) as an
+online predictor, where the mean prediction for wt is given
+by C x̂t . Then, if we replace and SoftMax with the identity, the Kalman filter and the RNN have the same set of parameters, where we B corresponds to K and A corresponds
+to (A KCA). In terms of the state dynamics, the LDS
+may provide parameters that are reasonable for a nonlinear
+RNN, since the sigmoid has a regime for inputs close to
+zero where it behaves like the identity. A linear approximation of SoftMax() ignores mutual exclusivity. However,
+we discuss in Section 4.2 that using a full-rank D captures
+some coordinate-wise anti-correlations. Also, (19) does not
+affect the state evolution in (18).
+A key difference between the LDS and the RNN is that the
+LDS provides a backwards pass, using Kalman smoothing,
+where x̄t depends on words to the right. For RNNs, this
+would requires separate model (Schuster & Paliwal, 1997).
+
+7. Experiments
+7.1. LDS Transition Dynamics
+Many popular word embedding methods learn word-tovector mappings, but do not learn the dynamics of text’s
+evolution in the latent space. Using the specific LDS model
+we describe in the next section, we employ the transition
+matrix A to explore properties of these dynamics. Because
+the state evolution is linear, it can be studied easily using
+a spectral decomposition. Namely, A converts its left singular vectors into (scaled) right singular vectors. For each
+vector, we find the words most likely to be generated from
+
+A Linear Dynamical System Model for Text
+Right Singular Vector
+islamist lebanese israeli
+palestinian british latin
+japanese shiite greek
+chris mike steve
+jason tim jeff
+bobby ian greg
+singh berlusconi sharon
+blair putin abbas
+netanyahu brown levy
+tampa colorado minnesota
+detroit cleveland phoenix
+indiana seattle dallas
+policemen helicopters soldiers
+suspects demonstrators guards
+iraqis personnel detainees
+salt chicken pepper
+chocolate butter cheese
+cream sauce bread
+
+Left Singular Vector
+territories immigrants sea
+films communities nationals
+rivals africa clients
+evans anderson harris
+robinson smith phillips
+collins murray murphy
+shares referee suggesting
+industries testified insisted
+adding arguing yesterday
+bay derby division
+county sox district
+sole river valley ballet
+remained expressed outst
+recommended remains feels
+gets resumed sparked
+chicken cream pepper
+sauce cheese chocolate
+salt butter bread
+
+Table 1. Words likely to be generated for singular vector pairs of
+the LDS transition operator. The operator maps right vectors to
+left, and the pairs are syntactically and semantically coherent.
+
+this state. Table 1 presents these singular vector pairs. We
+find they reflect interpretable transition dynamics. In all
+but the last block, the vectors reflect strict state transitions.
+However, in the last block contains topical terms about food
+invariant under A. Overall, we did not find such salient
+structure in the parameters estimated using SSID.
+7.2. POS Tagging
+Unsupervised learning of generative discrete state models
+for text has been shown to capture part-of-speech (POS)
+information (Christodoulopoulos et al., 2010). In response,
+we assess the ability of the LDS to also capture POS structure. Token embeddings can be used to predict POS in two
+ways: (1) by applying a local classifier to each token’s embedding, or (2) by including each token’s embedding as additional features in a lexicalized tagger. For both, we train
+the tagging model on the Penn Treebank (PTB) train set,
+which is not included for LDS training. Token embeddings
+are obtained from Kalman smoothing. We evaluate tagging
+accuracy on the PTB test set using the 12 ‘universal’ POS
+tags (Petrov et al., 2011) and the original tags. We contrast
+the LDS with type embeddings from Word2Vec, trained on
+the LDS data (Mikolov et al., 2013).
+We fit our LDS using a combination of the APNews, New
+York Times, and RCV1 newswire corpora, about 1B tokens
+total. We maintain punctuation and casing of the text, but
+replace all digits with “NUM’ and all but the most 200k
+frequent types with “OOV.” We employ r = 4 for SSID,
+r = 7 for EM, and h = 200. We add 1000 psuedocounts
+for each type, by adding 1000
+T to each coordinate of µ.
+The LDS hyperparameters were selected by maximizing
+the accuracy of a local classifier on the PTB dev set.
+
+tags
+
+W2V
+
+SSID
+
+EM
+
+Lex
+
+U
+P
+
+95.00
+92.58
+
+89.26
+83.00
+
+96.44
+94.30
+
+97.97
+97.28
+
+Lex
++EM
+98.05
+97.32
+
+Lex
++W2V
+98.02
+97.35
+
+Table 2. POS tagging with universal tags (U) and PTB tags (P).
+
+This also included when to terminate EM. For Word2Vec,
+we performed a broad search over hyperparameters, again
+maximizing for local POS tagging. Our local classifier was
+a two-layer neural network with 25 hidden units, which
+outperformed a linear classifier. The best Word2Vec configuration used the CBOW architecture with a window
+width of 3. The lexicalized tagger’s hyperparameters were
+also tuned on the PTB dev set. For the local tagging, we
+ignored punctuation and few common words types such as
+“and” in training. Instead, we classified them directly using
+their majority tag in the training data.
+Overall, we found that the LDS and Word2Vec took about
+12 hours to train on a single-core CPU. Since the Word2Vec
+algorithm is simple and the code is heavily optimized, it
+performs well, but our learning algorithm would have been
+substantially faster given a larger training set, since the k
+matrices can be gathered in parallel and the cost of SSID
+and ASOS is sublinear in the corpus size. In Section 7.4,
+training the LDS is order of magnitude faster than an RNN.
+Our results are shown in Table 2. Left to right, we compare Word2Vec (W2V), SSID, EM initialized with SSID
+(EM), our baseline lexicalized tagger (LEX), the lexicalized tagger with extra features from LDS token embeddings (LEX + EM), and the lexicalized tagger with typelevel Word2Vec embeddings (LEX + SSID).
+The first 3 columns perform local classification. First,
+while SSID is crucial for EM initialization, we found it
+performed poorly on its own. However, EM outperforms
+Word2Vec substantially. We expect this is because the LDS
+explicitly maximizes the likelihood of text sequences, and
+thus it forces token embeddings to capture the transition
+dynamics of syntax. All differences are statistically significant at a .05 significance level using the exact binomial
+test. In Appendix C, we demonstrate the importance of
+SSID vs. random initialization. The final 3 columns use a
+carefully-engineered tagger. For universal tags, LDS and
+Word2Vec both contribute a statistically-significant gain
+over the baseline (Lex), but their difference is not significant. For PTB tags, we find that Word2Vec achieves a significant gain over LEX, but the LDS does not. We expect
+that our context-dependent embeddings perform as well
+as context-independent embeddings since the taggers’ features and test-time inference capture non-local interactions.
+7.3. Named Entity Recognition
+In Table 3 we consider the effect of unsupervised token features for NER on the Conll 2003 dataset using a lexicalized
+
+A Linear Dynamical System Model for Text
+
+tagger (Lex). We use the same LDS and Word2Vec models
+as in the previous section, and also compare to the Brown
+clusters used for NER in Ratinov & Roth (2009). As before, we find that Word2Vec and LDS provide significant
+accuracy improvements over the baseline. We expect that
+the reason the LDS does not outperform Word2Vec is that
+NER relies mainly on performing local pattern matching,
+rather than capturing long-range discourse structure.
+set
+dev
+test
+
+Lex
+93.90
+89.34
+
+Lex+Brown
+93.79
+89.76
+
+Lex+W2V
+94.14
+90.00
+
+Lex+LDS
+94.21
+89.9
+
+Table 3. NER with various unsupervised token features
+
+7.4. RNN initialization
+As highlighted in Section 2, RNNs can provide impressive accuracy in various applications. We consider the
+simple RNN architecture of Sec. 6, since it permits natural initialization with an LDS and because Mikolov et al.
+(2015) demonstrate that small variants of it can outperform
+LSTMs as a language model (LM). Note that the ‘context
+units’ of Mikolov et al. (2015) could also be learned using our EM procedure, by restricting the parametrization
+of A. We leave exploration of hierarchical softmax observations (Mnih & Hinton, 2009), and other alternative architectures, for future work.
+We evaluate the usefulness of the LDS for initializing the
+RNN under two criteria: (1) whether it improves the perplexity of the final model, and (2) whether it leads to faster
+optimization. A standard dataset for comparing language
+models is the Penn Treebank (PTB) (Sundermeyer et al.,
+2012; Pachitariu & Sahani, 2013; Mikolov et al., 2015). We
+first train a baseline, obtaining the same test set perplexity as Mikolov (2012), with 300 hidden dimensions. This
+initializes parameters randomly, with lengthscales tuned as
+in Mikolov (2012). Next, we use the LDS to initialize an
+RNN. In order to maintain a fair comparison vs. the baseline, we train the LDS on the same PTB data, though in
+practice one should train it on a substantially larger corpus.
+We use the popular RNN learning rate schedule where it
+300
+
+LDS
+Baseline
+
+Perplexity
+
+250
+
+Baseline
+130.6
+124.0
+
+LDS
+128.1
+122.8
+
+Table 4. Final perplexity for an RNN language model trained using random parameter initialization vs. LDS initialization.
+
+is constant until performance on held-out data fails to improve, and then it is decreased geometrically until the heldout performance again fails to improve (Mikolov, 2012).
+We tuned the initial value and decay rate. When initializing
+with the LDS, small learning rates are crucial: otherwise,
+the optimization jumps far from where it started.
+In Figure 1, we plot perplexity on the dev set vs. the number of training epochs. The time to train the LDS, about 30
+minutes, is inconsequential compared to training the RNN
+(4 days) on a single CPU core. LDS training on the PTB
+is faster than our experiments above with 1B tokens because we use a small vocabulary and run far fewer EM iterations, in order to prevent overfitting. The RNN baseline converged after 17 training epochs, while using the
+LDS for initialization allowed it to converge after 12, which
+amounts to about a day of savings on a single CPU core.
+Next, in Table 4 we compare the final perplexities on the
+dev and test sets. We find that initializing with the LDS
+also provides a better model.
+We found that initializing the RNN with LDS parameters
+trained using SSID, rather than SSID+EM, performed no
+better than the baseline. Specifically, the best performance
+was obtained using a high initial learning rate, which allows gradient descent to ignore the SSID values. We expect this is because the method of moments requires lots of
+data, and the PTB is small. In a setting where one trains
+the LDS on a very large corpus, it is possible that SSID is
+effective. Overall, we did not explore initializing the RNN
+using type-level embeddings such as Word2Vec, since it is
+unclear how to initialize A and how to set K vs. C.
+
+8. Conclusion and Future Work
+We have contributed a scalable method for assigning
+word tokens context-specific low-dimensional representation that capture useful syntactic and semantic structure.
+Our algorithm requires a single pass over the training data
+and no painful tuning of learning rates.
+Next, we will extend ASOS to new models and improve
+initialization for alternative RNN architectures, including
+hierarchical softmaxes, by leveraging not just the LDS parameters, but also the LDS posterior on the training data.
+
+200
+150
+100
+0
+
+dev
+test
+
+5
+
+10
+
+Epochs
+
+15
+
+20
+
+Figure 1. RNN Dev set perplexity vs. # passes over the training
+data for baseline initialization vs. LDS initialization.
+
+Acknowledgments
+This work was partially completed while the first author
+was an intern at Microsoft Research. We appreciate helpful
+
+A Linear Dynamical System Model for Text
+
+comments from Brendan O’Connor, Ben Marlin, Andrew
+McCallum, and Qingqing Huang.
+
+References
+Anandkumar, Animashree, Ge, Rong, Hsu, Daniel,
+Kakade, Sham M, and Telgarsky, Matus. Tensor decompositions for learning latent variable models. The Journal of Machine Learning Research, 15(1):2773–2832,
+2014.
+Bansal, Mohit, Gimpel, Kevin, and Livescu, Karen. Tailoring continuous word representations for dependency
+parsing. In Proceedings of the Annual Meeting of the
+Association for Computational Linguistics, 2014.
+Bengio, Yoshua, Schwenk, Holger, Senécal, JeanSébastien, Morin, Fréderic, and Gauvain, Jean-Luc.
+Neural probabilistic language models. In Innovations in
+Machine Learning, pp. 137–186. Springer, 2006.
+Böhning, Dankmar. Multinomial logistic regression algorithm. Annals of the Institute of Statistical Mathematics,
+44(1):197–200, 1992.
+Brown, Peter F, Desouza, Peter V, Mercer, Robert L, Pietra,
+Vincent J Della, and Lai, Jenifer C. Class-based n-gram
+models of natural language. Computational linguistics,
+18(4):467–479, 1992.
+Chelba, Ciprian and Jelinek, Frederick. Structured language modeling. Computer Speech & Language, 14(4):
+283–332, 2000.
+Christodoulopoulos, Christos, Goldwater, Sharon, and
+Steedman, Mark. Two decades of unsupervised pos induction: How far have we come? In Proceedings of the
+2010 Conference on Empirical Methods in Natural Language Processing, pp. 575–584. Association for Computational Linguistics, 2010.
+Collobert, Ronan, Weston, Jason, Bottou, Léon, Karlen,
+Michael, Kavukcuoglu, Koray, and Kuksa, Pavel. Natural language processing (almost) from scratch. The
+Journal of Machine Learning Research, 12:2493–2537,
+2011.
+
+Ghahramani, Zoubin and Hinton, Geoffrey E. Parameter estimation for linear dynamical systems. Technical
+report, Technical Report CRG-TR-96-2, University of
+Totronto, Dept. of Computer Science, 1996.
+Ghahramani, Zoubin and Roweis, Sam T. Learning nonlinear dynamical systems using an em algorithm. Advances
+in neural information processing systems, pp. 431–437,
+1999.
+Halko, Nathan, Martinsson, Per-Gunnar, and Tropp,
+Joel A. Finding structure with randomness: Probabilistic
+algorithms for constructing approximate matrix decompositions. SIAM review, 53(2):217–288, 2011.
+Huang, Eric H, Socher, Richard, Manning, Christopher D,
+and Ng, Andrew Y. Improving word representations via
+global context and multiple word prototypes. In Proceedings of the 50th Annual Meeting of the Association
+for Computational Linguistics: Long Papers-Volume 1,
+pp. 873–882. Association for Computational Linguistics,
+2012.
+Kalman, Rudolph Emil. A new approach to linear filtering and prediction problems. Transactions of the
+ASME–Journal of Basic Engineering, 82(Series D):35–
+45, 1960.
+Le Cam, Lucien Marie. Notes on asymptotic methods in statistical decision theory, volume 1. Centre
+de Recherches Mathématiques, Université de Montréal,
+1974.
+Levy, Omer and Goldberg, Yoav. Neural word embedding
+as implicit matrix factorization. In Advances in Neural
+Information Processing Systems, pp. 2177–2185, 2014.
+Martens, James. Learning the linear dynamical system
+with asos. In Proceedings of the 27th International Conference on Machine Learning (ICML-10), pp. 743–750,
+2010.
+Mikolov, Tomáš. Statistical language models based on
+neural networks. PhD thesis, Ph. D. thesis, Brno University of Technology, 2012.
+
+Dhillon, Paramveer, Rodu, Jordan, Foster, Dean, and Ungar, Lyle. Two step cca: A new spectral method for
+estimating vector models of words. In Proceedings of
+the 29th International Conference on Machine learning,
+ICML’12, 2012.
+
+Mikolov, Tomas, Sutskever, Ilya, Chen, Kai, Corrado,
+Greg S, and Dean, Jeff. Distributed representations of
+words and phrases and their compositionality. In Advances in Neural Information Processing Systems, pp.
+3111–3119, 2013.
+
+Dhillon, Paramveer S., Foster, Dean, and Ungar, Lyle.
+Multi-view learning of word embeddings via cca. In
+Advances in Neural Information Processing Systems
+(NIPS), volume 24, 2011.
+
+Mikolov, Tomas, Joulin, Armand, Chopra, Sumit, Mathieu, Michael, and Ranzato, Marc’Aurelio. Learning
+longer memory in recurrent neural networks. International Conference on Learning Representations, 2015.
+
+A Linear Dynamical System Model for Text
+
+Mnih, Andriy and Hinton, Geoffrey E. A scalable hierarchical distributed language model. In Advances in neural
+information processing systems, pp. 1081–1088, 2009.
+Neelakantan, Arvind, Shankar, Jeevan, Passos, Alexandre,
+and McCallum, Andrew. Efficient nonparametric estimation of multiple embeddings per word in vector space.
+In Proceedings of EMNLP, 2014.
+Pachitariu, Marius and Sahani, Maneesh. Regularization
+and nonlinearities for neural language models: when are
+they needed? arXiv preprint arXiv:1301.5650, 2013.
+Pasa, Luca and Sperduti, Alessandro. Pre-training of recurrent neural networks via linear autoencoders. In Advances in Neural Information Processing Systems, pp.
+3572–3580, 2014.
+Passos, Alexandre, Kumar, Vineet, and McCallum, Andrew. Lexicon infused phrase embeddings for named
+entity resolution. In Proceedings of the Eighteenth Conference on Computational Natural Language Learning,
+2014.
+Pennington, Jeffrey, Socher, Richard, and Manning,
+Christopher D. Glove: Global vectors for word representation. Proceedings of the Empiricial Methods in Natural
+Language Processing (EMNLP 2014), 12, 2014.
+Petrov, Slav, Das, Dipanjan, and McDonald, Ryan.
+A universal part-of-speech tagset.
+arXiv preprint
+arXiv:1104.2086, 2011.
+Press, William H, Flannery, Brian P, Teukolsky, Saul A,
+and Vetterling, William T. Numerical Recipes: The art
+of scientific computing, volume 2. Cambridge University
+Press London, 1987.
+Ratinov, Lev and Roth, Dan. Design challenges and misconceptions in named entity recognition. In Proceedings
+of the Thirteenth Conference on Computational Natural
+Language Learning, pp. 147–155. Association for Computational Linguistics, 2009.
+Roweis, Sam and Ghahramani, Zoubin. A unifying review
+of linear gaussian models. Neural computation, 11(2):
+305–345, 1999.
+Rugh, Wilson J. Linear system theory, volume 2. prentice
+hall Upper Saddle River, NJ, 1996.
+Saxe, Andrew M, McClelland, James L, and Ganguli,
+Surya. Exact solutions to the nonlinear dynamics of
+learning in deep linear neural networks. International
+Conference on Learning Representations, 2014.
+Schuster, Mike and Paliwal, Kuldip K. Bidirectional recurrent neural networks. Signal Processing, IEEE Transactions on, 45(11):2673–2681, 1997.
+
+Smith, Gavin, de Freitas, Joao FG, Robinson, Tony, and
+Niranjan, Mahesan. Speech modelling using subspace
+and em techniques. Advances in neural information processing systems, pp. 431–437, 1999.
+Socher, Richard, Chen, Danqi, Manning, Christopher D,
+and Ng, Andrew. Reasoning with neural tensor networks
+for knowledge base completion. In Advances in Neural
+Information Processing Systems, pp. 926–934, 2013.
+Stratos, Karl, Kim, Do-kyum, Collins, Michael, and Hsu,
+Daniel. A spectral algorithm for learning class-based ngram models of natural language. In Uncertainty in Artificial Intelligence (UAI), 2014.
+Sundermeyer, Martin, Schlüter, Ralf, and Ney, Hermann.
+Lstm neural networks for language modeling. In INTERSPEECH, 2012.
+Sutskever, Ilya, Vinyals, Oriol, and Le, Quoc VV. Sequence to sequence learning with neural networks. In
+Advances in Neural Information Processing Systems, pp.
+3104–3112, 2014.
+Turian, Joseph, Ratinov, Lev, and Bengio, Yoshua. Word
+representations: a simple and general method for semisupervised learning. In Proceedings of the 48th Annual
+Meeting of the Association for Computational Linguistics, pp. 384–394. Association for Computational Linguistics, 2010.
+Van Overschee, Peter and De Moor, B. Subspace identification for linear systems: Theory, implementation. Methods, 1996.
+Van Overschee, Peter and De Moor, Bart. N4sid: Subspace algorithms for the identification of combined
+deterministic-stochastic systems. Automatica, 30(1):75–
+93, 1994.
+Vinyals, Oriol, Kaiser, Lukasz, Koo, Terry, Petrov, Slav,
+Sutskever, Ilya, and Hinton, Geoffrey. Grammar as a foreign language. arXiv preprint arXiv:1412.7449, 2014.
+
+

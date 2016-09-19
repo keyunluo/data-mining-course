@@ -1,0 +1,1966 @@
+Adding vs. Averaging in Distributed Primal-Dual Optimization
+
+Chenxin Ma∗
+Industrial and Systems Engineering, Lehigh University, USA
+
+CHM 514@ LEHIGH . EDU
+
+Virginia Smith∗
+University of California, Berkeley, USA
+
+VSMITH @ BERKELEY. EDU
+
+Martin Jaggi
+ETH Zürich, Switzerland
+
+JAGGI @ INF. ETHZ . CH
+
+Michael I. Jordan
+University of California, Berkeley, USA
+
+JORDAN @ CS . BERKELEY. EDU
+
+Peter Richtárik
+School of Mathematics, University of Edinburgh, UK
+
+PETER . RICHTARIK @ ED . AC . UK
+
+Martin Takáč
+Industrial and Systems Engineering, Lehigh University, USA
+∗
+
+TAKAC .MT@ GMAIL . COM
+
+Authors contributed equally.
+
+Abstract
+Distributed optimization methods for large-scale
+machine learning suffer from a communication
+bottleneck. It is difficult to reduce this bottleneck
+while still efficiently and accurately aggregating
+partial work from different machines. In this paper, we present a novel generalization of the recent communication-efficient primal-dual framework (C O C OA) for distributed optimization. Our
+framework, C O C OA+ , allows for additive combination of local updates to the global parameters at each iteration, whereas previous schemes
+with convergence guarantees only allow conservative averaging. We give stronger (primal-dual)
+convergence rate guarantees for both C O C OA as
+well as our new variants, and generalize the theory for both methods to cover non-smooth convex loss functions. We provide an extensive experimental comparison that shows the markedly
+improved performance of C O C OA+ on several
+real-world distributed datasets, especially when
+scaling up the number of machines.
+
+Proceedings of the 32 nd International Conference on Machine
+Learning, Lille, France, 2015. JMLR: W&CP volume 37. Copyright 2015 by the author(s).
+
+1. Introduction
+With the wide availability of large datasets that exceed
+the storage capacity of single machines, distributed optimization methods for machine learning have become increasingly important. Existing methods require significant
+communication between workers, frequently equaling the
+amount of local computation (or reading of local data). As
+a result, distributed machine learning suffers significantly
+from a communication bottleneck on real world systems,
+where communication is typically several orders of magnitudes slower than reading data from main memory.
+In this work we focus on optimization problems with empirical loss minimization structure, i.e., objectives that are
+a sum of the loss functions of each datapoint. This includes the most commonly used regularized variants of
+linear regression and classification methods. For this
+class of problems, the recently proposed C O C OA approach
+(Yang, 2013; Jaggi et al., 2014) develops a communicationefficient primal-dual scheme that targets the communication bottleneck, allowing more computation on data-local
+subproblems native to each machine before communication. By appropriately choosing the amount of local computation per round, this framework allows one to control
+the trade-off between communication and local computation based on the systems hardware at hand.
+However, the performance of C O C OA (as well as related
+primal SGD-based methods) is significantly reduced by the
+
+Adding vs. Averaging in Distributed Primal-Dual Optimization
+
+need to average updates between all machines. As the
+number of machines K grows, the updates get diluted and
+slowed by 1/K, e.g., in the case where all machines except one would have already reached the solutions of their
+respective partial optimization tasks. On the other hand, if
+the updates are instead added, the algorithms can diverge,
+as we will observe in the practical experiments below.
+To address both described issues, in this paper we develop
+a novel generalization of the local C O C OA subproblems
+assigned to each worker, making the framework more powerful in the following sense: Without extra computational
+cost, the set of locally computed updates from the modified subproblems (one from each machine) can be combined more efficiently between machines. The proposed
+C O C OA+ updates can be aggressively added (hence the
+‘+’-suffix), which yields much faster convergence both in
+practice and in theory. This difference is particularly significant as the number of machines K becomes large.
+1.1. Contributions
+Strong Scaling. To our knowledge, our framework is the
+first to exhibit favorable strong scaling for the class of problems considered, as the number of machines K increases
+and the data size is kept fixed. More precisely, while the
+convergence rate of C O C OA degrades as K is increased,
+the stronger theoretical convergence rate here is – in the
+worst case – independent of K. Our experiments in Section
+7 confirm the improved speed of convergence. Since the
+number of communicated vectors is only one per round and
+worker, this favorable scaling might be surprising. Indeed,
+for existing methods, splitting data among more machines
+generally increases communication requirements (Shamir
+& Srebro, 2014), which can severely affect overall runtime.
+Theoretical Analysis of Non-Smooth Losses. While the
+existing analysis for C O C OA in (Jaggi et al., 2014) only
+covered smooth loss functions, here we extend the class
+of functions where the rates apply, additionally covering,
+e.g., Support Vector Machines and non-smooth regression
+variants. We provide a primal-dual convergence rate for
+both C O C OA as well as our new method C O C OA+ in the
+case of general convex (L-Lipschitz) losses.
+Primal-Dual Convergence Rate. Furthermore, we additionally strengthen the rates by showing stronger primaldual convergence for both algorithmic frameworks, which
+are almost tight to their objective-only counterparts.
+Primal-dual rates for C O C OA had not previously been analyzed in the general convex case. Our primal-dual rates allow efficient and practical certificates for the optimization
+quality, e.g., for stopping criteria. The new rates apply to
+both smooth and non-smooth losses, and for both C O C OA
+as well as the extended C O C OA+ .
+
+Arbitrary Local Solvers. C O C OA as well as C O C OA+
+allow the use of arbitrary local solvers on each machine.
+Experimental Results. We provide a thorough experimental comparison with competing algorithms using several real-world distributed datasets. Our practical results
+confirm the strong scaling of C O C OA+ as the number of
+machines K grows, while competing methods, including
+the original C O C OA, slow down significantly with larger
+K. We implement all algorithms in Spark, and our code is
+publicly available at: github.com/gingsmith/cocoa.
+1.2. History and Related Work
+While optimal algorithms for the serial (single machine)
+case are already well researched and understood, the literature in the distributed setting is relatively sparse. In particular, details on optimal trade-offs between computation
+and communication, as well as optimization or statistical
+accuracy, are still widely unclear. For an overview over
+this currently active research field, we refer the reader to
+(Balcan et al., 2012; Richtárik & Takáč, 2013; Duchi et al.,
+2013; Yang, 2013; Liu & Wright, 2014; Fercoq et al., 2014;
+Jaggi et al., 2014; Shamir & Srebro, 2014; Shamir et al.,
+2014; Zhang & Lin, 2015; Qu & Richtárik, 2014) and the
+references therein. We provide a detailed comparison of
+our proposed framework to the related work in Section 6.
+
+2. Setup
+We consider regularized empirical loss minimization problems of the following
+well-established form:
+)
+(
+n
+λ
+1X
+T
+2
+`i (xi w) + kwk
+(1)
+min P(w) :=
+n i=1
+2
+w∈Rd
+Here the vectors {xi }ni=1 ⊂ Rd represent the training data
+examples, and the `i (.) are arbitrary convex real-valued
+loss functions (e.g., hinge loss), possibly depending on label information for the i-th datapoints. The constant λ > 0
+is the regularization parameter.
+The above class includes many standard problems of wide
+interest in machine learning, statistics, and signal processing, including support vector machines, regularized linear
+and logistic regression, ordinal regression, and others.
+Dual Problem, and Primal-Dual Certificates. The conjugate dual of (1) takes following form:
+(
+
+2 )
+n
+1X ∗
+λ
+Aα 
+
+
+max D(α) := −
+`j (−αj ) − 
+(2)
+α∈Rn
+n
+2 λn 
+j=1
+
+Here the data matrix A = [x1 , x2 , . . . , xn ] ∈ Rd×n collects all data-points as its columns, and `∗j is the conjugate
+function to `j . See, e.g., (Shalev-Shwartz & Zhang, 2013c)
+for several concrete applications.
+
+Adding vs. Averaging in Distributed Primal-Dual Optimization
+
+It is possible to assign for any dual vector α ∈ Rn a corresponding primal feasible point
+w(α) =
+
+1
+λn Aα
+
+(3)
+
+The duality gap function is then given by:
+G(α) := P(w(α)) − D(α)
+
+(4)
+
+By weak duality, every value D(α) at a dual candidate α
+provides a lower bound on every primal value P(w). The
+duality gap is therefore a certificate on the approximation quality: The distance to the unknown true optimum
+P(w∗ ) must always lie within the duality gap, i.e., G(α) =
+P(w) − D(α) ≥ P(w) − P(w∗ ) ≥ 0.
+In large-scale machine learning settings like those considered here, the availability of such a computable measure of
+approximation quality is a significant benefit during training time. Practitioners using classical primal-only methods
+such as SGD have no means by which to accurately detect
+if a model has been well trained, as P (w∗ ) is unknown.
+
+Local Subproblems in C O C OA+ . We can define a datalocal subproblem of the original dual optimization problem
+(2), which can be solved on machine k and only requires
+accessing data which is already available locally, i.e., datapoints with i ∈ Pk . More formally, each machine k is assigned the following local subproblem, depending only on
+the previous shared primal vector w ∈ Rd , and the change
+in the local dual variables αi with i ∈ Pk :
+max
+
+∆α[k]
+
+0
+
+∈Rn
+
+Gkσ (∆α[k] ; w, α[k] )
+
+(8)
+
+where
+1 X ∗
+`i (−αi − (∆α[k] )i )
+n
+i∈Pk
+2
+1 λ
+1
+λ 
+ 1
+
+−
+kwk2 − wT A∆α[k] − σ 0  A∆α[k]  (9)
+K2
+n
+2
+λn
+0
+
+Gkσ (∆α[k] ; w, α[k] ) := −
+
+(6)
+
+Interpretation. The above definition of the local objec0
+tive functions Gkσ are such that they closely approximate
+the global dual objective D, as we vary the ‘local’ variable ∆α[k] , in the following precise sense:
+Lemma 3. For any dual α, ∆α ∈ Rn , primal w = w(α)
+and real values γ, σ 0 satisfying (11), it holds that
+K
+
+
+X
+∆α[k] ≥ (1 − γ)D(α)
+D α+γ
+K
+k=1
+X
+0
++γ
+Gkσ (∆α[k] ; w, α[k] ) (10)
+
+Definition 2 ((1/µ)-smooth loss). A function `i : R → R
+is (1/µ)-smooth if it is differentiable and its derivative is
+(1/µ)-Lipschitz continuous, i.e., ∀a, b ∈ R, we have
+
+The role of the parameter σ 0 is to measure the difficulty of
+the given data partition. For our purposes, we will see that
+it must be chosen not smaller than
+
+Classes of Loss-Functions. To simplify presentation, we
+assume that all loss functions `i are non-negative, and
+`i (0) ≤ 1
+∀i
+(5)
+Definition 1 (L-Lipschitz continuous loss). A function `i :
+R → R is L-Lipschitz continuous if ∀a, b ∈ R, we have
+|`i (a) − `i (b)| ≤ L|a − b|
+
+k=1
+
+|`0i (a) − `0i (b)| ≤
+
+1
+|a − b|
+µ
+
+(7)
+
+3. The C O C OA+ Algorithm Framework
+In this section we present our novel C O C OA+ framework. C O C OA+ inherits the many benefits of CoCoA as
+it remains a highly flexible and scalable, communicationefficient framework for distributed optimization. C O C OA+
+differs algorithmically in that we modify the form of the local subproblems (9) to allow for more aggressive additive
+updates (as controlled by γ). We will see that these changes
+allow for stronger convergence guarantees as well as improved empirical performance. Proofs of all statements in
+this section are given in the supplementary material.
+Data Partitioning. We write {Pk }K
+k=1 for the given partition of the datapoints [n] := {1, 2, . . . , n} over the K
+worker machines. We denote the size of each part by
+nk = |Pk |. For any k ∈ [K] and α ∈ Rn we use the
+notation α[k] ∈ Rn for the(vector
+0, if i ∈
+/ Pk ,
+(α[k] )i :=
+αi , otherwise.
+
+0
+σ 0 ≥ σmin
+:= γ maxn PK
+α∈R
+
+kAαk2
+
+k=1
+
+kAα[k] k2
+
+(11)
+
+In the following lemma, we show that this parameter can
+be upper-bounded by γK, which is trivial to calculate for
+all values γ ∈ R. We show experimentally (Section 7) that
+this safe upper bound for σ 0 has a minimal effect on the
+overall performance of the algorithm. Our main theorems
+1
+below show convergence rates dependent on γ ∈ [ K
+, 1],
+which we refer to as the aggregation parameter.
+Lemma 4. The choice of σ 0 := γK is valid for (11), i.e.,
+0
+γK ≥ σmin
+
+Notion of Approximation Quality of the Local Solver.
+Assumption 1 (Θ-approximate solution). We assume that
+there exists Θ ∈ [0, 1) such that ∀k ∈ [K], the local solver
+at any outer iteration t produces a (possibly) randomized
+approximate solution ∆α[k] , which satisfies
+ 0
+
+0
+E Gkσ (∆α∗[k] ; w, α[k] ) − Gkσ (∆α[k] ; w, α[k] )
+(12)
+ 0
+
+0
+≤ Θ Gkσ (∆α∗[k] ; w, α[k] ) − Gkσ (0; w, α[k] ) ,
+
+Adding vs. Averaging in Distributed Primal-Dual Optimization
+
+where
+0
+
+∆α∗[k] ∈ arg max Gkσ (∆α[k] ; w, α[k] ) ∀k ∈ [K] (13)
+∆α∈Rn
+
+We are now ready to describe the C O C OA+ framework,
+shown in Algorithm 1. The crucial difference compared
+to the existing C O C OA algorithm (Jaggi et al., 2014) is the
+more general local subproblem, as defined in (9), as well as
+the aggregation parameter γ. These modifications allow the
+option of directly adding updates to the global vector w.
+Algorithm 1 C O C OA+ Framework
+1: Input: Datapoints A distributed according to partition {Pk }K
+Aggregation parameter γ ∈ (0, 1],
+k=1 .
+subproblem parameter σ 0 for the local subproblems
+0
+Gkσ (∆α[k] ; w, α[k] ) for each k ∈ [K].
+Starting point α(0) := 0 ∈ Rn , w(0) := 0 ∈ Rd .
+2: for t = 0, 1, 2, . . . do
+3:
+for k ∈ {1, 2, . . . , K} in parallel over computers
+do
+4:
+call the local solver, computing a Θ-approximate
+solution ∆α[k] of the local subproblem (9)
+(t+1)
+(t)
+5:
+update α[k] := α[k] + γ ∆α[k]
+1
+A∆α[k]
+6:
+return ∆wk := λn
+7:
+end for
+P
+8:
+reduce w(t+1) := w(t) + γ K ∆wk .
+(14)
+k=1
+9: end for
+
+4. Convergence Guarantees
+Before being able to state our main convergence results,
+we introduce some useful quantities and the following
+main lemma characterizing the effect of iterations of Algorithm 1, for any chosen internal local solver.
+Lemma 5. Let `∗i be strongly1 convex with convexity parameter µ ≥ 0 with respect to the norm k·k, ∀i ∈ [n]. Then
+for all iterations t of Algorithm 1 under Assumption 1, and
+any s ∈ [0, 1], it holds that
+E[D(α
+
+(t+1)
+
+(t)
+
+) − D(α )] ≥
+
+(15)
+
+
+0
+
+σ
+s
+2 (t)
+γ(1 − Θ) sG(α(t) ) −
+R
+,
+2λ n
+
+where
+R(t) := − λµn(1−s)
+ku(t) − α(t) k2
+σ0 s
+PK
++ k=1 kA(u(t) − α(t) )[k] k2 ,
+
+(16)
+
+for u(t) ∈ Rn with
+(t)
+
+− ui ∈ ∂`i (w(α(t) )T xi ).
+
+(17)
+
+1
+Note that the case of weakly convex `∗i (.) is explicitly allowed here as well, as the Lemma holds for the case µ = 0.
+
+The following Lemma provides a uniform bound on R(t) :
+Lemma 6. If `i are L-Lipschitz continuous for all i ∈ [n],
+K
+then
+X
+∀t : R(t) ≤ 4L2
+σk nk ,
+(18)
+k=1
+
+| {z }
+where
+
+=:σ
+
+kAα[k] k2
+.
+σk := max n
+α[k] ∈R
+kα[k] k2
+
+(19)
+
+Remark 7. If all data-points xi are normalized such that
+kxi k ≤ 1 ∀i ∈ [n], then σk ≤ |Pk | = nk . Furthermore,
+if we assume that the data partition is balanced, i.e., that
+nk = n/K for all k, then σ ≤ n2 /K. This can be used to
+2 2
+bound the constants R(t) , above, as R(t) ≤ 4LKn .
+4.1. Primal-Dual Convergence for General Convex
+Losses
+The following theorem shows the convergence for nonsmooth loss functions, in terms of objective values as well
+as primal-dual gap. The analysis in (Jaggi et al., 2014) only
+covered the case of smooth loss functions.
+Theorem 8. Consider Algorithm 1 with Assumption 1. Let
+`i (·) be L-Lipschitz continuous, and G > 0 be the desired duality gap (and hence an upper-bound on primal
+sub-optimality). Then after T iterations, where
+l
+m
+4L2 σσ 0
+1
+T ≥ T0 + max{
+, 2
+}, (20)
+γ(1 − Θ) λn G γ(1 − Θ)
+
+ 2 0
+
+2
+8L σσ
+,
+T0 ≥ t0 +
+−
+1
+γ(1 − Θ) λn2 G
++
+l
+m
+2
+∗
+)−D(α(0) ))
+1
+t0 ≥ max(0, γ(1−Θ)
+log( 2λn (D(α
+)
+),
+2
+0
+4L σσ
+we have that the expected duality gap satisfies
+E[P(w(α)) − D(α)] ≤ G ,
+at the averaged iterate
+α :=
+
+1
+T −T0
+
+PT −1
+
+t=T0 +1 α
+
+(t)
+
+.
+
+(21)
+
+The following corollary of the above theorem clarifies our
+main result: The more aggressive adding of the partial updates, as compared averaging, offers a very significant improvement in terms of total iterations needed. While the
+convergence in the ‘adding’ case becomes independent of
+the number of machines K, the ‘averaging’ regime shows
+the known degradation of the rate with growing K, which is
+a major drawback of the original C O C OA algorithm. This
+important difference in the convergence speed is not a theoretical artifact but also confirmed in our practical experiments below for different K, as shown e.g. in Figure 2.
+We further demonstrate below that by choosing γ and σ 0
+accordingly, we can still recover the original C O C OA algorithm and its rate.
+
+Adding vs. Averaging in Distributed Primal-Dual Optimization
+
+Corollary 9. Assume that all datapoints xi are bounded as
+kxi k ≤ 1 and that the data partition is balanced, i.e. that
+nk = n/K for all k. We consider two different possible
+choices of the aggregation parameter γ:
+1
+): In this case, σ 0 := 1
+• (C O C OA Averaging, γ := K
+is a valid choice which satisfies (11). Then using σ ≤
+n2 /K in light of Remark 7, we have that T iterations
+are sufficient for primal-dual accuracy G , with
+
+T ≥
+
+λµn+σmax σ 0
+1
+γ(1−Θ)
+λµn
+
+log
+
+1
+D ,
+
+it holds that
+E[D(α∗ ) − D(α(T ) )] ≤ D .
+Furthermore, after T iterations with
+
+
+λµn+σmax σ 0
+λµn+σmax σ 0 1
+1
+1
+T ≥ γ(1−Θ)
+log γ(1−Θ)
+λµn
+λµn
+G ,
+we have the expected duality gap
+
+l K m
+4L2
+,
+T ≥ T0 + max{
+},
+1 − Θ λG (1 − Θ)
+
+
+
+2K
+8L2
+T0 ≥ t0 +
+−1
+,
+1 − Θ λKG
++
+ K
+∗
+)−D(α(0) )) 
+log( 2λ(D(α4KL
+) )
+t0 ≥ max(0, 1−Θ
+2
+Hence the more machines K, the more iterations are
+needed (in the worst case).
+• (C O C OA+ Adding, γ := 1): In this case, the choice of
+σ 0 := K satisfies (11). Then using σ ≤ n2 /K in light
+of Remark 7, we have that T iterations are sufficient
+for primal-dual accuracy G , with
+l 1 m
+4L2
+T ≥ T0 + max{
+,
+},
+1 − Θ λG (1 − Θ)
+
+ 2
+
+2
+8L
+T0 ≥ t0 +
+,
+−1
+1 − Θ λG
++
+ 1
+∗
+)−D(α(0) )) 
+t0 ≥ max(0, 1−Θ
+log( 2λn(D(α4KL
+) )
+2
+This is significantly better than the averaging case.
+In practice, we usually have σ  n2 /K, and hence the
+actual convergence rate can be much better than the proven
+worst-case bound. Table 1 shows that the actual value of
+σ is typically between one and two orders of magnitudes
+smaller compared to our used upper-bound n2 /K.
+
+E[P(w(α(T ) )) − D(α(T ) )] ≤ G .
+The following corollary is analogous to Corollary 9, but
+for the case of smooth loses. It again shows that while the
+C O C OA variant degrades with the increase of the number
+of machines K, the C O C OA+ rate is independent of K.
+Corollary 11. Assume that all datapoints xi are bounded
+as kxi k ≤ 1 and that the data partition is balanced, i.e.,
+that nk = n/K for all k. We again consider the same two
+different possible choices of the aggregation parameter γ:
+1
+): In this case, σ 0 :=
+• (C O C OA Averaging, γ := K
+1 is a valid choice which satisfies (11). Then using
+σmax ≤ nk = n/K in light of Remark 7, we have that
+T iterations are sufficient for suboptimality D , with
+
+T ≥
+
+1 λµK+1
+1−Θ
+λµ
+
+log
+
+1
+D
+
+Hence the more machines K, the more iterations are
+needed (in the worst case).
+• (C O C OA+ Adding, γ := 1): In this case, the choice
+of σ 0 := K satisfies (11). Then using σmax ≤ nk =
+n/K in light of Remark 7, we have that T iterations
+are sufficient for suboptimality D , with
+T ≥
+
+1 λµ+1
+1−Θ λµ
+
+log
+
+1
+D
+
+This is significantly better than the averaging case.
+Both rates hold analogously for the duality gap.
+
+2
+
+Table 1. The ratio of upper-bound nK divided by the true value of
+the parameter σ, for some real datasets.
+K
+
+16
+
+32
+
+64
+
+128
+
+256
+
+512
+
+news
+real-sim
+rcv1
+
+15.483
+42.127
+40.138
+
+14.933
+36.898
+23.827
+
+14.278
+30.780
+28.204
+
+13.390
+23.814
+21.792
+
+12.074
+16.965
+16.339
+
+10.252
+11.835
+11.099
+
+K
+
+256
+
+512
+
+1024
+
+2048
+
+4096
+
+8192
+
+covtype
+
+17.277
+
+17.260
+
+17.239
+
+16.948
+
+17.238
+
+12.729
+
+4.2. Primal-Dual Convergence for Smooth Losses
+The following theorem shows the convergence for smooth
+losses, in terms of the objective as well as primal-dual gap.
+Theorem 10. Assume the loss functions functions `i are
+(1/µ)-smooth ∀i ∈ [n]. We define σmax = maxk∈[K] σk .
+Then after T iterations of Algorithm 1, with
+
+4.3. Comparison with Original C O C OA
+1
+Remark 12. If we choose averaging (γ := K
+) for aggre0
+gating the updates, together with σ := 1, then the resulting Algorithm 1 is identical to C O C OA analyzed in (Jaggi
+et al., 2014). However, they only provide convergence for
+smooth loss functions `i and have guarantees for dual suboptimality and not the duality gap. Formally, when σ 0 = 1,
+the subproblems (9) will differ from the original dual D(.)
+only by an additive constant, which does not affect the local
+optimization algorithms used within C O C OA.
+
+5. SDCA as an Example Local Solver
+We have shown convergence rates for Algorithm 1, depending solely on the approximation quality Θ of the used local
+
+Adding vs. Averaging in Distributed Primal-Dual Optimization
+
+solver (Assumption 1). Any chosen local solver in each
+round receives the local α variables as an input, as well as
+(3)
+a shared vector w = w(α) being compatible with the last
+state of all global α ∈ Rn variables.
+As an illustrative example for a local solver, Algorithm 2
+below summarizes randomized coordinate ascent (SDCA)
+applied on the local subproblem (9). The following two
+Theorems (13, 14) characterize the local convergence for
+both smooth and non-smooth functions. In all the results
+we will use rmax := maxi∈[n] kxi k2 .
+Algorithm 2 L OCAL SDCA (w, α[k] , k, H)
+1: Input: α[k] , w = w(α)
+2: Data: Local {(xi , yi )}i∈Pk
+(0)
+
+3: Initialize: ∆α[k] := 0 ∈ Rn
+4: for h = 0, 1, . . . , H − 1 do
+5:
+choose i ∈ Pk uniformly at random
+0
+
+6:
+
+(h)
+
+δi∗ := arg max Gkσ (∆α[k] + δi ei ; w, α[k] )
+
+δi ∈R
+(h+1)
+∆α[k]
+:=
+
+(h)
+
+7:
+∆α[k] + δi∗ ei
+8: end for
+(H)
+9: Output: ∆α[k]
+
+Theorem 13. Assume the functions `i are (1/µ)−smooth
+for i ∈ [n]. Then Assumption 1 on the local approximation
+quality Θ is satisfied for L OCAL SDCA as given in Algorithm 2, if we choose the number of inner iterations H as
+σ 0 rmax + λnµ
+1
+log .
+(22)
+λnµ
+Θ
+Theorem 14. Assume the functions `i are L-Lipschitz for
+i ∈ [n]. Then Assumption 1 on the local approximation
+quality Θ is satisfied for L OCAL SDCA as given in Algorithm 2, if we choose the number of inner iterations H as
+
+
+k∆α∗[k] k2
+1 − Θ σ 0 rmax
+H ≥ nk
++
+.
+0
+0
+Θ
+2Θλn2 Gkσ (∆α∗[k] ; .) − Gkσ (0; .)
+(23)
+H ≥ nk
+
+Remark 15. Between the different regimes allowed in
+C O C OA+ (ranging between averaging and adding the updates) the computational cost for obtaining the required
+local approximation quality varies with the choice of σ 0 .
+From the above worst-case upper bound, we note that the
+cost can increase with σ 0 , as aggregation becomes more
+aggressive. However, as we will see in the practical experiments in Section 7 below, the additional cost is negligible
+compared to the gain in speed from the different aggregation, when measured on real datasets.
+
+6. Discussion and Related Work
+SGD-based Algorithms. For the empirical loss minimization problems of interest here, stochastic subgradient
+
+descent (SGD) based methods are well-established. Several distributed variants of SGD have been proposed, many
+of which build on the idea of a parameter server (Niu et al.,
+2011; Liu et al., 2014; Duchi et al., 2013). The downside of
+this approach, even when carefully implemented, is that the
+amount of required communication is equal to the amount
+of data read locally (e.g., mini-batch SGD with a batch size
+of 1 per worker). These variants are in practice not competitive with the more communication-efficient methods considered here, which allow more local updates per round.
+One-Shot Communication Schemes. At the other extreme, there are distributed methods using only a single
+round of communication, such as (Zhang et al., 2013;
+Zinkevich et al., 2010; Mann et al., 2009; McWilliams
+et al., 2014). These require additional assumptions on the
+partitioning of the data, and furthermore can not guarantee
+convergence to the optimum solution for all regularizers, as
+shown in, e.g., (Shamir et al., 2014). (Balcan et al., 2012)
+shows additional relevant lower bounds on the minimum
+number of communication rounds necessary for a given approximation quality for similar machine learning problems.
+Mini-Batch Methods. Mini-batch methods are more
+flexible and lie within these two communication vs. computation extremes. However, mini-batch versions of both
+SGD and coordinate descent (CD) (Richtárik & Takáč,
+2013; Shalev-Shwartz & Zhang, 2013b; Yang, 2013; Qu
+& Richtárik, 2014; Qu et al., 2014) suffer from their convergence rate degrading towards the rate of batch gradient
+descent as the size of the mini-batch is increased. This follows because mini-batch updates are made based on the
+outdated previous parameter vector w, in contrast to methods that allow immediate local updates like C O C OA. Furthermore, the aggregation parameter for mini-batch methods is harder to tune, as it can lie anywhere in the order of
+mini-batch size. In the C O C OA setting, the parameter lies
+in the smaller range given by K. Our C O C OA+ extension
+avoids needing to tune this parameter entirely, by adding.
+Methods Allowing Local Optimization. Developing
+methods that allow for local optimization requires carefully devising data-local subproblems to be solved after
+each communication round. (Shamir et al., 2014; Zhang
+& Lin, 2015) have proposed distributed Newton-type algorithms in this spirit. However, the subproblems must be
+solved to high accuracy for convergence to hold, which is
+often prohibitive as the size of the data on one machine is
+still relatively large. In contrast, the C O C OA framework
+(Jaggi et al., 2014) allows using any local solver of weak
+local approximation quality in each round. By making use
+of the primal-dual structure in the line of work of (Yu et al.,
+2012; Pechyony et al., 2011; Yang, 2013; Lee & Roth,
+2015), the C O C OA and C O C OA+ frameworks also allow
+more control over the aggregation of updates between ma-
+
+Adding vs. Averaging in Distributed Primal-Dual Optimization
+
+10-3
+
+10
+
+-4
+
+10
+
+-2
+
+10-3
+
+10
+10
+
+1
+
+10
+
+2
+
+10
+
+3
+
+10
+
+4
+
+10
+
+0
+
+10
+
+-3
+
+10
+
+-4
+
+10
+
+1
+
+10
+
+2
+
+3
+
+10
+
+10
+
+-1
+
+10
+
+-2
+
+10
+
+-3
+
+10
+
+-4
+
+4
+
+-1
+
+10
+
+-2
+
+10
+
+-3
+
+10
+
+-4
+
+10
+
+1
+
+10
+
+2
+
+10
+
+3
+
+Number of Communications
+
+0
+
+10
+
+10
+
+-4
+
+10
+
+4
+
+6
+
+H=10
+H=10 5
+4
+H=10
+H=106
+H=105
+4
+H=10
+
+10-2
+
+10
+
+-3
+
+10
+
+1
+
+10
+
+0
+
+10
+
+-1
+
+10
+
+-2
+
+10
+
+-3
+
+10
+
+-4
+
+3
+
+10
+
+4
+
+10
+
+5
+
+10
+
+-4
+
+10
+
+1
+
+10
+
+10
+
+2
+
+6
+
+H=10
+H=10 5
+4
+H=10
+H=106
+H=105
+4
+H=10
+
+-3
+
+10
+
+-4
+
+10
+
+1
+
+10
+
+2
+
+10
+
+3
+
+10
+
+10
+
+4
+
+10
+
+5
+
+10
+
+-3
+
+10
+
+-4
+
+10
+
+10
+
+2
+
+Elapsed Time (s)
+
+10
+
+-1
+
+10
+
+-2
+
+10
+
+-3
+
+10
+
+-4
+
+10
+CoCoA
+CoCoA
+CoCoA
+CoCoA+
+CoCoA+
+CoCoA+
+
+10
+
+2
+
+10
+
+3
+
+10
+
+4
+
+4
+
+10
+
+4
+
+10
+
+4
+
+6
+
+H=10
+H=10 5
+4
+H=10
+H=106
+H=105
+4
+H=10
+
+1
+
+10
+
+2
+
+10
+
+3
+
+Elapsed Time (s)
+
+RCV1, 1e-6
+
+0
+
+6
+
+10
+
+10-2
+
+Number of Communications
+
+H=10
+5
+H=10
+4
+H=10
+H=106
+5
+H=10
+4
+H=10
+
+3
+
+CoCoA
+CoCoA
+CoCoA
+CoCoA+
+CoCoA+
+CoCoA+
+
+10-1
+
+10-2
+
+10
+
+10
+
+RCV1, 1e-5
+
+100
+CoCoA
+CoCoA
+CoCoA
+CoCoA+
+CoCoA+
+CoCoA+
+
+10-1
+
+2
+
+Elapsed Time (s)
+
+RCV1, 1e-5
+
+100
+
+CoCoA
+CoCoA
+CoCoA
+CoCoA+
+CoCoA+
+CoCoA+
+
+1
+
+10
+
+6
+
+H=10
+H=10 5
+4
+H=10
+H=106
+H=105
+4
+H=10
+
+Covertype, 1e-6
+
+10
+
+2
+
+Number of Communications
+
+1
+
+6
+
+H=10
+5
+H=10
+4
+H=10
+H=106
+5
+H=10
+4
+H=10
+
+Duality Gap
+
+Duality Gap
+
+10
+
+10
+CoCoA
+CoCoA
+CoCoA
+CoCoA+
+CoCoA+
+CoCoA+
+
+-3
+
+Elapsed Time (s)
+
+Covertype, 1e-6
+
+0
+
+2
+
+CoCoA
+CoCoA
+CoCoA
+CoCoA+
+CoCoA+
+CoCoA+
+
+10
+
+Number of Communications
+
+10
+
+10
+
+Covertype, 1e-5
+
+100
+
+10
+
+1
+
+Duality Gap
+
+10
+
+-2
+
+10
+
+6
+
+H=10
+H=10 5
+4
+H=10
+H=106
+H=105
+4
+H=10
+
+Duality Gap
+
+Duality Gap
+
+10
+
+-1
+
+10
+
+CoCoA
+CoCoA
+CoCoA
+CoCoA+
+CoCoA+
+CoCoA+
+
+10-1
+
+10-2
+
+Elapsed Time (s)
+
+Covertype, 1e-5
+CoCoA
+CoCoA
+CoCoA
+CoCoA+
+CoCoA+
+CoCoA+
+
+10-1
+
+RCV1, 1e-4
+
+0
+
+6
+
+H=10
+H=10 5
+4
+H=10
+H=106
+H=105
+4
+H=10
+
+-4
+
+Number of Communications
+100
+
+10
+CoCoA
+CoCoA
+CoCoA
+CoCoA+
+CoCoA+
+CoCoA+
+
+Duality Gap
+
+-2
+
+-1
+
+RCV1, 1e-4
+
+0
+
+6
+
+H=10
+H=10 5
+4
+H=10
+H=106
+H=105
+4
+H=10
+
+RCV1, 1e-6
+
+0
+
+6
+
+H=10
+5
+H=10
+4
+H=10
+H=106
+5
+H=10
+4
+H=10
+
+Duality Gap
+
+10
+
+10
+
+10
+CoCoA
+CoCoA
+CoCoA
+CoCoA+
+CoCoA+
+CoCoA+
+
+Duality Gap
+
+-1
+
+Covertype, 1e-4
+
+0
+
+6
+
+H=10
+H=10 5
+4
+H=10
+H=106
+H=105
+4
+H=10
+
+Duality Gap
+
+10
+
+10
+CoCoA
+CoCoA
+CoCoA
+CoCoA+
+CoCoA+
+CoCoA+
+
+Duality Gap
+
+Covertype, 1e-4
+
+0
+
+Duality Gap
+
+Duality Gap
+
+10
+
+10
+
+5
+
+10
+
+-1
+
+10
+
+-2
+
+10
+
+-3
+
+10
+
+-4
+
+CoCoA
+CoCoA
+CoCoA
+CoCoA+
+CoCoA+
+CoCoA+
+
+10
+
+1
+
+Number of Communications
+
+10
+
+2
+
+10
+
+3
+
+6
+
+H=10
+5
+H=10
+4
+H=10
+H=106
+5
+H=10
+4
+H=10
+
+Elapsed Time (s)
+
+Figure 1. Duality gap vs. the number of communicated vectors, as well as duality gap vs. elapsed time in seconds for two datasets:
+Covertype (left, K=4) and RCV1 (right, K=8). Both are shown on a log-log scale, and for three different values of regularization
+(λ=1e-4; 1e-5; 1e-6). Each plot contains a comparison of C O C OA (red) and C O C OA+ (blue), for three different values of H, the
+number of local iterations performed per round. For all plots, across all values of λ and H, we see that C O C OA+ converges to the
+optimal solution faster than C O C OA, in terms of both the number of communications and the elapsed time.
+
+chines. The practical variant DisDCA-p proposed in (Yang,
+2013) allows additive updates but is restricted to SDCA
+updates, and was proposed without convergence guarantees. DisDCA-p can be recovered as a special case of the
+C O C OA+ framework when using SDCA as a local solver,
+if nk = n/K and σ 0 := K, see Appendix C. The theory
+presented here also therefore covers that method.
+ADMM. An alternative approach to distributed optimization is to use the alternating direction method of multipliers (ADMM), as used for distributed SVM training in, e.g.,
+(Forero et al., 2010). This uses a penalty parameter balancing between the equality constraint w and the optimization
+objective (Boyd et al., 2011). However, the known convergence rates for ADMM are weaker than the more problemtailored methods mentioned previously, and the choice of
+the penalty parameter is often unclear.
+Batch Proximal Methods. In spirit, for the special case
+of adding (γ = 1), C O C OA+ resembles a batch proximal
+method, using the separable approximation (9) instead of
+the original dual (2). Known batch proximal methods require high accuracy subproblem solutions, and don’t allow
+arbitrary solvers of weak accuracy Θ such as we do here.
+
+7. Numerical Experiments
+We present experiments on several large real-world distributed datasets. We show that C O C OA+ converges faster
+in terms of total rounds as well as elapsed time as compared
+to C O C OA in all cases, despite varying: the dataset, values
+of regularization, batch size, and cluster size (Section 7.2).
+In Section 7.3 we demonstrate that this performance translates to orders of magnitude improvement in convergence
+when scaling up the number of machines K, as compared
+to C O C OA as well as to several other state-of-the-art methods. Finally, in Section 7.4 we investigate the impact of the
+local subproblem parameter σ 0 in the C O C OA+ framework.
+Table 2. Datasets for Numerical Experiments.
+Dataset
+
+covertype
+epsilon
+RCV1
+
+n
+522,911
+400,000
+677,399
+
+d
+54
+2,000
+47,236
+
+Sparsity
+
+22.22%
+100%
+0.16%
+
+7.1. Implementation Details
+We implement all algorithms in Apache Spark (Zaharia
+et al., 2012) and run them on m3.large Amazon EC2 instances, applying each method to the binary hinge-loss sup-
+
+Adding vs. Averaging in Distributed Primal-Dual Optimization
+
+Time (s) to e-3 Accurate Primal
+
+250
+200
+150
+100
+50
+0
+
+2
+
+4
+
+6
+
+scale with an increasing number of machines K. The
+experiments confirm the ability of strong scaling of the
+new method, as predicted by our theory in Section 4,
+in contrast to the competing methods. Unlike C O C OA,
+which becomes linearly slower when increasing the number of machines, the performance of C O C OA+ improves
+with additional machines, only starting to degrade slightly
+once K=16 for the RCV1 dataset.
+7.4. Impact of the Subproblem Parameter σ 0
+Finally, in Figure 3, we consider the effect of the choice
+of the subproblem parameter σ 0 on convergence. We plot
+both the number of communications and clock time on a
+log-log scale for the RCV1 dataset with K=8 and H=1e4.
+For γ = 1 (the most aggressive variant of C O C OA+ in
+which updates are added) we consider several different values of σ 0 , ranging from 1 to 8. The value σ 0 =8 represents
+the safe upper bound of γK. The optimal convergence occurs around σ 0 =4, and diverges for σ 0 ≤ 2. Notably, we
+
+12
+
+14
+
+10
+
+16
+
+1
+
+2
+
+4
+
+6
+
+8
+
+10
+
+12
+
+14
+
+16
+
+Number of machines (K)
+
+Scaling up K, Epsilon
+
+700
+CoCoA+
+CoCoA
+
+600
+500
+400
+300
+200
+100
+0
+
+20
+
+40
+
+60
+
+80
+
+100
+
+Figure 2. The effect of increasing K on the time (s) to reach an
+D -accurate solution. We see that C O C OA+ converges twice as
+fast as C O C OA on 100 machines for the Epsilon dataset, and
+nearly 7 times as quickly for the RCV1 dataset. Mini-batch SGD
+converges an order of magnitude more slowly than both methods.
+
+see that the easy to calculate upper bound of σ 0 := γK (as
+given by Lemma 4) has only slightly worse performance
+than best possible subproblem parameter in our setting.
+Effect of <` for . = 1 (adding)
+
+101
+
+101
+
+10-1
+
+10-2
+
+10
+
+Effect of <` for . = 1 (adding)
+
+100
+
+Duality Gap
+
+Duality Gap
+
+100
+
+<` = 8 (K)
+<` = 6
+<` = 4
+<` = 2
+<` = 1
+
+-3
+
+10
+
+In Figure 2 we demonstrate the ability of C O C OA+ to
+
+10
+
+102
+
+Number of machines (K)
+
+10-4
+
+7.3. Scaling the Number of Machines K
+
+8
+
+CoCoA+
+CoCoA
+Mini-batch SGD
+
+Number of machines (K)
+
+7.2. Comparison of C O C OA+ and C O C OA
+We compare the C O C OA+ and C O C OA frameworks directly using two datasets (Covertype and RCV1) across various values of λ, the regularizer, in Figure 1. For each value
+of λ we consider both methods with different values of H,
+the number of local iterations performed before communicating to the master. For all runs of C O C OA+ we use the
+safe upper bound of γK for σ 0 . In terms of both the total number of communications made and the elapsed time,
+C O C OA+ (shown in blue) converges to the optimal solution faster than C O C OA (red). The discrepancy is larger
+for greater values of λ, where the strongly convex regularizer has more of an impact and the problem difficulty is reduced. We also see a greater performance gap for smaller
+values of H, where there is frequent communication between the machines and the master, and changes between
+the algorithms therefore play a larger role.
+
+Scaling up K, RCV1
+
+103
+
+300
+
+Time (s) to e-2 Duality Gap
+
+For illustration and ease of comparison, we here use SDCA
+(Shalev-Shwartz & Zhang, 2013c) as the local solver for
+both C O C OA and C O C OA+ . Note that in this special case,
+and if additionally σ 0 := K, and if the partitioning nk =
+n/K is balanced, once can show that the C O C OA+ framework reduces to the practical variant of DisDCA (Yang,
+2013) (which had no convergence guarantees so far). We
+include more details on the connection in Appendix C.
+
+Scaling up K, RCV1
+CoCoA+
+CoCoA
+
+350
+
+Time (s) to e-4 Duality Gap
+
+port vector machine. The analysis for this non-smooth loss
+was not covered in (Jaggi et al., 2014) but has been captured
+here, and thus is both theoretically and practically justified.
+The used datasets are summarized in Table 2.
+
+1
+
+10-1
+
+10-2
+
+10-3
+
+10
+
+2
+
+Number of Communications
+
+10
+
+3
+
+<` = 8 (K)
+<` = 6
+<` = 4
+<` = 2
+<` = 1
+
+10-4
+10
+
+1
+
+Elapsed Time (s)
+
+Figure 3. The effect of σ 0 on convergence of C O C OA+ for the
+RCV1 dataset distributed across K=8 machines. Decreasing σ 0
+improves performance in terms of communication and overall run
+time until a certain point, after which the algorithm diverges. The
+“safe” upper bound of σ 0 :=K=8 has only slightly worse performance than the practically best “un-safe” value of σ 0 .
+
+8. Conclusion
+In conclusion, we present a novel framework C O C OA+
+that allows for fast and communication-efficient additive
+aggregation in distributed algorithms for primal-dual optimization. We analyze the theoretical performance of this
+method, giving strong primal-dual convergence rates with
+outer iterations scaling independently of the number of machines. We extended our theory to allow for non-smooth
+losses. Our experimental results show significant speedups
+over previous methods, including the original C O C OA
+framework as well as other state-of-the-art methods.
+Acknowledgments. We thank Ching-pei Lee and an
+anonymous reviewer for several helpful insights and comments.
+
+Adding vs. Averaging in Distributed Primal-Dual Optimization
+
+References
+Balcan, M.-F., Blum, A., Fine, S., and Mansour, Y. Distributed Learning, Communication Complexity and Privacy. In COLT, pp. 26.1–26.22, 2012.
+Boyd, S., Parikh, N., Chu, E., Peleato, B., and Eckstein, J.
+Distributed optimization and statistical learning via the
+alternating direction method of multipliers. Foundations
+and Trends in Machine Learning, 3(1):1–122, 2011.
+Duchi, J. C., Jordan, M. I., and McMahan, H. B. Estimation, Optimization, and Parallelism when Data is Sparse.
+In NIPS, 2013.
+Fercoq, O. and Richtárik, P. Accelerated, parallel and proximal coordinate descent. arXiv:1312.5799, 2013.
+Fercoq, O., Qu, Z., Richtárik, P., and Takáč, M. Fast
+distributed coordinate descent for non-strongly convex
+losses. IEEE Workshop on Machine Learning for Signal
+Processing, 2014.
+Forero, P. A., Cano, A., and Giannakis, G. B. ConsensusBased Distributed Support Vector Machines. JMLR, 11:
+1663–1707, 2010.
+Jaggi, M., Smith, V., Takáč, M., Terhorst, J., Krishnan, S.,
+Hofmann, T., and Jordan, M. I. Communication-efficient
+distributed dual coordinate ascent. In NIPS, 2014.
+Lee, C.-P. and Roth, D. Distributed Box-Constrained
+Quadratic Optimization for Dual Linear SVM. In ICML,
+2015.
+Liu, J. and Wright, S. J. Asynchronous stochastic coordinate descent: Parallelism and convergence properties.
+arXiv:1403.3862, 2014.
+Liu, J., Wright, S. J., Ré, C., Bittorf, V., and Sridhar,
+S. An Asynchronous Parallel Stochastic Coordinate Descent Algorithm. In ICML, 2014.
+Lu, Z. and Xiao, L. On the complexity analysis of randomized block-coordinate descent methods. arXiv preprint
+arXiv:1305.4723, 2013.
+Mann, G., McDonald, R., Mohri, M., Silberman, N., and
+Walker, D. D. Efficient Large-Scale Distributed Training
+of Conditional Maximum Entropy Models. NIPS, 2009.
+Mareček, J., Richtárik, P., and Takáč, M. Distributed block
+coordinate descent for minimizing partially separable
+functions. arXiv:1406.0238, 2014.
+McWilliams, B., Heinze, C., Meinshausen, N., Krummenacher, G., and Vanchinathan, H. P. LOCO: Distributing Ridge Regression with Random Projections. arXiv
+stat.ML, June 2014.
+
+Niu, F., Recht, B., Ré, C., and Wright, S. J. Hogwild!: A
+Lock-Free Approach to Parallelizing Stochastic Gradient
+Descent. In NIPS, 2011.
+Pechyony, D., Shen, L., and Jones, R. Solving Large Scale
+Linear SVM with Distributed Block Minimization. In
+NIPS Workshop on Big Learning, 2011.
+Qu, Z. and Richtárik, P.
+Coordinate descent with
+arbitrary sampling I: Algorithms and complexity.
+arXiv:1412.8060, 2014.
+Qu, Z., Richtárik, P., and Zhang, T. Randomized dual coordinate ascent with arbitrary sampling. arXiv:1411.5873,
+2014.
+Richtárik, P. and Takáč, M. Distributed coordinate descent method for learning with big data. arXiv preprint
+arXiv:1310.2059, 2013.
+Richtárik, P. and Takáč, M. Iteration complexity of randomized block-coordinate descent methods for minimizing a composite function. Mathematical Programming,
+144(1-2):1–38, April 2014.
+Richtárik, P. and Takáč, M. Parallel coordinate descent
+methods for big data optimization. Mathematical Programming, pp. 1–52, 2015.
+Shalev-Shwartz, S. and Zhang, T. Accelerated mini-batch
+stochastic dual coordinate ascent. In NIPS, 2013a.
+Shalev-Shwartz, S. and Zhang, T. Accelerated proximal
+stochastic dual coordinate ascent for regularized loss
+minimization. arXiv:1309.2375, 2013b.
+Shalev-Shwartz, S. and Zhang, T. Stochastic Dual Coordinate Ascent Methods for Regularized Loss Minimization. JMLR, 14:567–599, 2013c.
+Shamir, O. and Srebro, N. Distributed Stochastic Optimization and Learning . In Allerton, 2014.
+Shamir, O., Srebro, N., and Zhang, T. Communication
+efficient distributed optimization using an approximate
+newton-type method. In ICML, 2014.
+Tappenden, R., Takáč, M., and Richtárik, P. On the complexity of parallel coordinate descent. Technical report,
+2015. ERGO 15-001, University of Edinburgh.
+Yang, T. Trading Computation for Communication: Distributed Stochastic Dual Coordinate Ascent. In NIPS,
+2013.
+Yang, T., Zhu, S., Jin, R., and Lin, Y. On Theoretical Analysis of Distributed Stochastic Dual Coordinate Ascent.
+arXiv:1312.1031, 2013.
+
+Adding vs. Averaging in Distributed Primal-Dual Optimization
+
+Yu, H.-F., Hsieh, C.-J., Chang, K.-W., and Lin, C.-J. Large
+Linear Classification When Data Cannot Fit in Memory.
+TKDD, 5(4):1–23, 2012.
+Zaharia, M., Chowdhury, M., Das, T., Dave, A., McCauley,
+M., Franklin, M. J., Shenker, S., and Stoica, I. Resilient
+Distributed Datasets: A Fault-Tolerant Abstraction for
+In-Memory Cluster Computing. In NSDI, 2012.
+Zhang, Y. and Lin, X. DiSCO: Distributed Optimization for
+Self-Concordant Empirical Loss. In ICML, pp. 362–370,
+2015.
+Zhang, Y., Duchi, J. C., and Wainwright, M. J.
+Communication-Efficient Algorithms for Statistical Optimization. JMLR, 14:3321–3363, 2013.
+Zinkevich, M. A., Weimer, M., Smola, A. J., and Li, L.
+Parallelized Stochastic Gradient Descent. NIPS, 2010.
+
+

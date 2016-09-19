@@ -1,0 +1,1100 @@
+A Highly Scalable Parallel Algorithm for Isotropic Total Variation Models
+
+Jie Wang1
+Qingyang Li1
+Sen Yang1
+Wei Fan2
+Peter Wonka3,1
+Jieping Ye1
+1
+Arizona State University, Tempe, AZ 85287 USA
+2
+Huawei Noahs Ark Lab, Hong Kong, China
+3
+King Abdullah University of Science and Technology, Thuwal, Saudi Arabia
+
+Abstract
+Total variation (TV) models are among the most
+popular and successful tools in signal processing.
+However, due to the complex nature of the TV
+term, it is challenging to efficiently compute a
+solution for large-scale problems. State-of-theart algorithms that are based on the alternating
+direction method of multipliers (ADMM) often
+involve solving large-size linear systems. In this
+paper, we propose a highly scalable parallel algorithm for TV models that is based on a novel
+decomposition strategy of the problem domain.
+As a result, the TV models can be decoupled into a set of small and independent subproblems,
+which admit closed form solutions. This makes
+our approach particularly suitable for parallel implementation. Our algorithm is guaranteed to
+converge to its global minimum. With N variables and np processes, the time complexity is
+N
+O( n
+) to reach an -optimal solution. Extenp
+sive experiments demonstrate that our approach
+outperforms existing state-of-the-art algorithms,
+especially in dealing with high-resolution, megasize images.
+
+1. Introduction
+Total variation (TV) models have found great success in
+a wide range of applications, including but not limited to
+image denoising, image deblurring, image reconstruction
+(Barbero & Sra, 2011; Candès et al., 2006; Casas et al.,
+1999; He et al., 2005; Kim et al., 2010; Lustig et al., 2005;
+Proceedings of the 31 st International Conference on Machine
+Learning, Beijing, China, 2014. JMLR: W&CP volume 32. Copyright 2014 by the author(s).
+
+JIE . WANG . USTC @ ASU . EDU
+QINGYANG . LI @ ASU . EDU
+
+S EN YANG @ ASU . EDU
+DAVID . FANWEI @ HUAWEI . COM
+PWONKA @ GMAIL . COM
+JIEPING . YE @ ASU . EDU
+
+Osher et al., 2005; Vert & Bleakley, 2010; Vogel & Oman,
+1998) etc. Rudin et al. (1992) first introduced the TV model
+to remove noise in a given image by using the TV term.
+The motivation for this model came from the fact that a
+noisy signal generally implies high total variation. Given
+an image Y ∈ <m×n , the discrete version of the RudinOsher-Fatemi (ROF) model is:
+1
+min kX − Y k2F + λkXkT V ,
+(1)
+X 2
+where k · kF and k · kT V are the Frobenius norm and TV
+norm respectively, λ is a positive parameter, and X ∈
+<m×n is the image to be recovered. In this paper, we consider the isotropic TV norm:
+Xm Xn
+kXkT V =
+kDi,j Xk2 ,
+(2)
+i=1
+
+j=1
+
+where Di,j X = ((D1 X)i,j , (D2 X)i,j )T is the discretized
+gradient at pixel (i, j). For simplicity, we use the forward
+difference to define Di,j X, i.e.,
+(
+xi+1,j − xi,j
+if i < m
+(D1 X)i,j =
+,
+(3)
+0
+if i = m
+(
+xi,j+1 − xi,j
+if j < n
+(D2 X)i,j =
+.
+(4)
+0
+if j = n
+It is worthwhile to mention that there are fast algorithms for
+the
+TV model, where kXkT V is defined by
+Pm“anisotropic”
+Pn
+kD
+Xk1 . However, those algorithms, which
+i,j
+i=1
+j=1
+are usually based on graph cuts or maximum flow, are not
+applicable to isotropic TV models. As pointed out by Goldfarb & Yin (2009); Duan & Tai (2012), unless xi,j are binary variables, the isotropic TV term is not graph representable. Moreover, Wahlberg et al. (2012) proposed an
+ADMM method to solve the 1D TV model. Recently, Condat (Condat, 2013) showed that the 1D TV denoising model admits a closed-form solution and thus can be solved by
+
+A Highly Scalable Parallel Algorithm for Isotropic Total Variation Models
+
+a very fast noniterative algorithm. By utilizing this result,
+Yang et al. (2013) proposed an efficient ADMM algorithm
+for the multidimensional TV model. However, this method
+is only applicable to the anisotropic TV model.
+Although the formulation in problem (1) is simple, it is
+computationally challenging to solve due to the complex
+nature of the TV norm. This makes it difficult to work with
+high-resolution, large-scale data. Existing algorithms usually demand high computational cost and memory usage,
+which prevent their use in large-scale problems. Simpler
+methods require moderate computational efforts and less
+memory space, but usually converge very slowly. These
+difficulties have motivated a lot of research efforts to better trade off the computational cost and the convergence
+rate. For example, Beck & Teboulle (2009a) propose fast
+gradient-based algorithms that combine an acceleration of
+the dual approach with a fast iterative shrinkage algorithm (FISTA) (Beck & Teboulle, 2009b); Goldstein & Osher (2009) develop a split Bregman method; Chambolle
+& Pock (2011) apply a primal-dual method to solve (1).
+As another popular application of TV-based models, the
+Magnetic Resonance (MR) image reconstruction has received great attention recently. Ma et al. (2008) propose
+an operator-splitting algorithm (TVCMRI) for MR image
+reconstruction. Huang et al. (2011) propose another efficient algorithm named FCSA, which utilizes the ideas of
+composite splitting (Combettes & Pesquet, 2011) and the
+acceleration technique introduced by FISTA.
+In this paper, we propose a fast Altermating Direction
+Method of Multipliers (ADMM) (Boyd et al., 2011; Chen
+et al., 2012; Chan et al., 2011; Esser et al., 2010; Esser,
+2009) based algorithm, termed FAD, to solve the TV models. FAD is based on a novel decomposition strategy of the
+problem domain. As a result, the TV model in (1) can be
+decoupled into a set of small and independent subproblems.
+Each subproblem involves at most three variables and admits a closed-form solution. Thus, all of the subproblems can be solved efficiently in parallel. We implement our
+highly scalable parallel algorithm via OpenMP and MPI.
+Extensive experiments on synthetic and real data demonstrate the scalability and efficiency of FAD.
+Notation: Let k · k be the `2 norm. For matrix A, [A]i,j
+is its (i, j)th entry. The
+Pinner product between matrices is
+defined as hA, Bi = i,j [A]i,j [B]i,j . Given a set C, we
+use C ◦ , relint C, and ∂C to denote the interior points, relative interior and boundary points of C, respectively. For
+any real number c, let d := bcc be the largest
+  integer
+such that d ≤ c, and mod (a, b) := a − ab b. Let
+f : <n → < ∪ {+∞} be a closed proper convex function. The proximal operator of f is defined by:
+
+
+1
+2
+proxf (x) = argminy f (y) + ky − xk .
+2
+
+2. Optimization Methods
+In this section, we present the details of FAD. We first
+briefly review ADMM in Section 2.1. In Section 2.2, we
+present our novel decomposition strategy to partition the
+variables in (1). FAD and its convergence properties are
+presented in Sections 2.3 and 2.4, respectively.
+2.1. Review of ADMM
+ADMM makes use of the decomposability of the dual ascent and meanwhile has the good convergence properties
+of the multipliers’ method. Given a problem:
+min {f (x) + g(z) : x − z = 0} ,
+x,z
+
+(5)
+
+we assume that both f (·) and g(·) are convex. The augmented Lagrangian is given by:
+γ
+Lγ (x, z; θ) = f (x) + g(z) + kx − (z − θ)k2 , (6)
+2
+where θ and γ > 0 are the scaled augmented Lagrangian
+multipliers (Boyd et al., 2011) and the penalty parameter,
+respectively. ADMM attempts to solve problem (5) by iteratively minimizing Lγ (x, y; θ) over x and y, respectively,
+and updating θ accordingly (Boyd et al., 2011). The supplement presents details on ADMM.
+2.2. The Decomposition Strategy
+We first give an example to illustrate our idea in Section
+2.2.1 and then consider the general case in Section 2.2.2.
+2.2.1. A S IMPLE E XAMPLE
+Let us first consider a simple case as an example. Suppose
+that we have an image of 4×4 pixels as illustrated in Fig. 1.
+The TV term kXkT V can be written as:
+X4 X4
+kXkT V =
+kDi,j Xk
+(7)
+i=1
+j=1
+q
+X3 X3
+(xi+1,j − xi,j )2 + (xi,j+1 − xi,j )2
+=
+i=1
+j=1
+X3
+X3
+|xi+1,4 − xi,4 | +
+|x4,j+1 − x4,j |.
++
+i=1
+
+j=1
+
+From the right-hand side (RHS) of Eq. (7), we can see
+
+(a)
+(b)
+(c)
+Figure 1. Illustration of the decomposition.
+
+that none of the terms is separable from the others since
+most of the variables appear in different terms. Our goal
+
+A Highly Scalable Parallel Algorithm for Isotropic Total Variation Models
+
+is to decompose kXkT V into several different parts such
+that each term is separable from all the others. As shown in
+Fig. 1, we decompose kXkT V into three disjoint parts, i.e.,
+X3
+kXkT V =
+kXkT Vk .
+(8)
+k=1
+
+Each part consists of the total variation norm kDi,j Xk associated with the big solid nodes. For example, there are
+six big solid red nodes in Fig. 1(a): (1, 1), (2, 2), (3, 3),
+(4, 4), (1, 4) and (4, 1). Thus, the first part kXkT V1 is:
+X4
+kXkT V1 =
+kDk,k Xk + kD1,4 Xk + kD4,1 Xk
+k=1
+X3 q
+=
+(xk+1,k − xk,k )2 + (xk,k+1 − xk,k )2
+k=1
+
+Recall that kD4,4 Xk = 0. From the RHS of the above equation, we can see that each variable only appears in one
+term, which implies that every term is separable from all the other ones. Similarly, from Fig. 1(b) and Fig. 1(c),
+kXkT V2 and kXkT V3 are given by
+X3
+X2
+kXkT V2 =
+kDk,k+1 Xk +
+kDk+2,k Xk,
+k=1
+k=1
+X3
+X2
+kXkT V3 =
+kDk+1,k Xk +
+kDk,k+2 Xk.
+k=1
+
+Clearly, for kXkT V2 , each term on the RHS of the equation
+is separable from all the other ones and the same property
+holds for kXkT V3 .
+2.2.2. T HE G ENERAL C ASE
+Suppose that we have an image of m × n pixels. Let D =
+{(i, j) : i = 1, 2, . . . , m, j = 1, 2, . . . , n.}. Then, we can
+divide D into three non-overlapping subsets:
+Dk = {(i, j) ∈ D : mod(j − i, 3) = k − 1}, k = 1, 2, 3.
+Thus, kXkT V can be written as:
+kXkT V =
+
+3
+X
+k=1
+
+kXkT Vk =
+
+3
+X
+
+X
+
+kDi,j Xk.
+
+By using the decomposition strategy presented in the last
+section, problem (1) can be rewritten as:
+X3
+1
+kXkT Vk .
+(10)
+min kX − Y k2F + λ
+k=1
+X 2
+To use ADMM, (10) can be reformulated as:
+X3
+1
+min
+kZ − Y k2F + λ
+kXk kT Vk , (11)
+k=1
+Z;X1 ,X2 ,X3
+2
+s.t.
+Xk = Z, k = 1, 2, 3,
+with global variable Z and local variables Xk , k = 1, 2, 3.
+The augmented Lagrangian of problem (11) is:
+Lγ (Z; X1 , X2 , X3 ; Θ1 , Θ2 , Θ3 )
+
++ |x2,4 − x1,4 | + |x4,2 − x4,1 |.
+
+k=1
+
+2.3. ADMM for TV-Based Models
+
+(9)
+
+k=1 (i,j)∈Dk
+
+P
+For each kXkT Vk =
+(i,j)∈Dk kDi,j Xk (k = 1, 2, 3),
+every term kDi,j Xk2 , (i, j) ∈ Dk is separable from all
+the other ones kDi0 ,j 0 Xk where (i0 , j 0 ) ∈ Dk \ (i, j). For
+details, please refer to Proposition 1 in the supplement.
+Remark 1. The isotropic TV norm introduced in Eq. (2)
+is the summation of the `2 norm of the discretized gradient over all pixels. The proposed decomposition strategy is to decompose the image into three non-overlapping
+sets of pixels, and write the TV norm as the summation of three terms as in Eq. (9). Each term refers to
+the summation of the `2 norm of the discretized gradientPover one group of pixels. Notice that each kXkT Vk =
+(i,j)∈Dk kDi,j Xk also involves the pixel-level variables
+[X]i0 ,j 0 that are shared across the three groups (though not
+within the groups).
+
+(12)
+
+3
+3
+X
+1
+γX
+= kZ − Y k2F + λ
+kXk − (Z − Θk )k2F .
+kXk kT Vk +
+2
+2
+k=1
+
+k=1
+
+Denote X1 , X2 , X3 and Θ1 , Θ2 , Θ3 by X and Θ, respectively. Thus, Lγ in Eq. (12) can be simplified to
+Lγ (Z; X; Θ). We apply ADMM to solve (11). In each
+iteration, we first minimize Lγ (Z; X; Θ) with respect to Z
+and X, and then update the dual variable Θ. Assume that
+we are at the tth step, i.e., Z t , Xt and Θt are known. We
+then compute Z t+1 , Xt+1 and Θt+1 as follows:
+S1. Minimize Lγ (Z t ; X; Θt ) with respect to X
+Recall that X refers to Xk , k = 1, 2, 3. Thus, we need to
+minimize Lγ (Z t ; X; Θt ) with respect to Xk , k = 1, 2, 3.
+Since Xkt+1 = argminXk Lγ (Z t ; X; Θt ), we have
+γ
+Xkt+1 = argmin λkXk kT Vk + kXk − (Z t − Θtk )k2F (13)
+2
+Xk
+1
+λ
+= argmin kXk − Vkt k2F + kXk kT Vk ,
+2
+γ
+Xk
+where Vkt = Z t − Θtk . Note that, the first term on the RHS
+of (13) is separable. Due to the decomposition strategy in
+Section 2.2, the second term on the RHS of (13) is separable as well. Therefore, problem (13) can be decoupled into
+a set of subproblems that involve at most three variables.
+Intuitively, the reason is that each subproblem involves a
+given pixel as well as the pixels above and to the right due
+to the forward difference. Suppose that pixel (p, q) ∈ Dk .
+We have the following cases.
+Case 1. Image interior (if p < m, q < n). Let us define
+u = ([Xk ]p,q+1 , [Xk ]p,q , [Xk ]p+1,q )T ,
+w=
+
+(14)
+
+([Vkt ]p,q+1 , [Vkt ]p,q , [Vkt ]p+1,q )T .
+
+As we discussed in Section 2.2, u is only involved in
+kDp,q Xk k, not any other terms in kXk kT Vk . Thus, the following subproblem can be decoupled from problem (13):
+1
+λp
+min ku − wk2 +
+(u1 − u2 )2 + (u3 − u2 )2 . (15)
+u 2
+γ
+
+A Highly Scalable Parallel Algorithm for Isotropic Total Variation Models
+
+The dual variables Θtk , k = 1, 2, 3, are updated by
+
+Case 2. Top boundary (if p = m, q < n). Let
+T
+
+u = ([Xk ]p,q+1 , [Xk ]p,q ) , w =
+
+([Vkt ]p,q+1 , [Vkt ]p,q )T .
+
+(16)
+
+Then, due to the same reason as in Case 1, we have the
+following subproblem that can be decoupled from (13):
+λ
+1
+(17)
+min ku − wk2 + |u2 − u1 |.
+u 2
+γ
+Consider the right boundary (p < m, q = n). Let
+T
+
+u = ([Xk ]p+1,q , [Xk ]p,q ) , w =
+
+([Vkt ]p+1,q , [Vkt ]p,q )T .
+
+(18)
+
+We have the same subproblem as (17).
+Case 3. Top right corner (if p = m and q = n). We have
+kDp,q Xk k = 0 by the definitions in (3) and (4). Thus,
+1
+min ([Xk ]p,q − [Vkt ]p,q )2 ⇒ [Xkt+1 ]p,q = [Vkt ]p,q . (19)
+[Xk ]p,q 2
+We solve problems (15) and (17) in Section 3.
+Remark 2. [Xk ]p,q will be updated with one of the above
+three cases if group k contains pixel (p, q), the pixel below,
+or the pixel to the left.
+Case 4. By Remark 2, if none among the pixels (p, q),
+the pixel below, or the pixel to the left belongs to group k,
+[Xk ]p,q will not be updated. Take Fig. 1(a) as an example;
+this is the case for pixel (1, 3). Clearly, the variable [Xk ]p,q
+does not appear in the second term on the RHS of (13), i.e.,
+λ
+γ kXk kT Vk . Thus, we only need to solve:
+min 1 ([Xk ]p,q
+[Xk ]p,q 2
+
+− [Vkt ]p,q )2 ⇒ [Xkt+1 ]p,q = [Vkt ]p,q . (20)
+
+Remark 3. S1 involves two levels of decomposition. The
+first level comes from the fact that problem (13) involves
+minimizing over the three sets of local variables, Xk , k =
+1, 2, 3, which are independent from each other. Thus, we
+can solve (13) for Xk , k = 1, 2, 3, in parallel. The second level is due to the four cases in S1. Specifically, for
+each k ∈ {1, 2, 3}, (13) breaks into a set of subproblems
+involving at most three variables [problems (15) and (17)].
+Recall that, in Section 2.2, we decompose the image into
+three groups of non-overlapping pixels. We emphasize that
+these are referring to different levels of the decomposition.
+S2. Minimize Lγ (Z; Xt+1 ; Θt ) with respect to Z
+Since Z t+1 = argminZ Lγ (Z; Xt+1 ; Θt ), we have
+
+∂Lγ (Z; Xt+1 ; Θt ) 
+=0
+(21)
+
+∂Z
+Z=Z t+1
+X3
+⇒Z t+1 − Y − γ
+(Xkt+1 − Z + Θtk ) = 0
+k=1
+P3
+Y + k=1 (Θtk + Xkt+1 )
+t+1
+⇒Z
+=
+.
+(22)
+1 + 3γ
+Notice that, in this step, we update the global variable Z
+and thus the replicated variables Xk , k = 1, 2, 3, are coordinated across the three pixel groups.
+S3. Update the (scaled) dual variable Θt
+
+Θt+1
+= Θtk + (Xkt+1 − Z t+1 ),
+k
+
+(23)
+
+which is equivalent to a dual ascent step (Boyd et al., 2011).
+Our method is summarized in Algorithm 1.
+Algorithm 1 FAD (Fast ADMM for TV Models)
+Input: Y , λ, γ > 0
+Initialize Z 0 = Xk0 := Y , Θ0k := 0,
+k = 1, 2, 3
+for t = 0 to T do
+for k = 1 to 3 do
+Vkt := Z t − Θtk ,
+1
+λ
+Xkt+1 := argmin kXk − Vkt k2F + kXk kT Vk ,
+2
+γ
+Xk
+end for
+P3
+Y + k=1 (Θtk + Xkt+1 )
+Z t+1 :=
+,
+1 + 3γ
+for k = 1 to 3 do
+Θt+1
+:= Θtk + (Xkt+1 − Z t+1 ),
+k
+end for
+end for
+Return: Z T
+
+Remark 4. Recall that T is the number of iterations when
+Algorithm 1 terminates. We use the primal and dual residuals (Boyd et al., 2011) to specify the stopping criterion.
+If both residuals are smaller than a given parameter , the
+algorithm stops. In this paper, we set  = 10−4 . In addition, it is known that a larger γ tends to result in a smaller
+primal residual but a larger dual residual. We keep γ fixed
+(γ = 10) in this paper. For schemes about varying γ, we
+refer readers to (Boyd et al., 2011).
+2.4. Convergence Analysis
+The convergence properties of ADMM that solve the standard form in (5) have been extensively explored by (He &
+Yuan, 2012; Boyd et al., 2011; Monteiro & Svaiter, 2010;
+Eckstein & Bertsekas, 1992; Glowinski & Tallec, 1989).
+To establish the convergence properties of Algorithm 1,
+we can reformulate problem (11) as (5), and the resulting formulation satisfies the conditions required for convergence. Moreover, the convergence rate of Algorithm 1
+can be shown as O(1/k) by following the procedure in (He
+& Yuan, 2012). For details, see the supplement.
+
+3. Solutions to the Subproblems
+We solve problems (15) and (17) in Sections 3.1 and 3.2,
+respectively. In Section 3.3, we give a brief complexity
+analysis of Algorithm 1.
+3.1. Solution to Subproblem (15)
+We focus on the following subproblem:
+p
+1
+min ku − wk2 + ρ (u1 − u2 )2 + (u3 − u2 )2 ,
+u 2
+
+A Highly Scalable Parallel Algorithm for Isotropic Total Variation Models
+λ
+γ
+
+≥ 0. Let G ∈ <2×3 be defined by
+
+
+−1 1 0
+G=
+.
+0 −1 1
+The dual problem of (15) is:
+
+	
+min 21 kw − ρGT sk2 : s21 + s22 ≤ 1 .
+
+where ρ =
+
+s
+
+∗
+
+(24)
+
+where α > 0 solves the following quartic equation:
+(25)
+
+∗
+
+Assume that u and s are the optimal solutions of (15) and
+(25). By the KKT conditions, we have:
+∗
+
+position of G. If ρ < ρmax , the optimal solution to problem
+(15) is given by
+h
+i
+u∗ = I − GT (GGT + ρα2 I)−1 G w,
+(30)
+
+T ∗
+
+u = w − ρG s ,
+(26)
+ ∗  ( (u∗2 −u∗1 ,u∗3 −u∗2 )T
+∗
+∗
+∗
+∗ T
+6= 0,
+s1
+∗
+∗
+∗
+∗ T , if (u2 − u1 , u3 − u2 )
+∈ k(u2 −u1 ,u3 −u2 ) k
+∗
+∗
+∗
+∗
+∗ T
+s2
+v, kvk ≤ 1,
+if (u2 − u1 , u3 − u2 ) = 0.
+(27)
+Note that problem (25) is smooth and convex. It is thus
+easier to solve than the nonsmooth problem (15). We can
+solve u∗ via s∗ according to Eq. (26). We rewrite (25) as:
+
+ 
+2
+ρ2  w
+T 
+2
+2
+(28)
+min
+2  ρ − G s : s1 + s2 ≤ 1 .
+s
+
+Let Be = {t : t = GT s, s ∈ B}, where B ∈ <2 is the unit
+disc. Clearly, Be ∈ <3 is a two dimensional linear manifold.
+Indeed, problem (28) is a projection problem. Let
+2
+
+
+
+−
+t
+t∗ (ρ) = argmin  w
+ = PBe(w/ρ).
+ρ
+e
+t∈B
+
+Then, we have t (ρ) = GT s∗ (ρ). There is a one-to-one
+linear mapping between t∗ (ρ) and s∗ (ρ) since GT is linear
+and has full column rank. Consequently, t∗ (ρ) ∈ relint Be
+implies that s∗ (ρ) ∈ B ◦ and t∗ (ρ) ∈ ∂ Be implies that
+s∗ (ρ) ∈ ∂B and vice versa. Since the projection operator
+PBe(w/ρ) is nonexpansive (Bertsekas, 2003), t∗ (ρ) varies
+continuously with ρ. When ρ is large enough, t∗ (ρ) must
+belong to relint Be and thus ks∗ k ∈ B ◦ (consider the exe Therefore, there must
+treme case t∗ (∞) = 0 ∈ relint B).
+exist a ρmax such that ρ > ρmax implies s∗ (ρ) ∈ B ◦ , i.e.,
+ks∗ (ρ)k < 1. By Eq. (27), ks∗ k(ρ) < 1 implies that all components of u∗ (ρ) are equal. The following theorem
+solves for ρmax and u∗ explicitly when ρ ≥ ρmax .
+
+α4 + c3 α3 + c2 α2 + c1 α + c0 = 0.
+
+(31)
+
+The parameters are given by
+c0 = ρ8 σ14 σ24 − ρ6 (w
+e12 σ24 + w
+e22 σ14 ),
+c1 = 2ρ6 (σ12 σ 4 + σ14 σ 2 ) − 2ρ4 (w
+e12 σ 2 + w
+e22 σ12 ),
+c2 = ρ4 (σ14 + σ24 + 4σ12 σ22 ) − ρ2 (w
+e12 + w
+e22 ),
+c3 = 2ρ2 (σ12 + σ22 ),
+e = ΣV T w, σ12 = 3, σ22 = 1. Eq. (31) has a unique
+and w
+positive root if ρ < ρmax .
+Remark 6. There are numerous efficient algorithms1 to
+solve Eq. (31). Closed-form solutions of quartic equations
+are also available2 , but they are computationally expensive
+and nonstable. In this paper, we use Newton’s method to
+find the nonnegative root of Eq. (31), which never fails in
+practice. For discussions regarding the root finding techniques, we refer the reader to the supplement.
+3.2. Solution to Subproblem (17)
+
+∗
+
+Theorem 1. Let ρmax = k(GGT )−1 Gwk and I be the
+identity matrix. If ρ ≥ ρmax , the optimal solution of the
+problem (15) is given by
+
+
+u∗ = I − GT (GGT )−1 G w.
+(29)
+Remark 5. The expression of ρmax implies that if w belongs to the null space of G, i.e., all three components of
+w are equal, then ρmax = 0. In this case, the solution to
+problem (15) is u∗ = w [note that u∗ is the projection of w
+onto the null space of G by Eq. (29)], which is independent
+of ρ. To avoid this trivial case, we always assume that w is
+not a constant signal. Therefore, we consider only the case
+with ρmax > 0.
+We solve for u∗ with ρ < ρmax in the following theorem.
+Theorem 2. Let G = U ΣV T be the singular value decom-
+
+Recall that problem (17) takes the form of
+min h(u) = 21 ku − wk2 + ρ|u2 − u1 |,
+u
+
+where ρ = λ/γ. We have the following theorem.
+Theorem 3. Let u∗ be the optimal solution of (17). Then,
+
+T
+
+(w1 − ρ, w2 + ρ) , if w1 > w2 + 2ρ,
+∗
+u = (w1 + ρ, w2 − ρ)T , if w1 < w2 − 2ρ,
+(32)
+
+ w1 +w2 w1 +w2 T
+( 2 , 2 ) , otherwise.
+Notice that the result in Theorem 3 is a small variation on
+the standard soft thresholding operator.
+Remark 7. Notice that problems (15) and (17) can be
+viewed as proximal operators of particular functions. Take
+problem (15) for example. Let f (u) = kGuk. Then, the
+optimal solution u∗ of problem (15) can be expressed as:
+u∗ = proxρf (w).
+Moreover, Fenchel’s conjugate (Ruszczyński, 2006) of ρf
+is given by:
+
+(ρf )∗ (v) = supu uT v − ρf (u) = δρBe (v),
+e and δ e (v) = ∞ otherwise;
+where δρBe (v) = 0 if v ∈ ρB
+ρB
+1
+http://en.wikipedia.org/wiki/Quartic_
+function
+2
+We found instances that the closed form solution can not give
+correct answers due to the limitation of the computers’ precision.
+
+A Highly Scalable Parallel Algorithm for Isotropic Total Variation Models
+
+e Thus,
+that is, δρBe (v) is the indicator function of ρB.
+1
+proxδρBe (w) = min ku − wk2 + δρBe (u) = PρBe (w).
+u 2
+By Moreau decomposition (Rockafellar, 1970), we have
+proxρf (w) = w − prox(ρf )∗ (w) ⇒ u∗ = w − ρGT s∗ ,
+which is the same as Eq. (26). By similar analysis as in Section 3.1, we can also solve (15). For more details, please
+refer to Parikh & Boyd (2013); Pustelnik et al. (2011).
+3.3. Complexity Analysis of Algorithm 1
+Each iteration of Algorithm 1 involves updating of the primal variables Z, X, and dual variables Θ. We update Z and
+Θ element-wise by simple arithmetic operations and thus
+the complexity is O(N ), where N = m × n is the number
+of variables/pixels. The update of X involves solving a set
+of small and independent subproblems. Because each subproblem involves at most three variables, the complexity of
+updating X is proportional to N . Thus, the complexity of
+each iteration in Algorithm 1 is O(N ). From Section 2.4,
+to obtain an -optimal solution, Algorithm 1 needs O(1/)
+steps (He & Yuan, 2012). Thus, the complexity of Algorithm 1 to achieve an -optimal solution is O(N/).
+An appealing feature of Algorithm 1 is that every step of
+Algorithm 1 can be executed in parallel. Suppose that we
+have np processors. Then, we can run FAD simultaneously
+on these processors. Each processor solves a subset of subproblems (15) and (17) to update X and updates a small
+piece of Z and Θ. We call the parallel version of FAD
+N
+). Clearly, the
+“pFAD”. The complexity of pFAD is O( n
+p
+more processors we have, the more efficient pFAD will be.
+This is demonstrated in our experiments.
+
+4. Implementation of pFAD via MPI
+By the decomposition strategy in Section 2.2, the TV model in (1) can be decoupled into a set of small and independent subproblems as in (15) and (17). To fully utilize this
+feature, we implement pFAD via MPI such that pFAD can
+run on large systems of interconnected computer clusters
+in parallel. One of the key advantages of pFAD is that the
+communication overhead across processors is very small. Suppose that we divide the image into several blocks.
+Only the data on the “boundaries” need to be interchanged
+among the “adjacent” blocks (Fig. 1).
+Fig. 2 shows an example of the synthetic images for testing. Each image Ye ∈ <n×n has eight randomly generated
+blocks. We add Gaussian noise N (0, 0.22 ) to Ye to generate the noisy image Y . The intensities are scaled to [0, 1].
+Fig. 3(a) shows the speedup of pFAD compared with FAD
+when we increase the number of processors. The number
+of processors, c, is set to 1, 2, 4, 9, 16, 25, 100, 400. For
+
+each specific number of processors, we fix λ = 0.35 and
+vary n, the side length of the test images, from 100 to 5000
+with a step size 100 (we observed similar patterns under
+different parameters). For each n, we perform 10 trials
+and record the average performance. Then we average the
+performance across all different n to get the speedup for
+each specific number of processors. Recall that Algorithm
+1 involves updating the primal variables Z and X and dual
+variables Θ. Except X, the update of Z and Θ are elementwise and only require several simple arithmetic operations.
+Thus, the dominant part of Algorithm 1 is the update of X
+since it requires that we solve a bunch of quartic equations. In Fig. 3(a), we report the speedup of updating X and
+the total computational time. We can see that the speedup
+of updating X approximately equals the number of processors. For 400 processors, the speedup is about 377 times.
+Fig. 3(a) also indicates that the speedup of the total computational time is about 357 times for 400 processors, since
+the cost of updating Z and Θ is very low.
+
+(a) Original image
+(b) Noisy image
+Figure 2. Example of synthetic images to evaluate the performance of MFISTA, SplitBregman and FAD/pFAD.
+
+Comparison with Other Algorithms We compare FAD
+and its parallel variant pFAD with several state-of-the-art
+competitors including MFISTA3 (Beck & Teboulle, 2009a)
+and SplitBregman method4 (Goldstein & Osher, 2009).
+Note that it is not straightforward to implement MFISTA
+or SplitBregman in parallel since both of them involve
+manipulating or solving large-scale linear systems. Thus,
+we implement pFAD with OpenMP for this experiment and
+test all of the algorithms on a server with four quad-core (16
+processors in total) Intel Xeon 2.93GHz CPUs and 65GB memory. To evaluate the performance of the aforementioned methods thoroughly, we test them on images whose
+sizes vary from 100 × 100 to 5000 × 5000.
+We compare the performance of the above algorithms by
+varying n and λ, respectively. We first fix λ = 0.35 and
+vary the side length n of the images from 100 to 5000 with
+a step size of 100. Then, we fix n = 1000 and vary λ
+from 0.15 to 0.9 with a step size of 0.05. For both settings,
+we perform 10 trials and report the average performance in
+3
+
+iew3.technion.ac.il/˜becka/papers/tv_
+fista.zip
+4
+tag7.web.rice.edu/Split_Bregman.html
+
+A Highly Scalable Parallel Algorithm for Isotropic Total Variation Models
+
+(a)
+
+(b)
+
+(c)
+
+Figure 3. Efficiency evaluation. Fig. 3(a) shows the speedup of pFAD with respect to FAD using multiple prcessors. Fig. 3(b) and
+Fig. 3(c) present the efficiency comparison of FAD, pFAD, SplitBregman and MFISTA in terms of the computational time.
+
+Fig. 3(b) and Fig. 3(c), respectively. For a fair comparison,
+in each setting, we first run FAD and record the objective
+function value when it stops. Then we run all the other
+algorithms until the objective function values are no larger
+than that of FAD (for FAD/pFAD, we set  = 10−4 and
+γ = 10).
+Fig. 3(b) indicates that the performance of FAD is comparable to the SplitBregman method and about six times
+faster than MFISTA. pFAD further improves the efficiency
+of FAD by about one order. Thus, pFAD is about 60 and 10
+times faster than MFISTA and the SplitBregman method,
+respectively. Fig. 3(c) further demonstrates the efficiency
+of pFAD. We can observe that, pFAD and FAD become slightly faster when λ increases. From Theorems 1 and 2,
+when ρ ≥ ρmax (λ is proportional to ρ since γ is fixed),
+problem (15) admits a closed-form solution. Otherwise,
+we solve the quartic equation (31). Overall, FAD/pFAD is
+more stable than SplitBregman and MFISTA.
+
+(a) Original image
+
+(b) Subimage
+
+(c) Noisy subimage
+(d) Denoised result
+Figure 4. Image denoising.
+
+5.2. Image Deblurring
+The TV-based image deblurring model is:
+
+5. Applications
+
+min kB(X) − Y k2F + λkXkT V ,
+
+(33)
+
+X
+
+We apply pFAD to the problems of image denoising, deblurring and reconstruction and present the results below.
+5.1. Image Denoising
+We apply our methods to the image denoising problem.
+The original image5 is a high-resolution photograph of the
+moon with 5100 × 4768 pixels (about 13 MB). The noisy
+image is obtained by adding Gaussian noise N (0, 0.22 ).
+The regularization parameter λ is set to be 0.2. To give
+a better view, we show the results over a sub-image with
+512 × 512 pixels. The upper left corner of the sub-image is
+at (1800, 2200). The denoising process takes pFAD, SplitBregman and MFISTA 46.87, 445.66 and 2695.28 seconds,
+respectively. MFISTA takes about 45 minutes. SplitBregman is much more efficient than MFISTA, but still needs
+about 7 minutes. The proposed pFAD only needs several
+tens of seconds and thus performs the best.
+5
+http://blog.astrophotographytargets.com/
+2012/03/
+
+where X is the image to be recovered, B is a linear transformation encoding a certain blurring operation, and Y is the
+observed noisy and blurred image. Problem (33) can be efficiently solved via FISTA (Beck & Teboulle, 2009b). The
+key step is to solve the proximal operator of the TV term,
+which is equivalent to problem (1). Therefore, we can apply FAD or pFAD to solve the proximal operator to speedup
+the computation. The original image “text” in Fig. 5(a) is
+
+(a)
+
+(b)
+
+(c)
+
+Figure 5. Image deblurring via FISTA-pFAD.
+
+extracted from the Matlab image processing toolbox. We
+then apply a 7 × 7 Gaussian filter with a standard devia-
+
+A Highly Scalable Parallel Algorithm for Isotropic Total Variation Models
+Table 1. Computational time (in seconds) for MRI reconstruction.
+FCSA-MFISTA
+FCSA- P FAD
+
+C ARDIAC
+0.682
+
+B RAIN
+0.607
+
+C HEST
+0.633
+
+A RTERY
+0.712
+
+0.037
+
+0.033
+
+0.041
+
+0.031
+
+tion 5 to get the blurred image. Fig. 5(b) is obtained by
+adding Gaussian noise N (0, 0.022 ) to the blurred image.
+The regularization parameter λ of pFAD is set to be 0.001.
+Fig. 5(c) shows the deblurred image via FISTA-pFAD.
+5.3. Image Reconstruction
+
+(a) Cardiac
+
+(b) Brain
+
+(c) Chest
+
+(d) Artery
+Figure 6. MRI reconstruction. The left column shows the original images. The images in the middle and right columns are the
+reconstructed ones by FCSA-MFISTA and FCSA-pFAD, respectively. The SNR for Cardiac, Brain, Chest and Artery are 17.56,
+20.35, 16.06 and 23.70 respectively.
+
+Magnetic Resonance Imaging (MRI) is a powerful tool in
+medical diagnosis because of its excellent performance in
+detecting soft tissue changes. However, a typical MRI examination procedure may take up 45 minutes. By noting
+the sparse nature of signals in a transformed domain, recent
+advances in the compressive sensing theory (CS) (Candès et al., 2006; Donoho, 2006) show that it is possible to
+accurately reconstruct signals with limited undersamples.
+Therefore, the duration of an MRI examination can be sig-
+
+nificantly reduced. A popular formulation of the image reconstruction problem takes the form of (Lustig et al., 2007;
+Trzasko et al., 2007):
+1
+min kF(X) − Y k2 + λ1 kW(X)k1 + λ2 kXkT V , (34)
+X 2
+where X is the signal to be recovered, Y are the observed
+undersamples and F and W are partial Fourier and wavelet
+transformations, respectively. Huang et al. (2011) proposed
+an efficient algorithm called FCSA6 to solve (34). One of
+the key steps of FCSA is to solve the proximal operator
+of the TV term by MFISTA. To improve the efficiency of
+FCSA further, we use pFAD to replace MFISTA.
+We compare the performance of FCSA-MFISTA and
+FCSA-pFAD on four MRI images: cardiac, brain, chest
+and artery. We use the default settings of the FCSA package. The sample ratio is about 20% and Gaussian noise
+N (0, 0.012 ) is added to the undersamples to generate Y .
+For a fair comparison, we first run FCSA-pFAD and record
+the objective function values returned by pFAD. Then, we
+run FCSA-MFISTA and make sure it achieves the same
+precision level with FCSA-pFAD at each iteration. We run
+both FCSA-pFAD and FCSA-MFISTA for 50 iterations.
+Fig. 6 presents the results obtained by FCSA-MFISTA and
+FCSA-pFAD, which are almost identical to each other.
+Because both FCSA-MFISTA and FCSA-pFAD solve the
+same problem and achieve the same accuracy level, the resulting reconstructions and SNR are the same. The average
+time for the 50 iterations of the two methods is reported
+in Table 1, which indicates that FCSA-pFAD is about 20
+times faster than is FCSA-MFISTA.
+
+6. Conclusion
+In this paper, we propose a fast alternating direction method
+for isotropic TV models. Our approaches are based on a
+novel decomposition strategy of the problem domain. By
+the decomposition, isotropic TV models can be decoupled
+into a set of small and independent subproblems, which
+can be solved efficiently in parallel. Different from existing ADMM based approaches, like SplitBregman methods, one appealing feature of our method is that no largescale linear system is involved. Our empirical evaluation
+demonstrates the very low communication overhead and
+high scalability of the proposed method. One of our future
+directions is to extend our approach to higher dimensional
+problems, like video and functional MRI denoising.
+
+Acknowledgments
+This work was supported in part by NIH (LM010730), NSF (IIS-0953662, CCF-1025177) and China 973 Fundamental R&D Program (No.2014CB340304). We would like to
+thank Virginia Unkefer for proofreading.
+6
+
+ranger.uta.edu/˜huang/R_CSMRI.htm
+
+A Highly Scalable Parallel Algorithm for Isotropic Total Variation Models
+
+References
+Barbero, Á. and Sra, S. Fast newton-type methods for total variation regularization. In ICML, 2011.
+Beck, A. and Teboulle, M. Fast gradient-based algorithms for
+constrained total variation image denoising and deblurring
+problems. IEEE Transactions on Image Processing, 18:2419–
+2434, 2009a.
+
+3712–3743, 2009.
+Goldstein, Tom and Osher, Stanley. The Split Bregman method
+for L1-regularized problems. SIAM J. Imag. Sci., 2:323–342,
+2009.
+He, B. and Yuan, X. On the o(1/n) convergence rate of the
+Douglas-Rachford alternating direction method. SIAM J. Numer. Anal., 50:700–709, 2012.
+
+Beck, A. and Teboulle, M.
+A fast iterative shringkagethresholding algorithm for linear inverse problems. SIAM Journal on Imaging Sciences, 2:183–202, 2009b.
+
+He, L., Chang, T. C., and Osher, S. MR image reconstruction from
+sparse radial samples by using iterative refinement procedures.
+In 13th Annual Meeting of ISMRM, 2005.
+
+Bertsekas, D. P. Convex Analysis and Optimization. Athena Scientific, 2003.
+
+Huang, J., Zhang, S., and Metaxas, D. Efficient MR image reconstruction for compressed MR imaging. Medical Image Analysis, 15:670–679, 2011.
+
+Boyd, S., Parikh, N., Chu, E., Peleato, B., and Eckstein, J. Distributed optimization and statistical learning via the alternating
+direction method of multipliers. Foundations and Trends in
+Machine Learning, 3:1–122, 2011.
+Candès, E., Romberg, J., and Tao, T. Robust uncertainty principles: exact signal reconstruction from highly incomplete frequency information. IEEE Trans. Inform. Theory, 52:489–509,
+2006.
+Casas, E., Kunisch, K., and Pola, C. Regularization by functions
+of bounded variation and applications to image enhancement.
+Applied Mathematics & Optimization, 40:229–257, 1999.
+Chambolle, A. and Pock, T. A first-order primal-dual algorithm
+for convex problems with applications to imaging. J. Math.
+Imaging. Vis., 40:120–145, 2011.
+Chan, R. H., Yang, J. F., and Yuan, X. M. Alternating direction
+method for image inpainting in wavelet domain. SIAM Journal
+on Imaging Sciences, 4:807–826, 2011.
+Chen, C., He, B., and Yuan, X. Matrix completion via an alternating direction method. IMA Journal of Numerical Analysis,
+32:227–245, 2012.
+Combettes, P. and Pesquet, J. Fixed-Point Algorithms for Inverse
+Problems in Science and Engineering. Springer, 2011.
+Condat, L. A direct algorithm for 1-D total variation denoising.
+IEEE Signal Processing Letters, 20:1054–1057, 2013.
+Donoho, D. Compressed sensing. IEEE Trans. Inform. Theory,
+52:1289–1306, 2006.
+Duan, Y. and Tai, X. Domain decomposition methods with graph
+cuts algorithms for total variation minimization. Adv. Comput.
+Math, 36:175–199, 2012.
+Eckstein, J. and Bertsekas, D. P. On the Douglas-Rachford splitting method and the proximal point algorithm for maximal
+monotone operators. Mathematical Programming, 55:293–
+318, 1992.
+Esser, E. Applications of lagrangianbased alternating direction
+methods and connections to split Bregman. Technical report,
+UCLA CAM, 2009.
+Esser, E., Zhang, X. Q., and Chan, T. F. A general framework
+for a class of first order primaldual algorithms for convex optimization in imaging science. SIAM J. Imag. Sci., 3:1015–1046,
+2010.
+Glowinski, R. and Tallec, P. Le. Augmented Lagrangian and
+operator-splitting methods in nonlinear mechanics. SIAM Studies in Applied Mathematics, 1989.
+Goldfarb, D. and Yin, W. Parametric maximum flow algorithms
+for fast total variation minimization. SIAM J. Sci. Comput., 31:
+
+Kim, D., Sra, S., and Dhillon, I. A scalable trust-region algorithm
+with application to mixed-norm regression. In ICML, 2010.
+Lustig, M., Lee, J. H., Donoho, D. L., and Pauly, J. M. Faster
+imaging with randomly pertured undersampled spirals and l1
+reconstruction. In 13th Scientific Meeting of the ISMRM, 2005.
+Lustig, M., Donoho, D., and Pauly, J. Sparse MRI: The application of compressed sensing for rapid MR imaging. Magn.
+Reson. Med., 58:1182–1195, 2007.
+Ma, S., W, Yin, Zhang, Y., and Chakraborty, A. An efficient algorithm for compressed MR imaging using total variation and
+wavelets. In CVPR, 2008.
+Monteiro, R. and Svaiter, B. F. Iteration-complexity of blockdecomposition algorithms and the alternating direction method
+of multipliers. manuscript, 2010.
+Osher, S., Burger, M., Goldfarb, D., Xu, J., and Yin, W. An iterative regularization method for total variation-based image
+restoration. Multiscale Model. Simul., 4:460–489, 2005.
+Parikh, N. and Boyd, S. Proximal algorithms. Foundations and
+Trends in Optimization, 1:123–231, 2013.
+Pustelnik, N., Chaux, C., and Pesquet, J.-C. Parallel proximal
+algorithm for image restoration using hybrid regularization.
+IEEE Transactions on Image Processing, 20:2450–2462, 2011.
+Rockafellar, R. Convex Analysis. Princeton University Press,
+1970.
+Rudin, L. I., Osher, S. J., and Fatemi, E. Nonlinear total variation
+based noise removal algorithms. Phys. D, 60:259–268, 1992.
+Ruszczyński, A. Nonlinear Optimization. Princeton University
+Press, 2006.
+Trzasko, J., Manduca, A., and Borisch, E. Sparse MRI reconstruction via multiscale L0 -continuation. In 14th IEEE/SP Workshop on Statistical Signal Processing, 2007.
+Vert, J. P. and Bleakley, K. Fast detection of multiple changepoints shared by many signals using group LARS. In NIPS,
+2010.
+Vogel, C. and Oman, M. Fast, robust total variation-based reconstruction of noisy, blurred images. IEEE Trans. Image Process., 7:813–824, 1998.
+Wahlberg, B., Boyd, S., Annergren, M., and Wang, Y. An ADMM
+algorithm for a class of total variation regularized estimation
+problems. In IFAC Symposium on System Identification, 2012.
+Yang, S., Wang, J., Fan, W., Zhang, X., Wonka, P., and Ye, J.
+An efficient ADMM algorithm for multidimensional anistropic
+total variation regularization problems. In SIGKDD, 2013.
+
+

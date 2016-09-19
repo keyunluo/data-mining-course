@@ -1,0 +1,1285 @@
+Sample-based Approximate Regularization
+
+Philip Bachman1
+Amir-massoud Farahmand1,2
+Doina Precup1
+1
+School of Computer Science, McGill University, Montreal, Canada
+
+Abstract
+We introduce a method for regularizing linearly parameterized functions using general
+derivative-based penalties, which relies on sampling as well as finite-difference approximations
+of the relevant derivatives. We call this approach
+sample-based approximate regularization (SAR).
+We provide theoretical guarantees on the fidelity
+of such regularizers, compared to those they approximate, and prove that the approximations
+converge efficiently. We also examine the empirical performance of SAR on several datasets.
+
+1. Introduction
+Regularization is critical to controlling the complexity of
+hypothesis spaces and achieving favourable bias-variance
+trade-offs. Some machine learning methods even owe most
+of their success to an effective use of regularization. For example, a major reason for the success of SVMs is arguably
+their use of regularization that is “natural” in the RKHS tied
+to their kernel. For some choices of kernels, this Tikhonovlike regularization has a smoothness-inducing interpretation (Schölkopf & Smola, 2002). For example, the RKHS
+norm induced by the popular Gaussian RBF kernel penalizes all orders of derivatives of the learned function (Yuille
+& Grzywacz, 1988). Spline-based methods, which are
+ubiquitous in statistics but less common in machine learning, also rely on smoothness-inducing, derivative-based
+penalties. In particular, for univariate inputs or additive models, a second-order derivative penalty can be applied exactly in the nonparametric setting, leading to cubic
+smoothing splines (Wahba, 1990). But, this exact penalty
+quickly becomes intractable as the training set grows or the
+order of modeled interactions increases. While attempts
+have been made to produce computationally-efficient approximations of spline-like penalties (Eilers & Marx, 1996;
+Proceedings of the 31 st International Conference on Machine
+Learning, Beijing, China, 2014. JMLR: W&CP volume 32. Copyright 2014 by the author(s).
+
+PHIL . BACHMAN @ GMAIL . COM
+AMIRMF @ ANDREW. CMU . EDU
+DPRECUP @ CS . MCGILL . CA
+2
+
+Carnegie Mellon University, Pittsburgh, USA
+
+Wood, 2003), full spline-based methods generally scale unfavorably.
+In this paper, we introduce a method for efficiently approximating a general class of derivative-based penalties, which
+we call Sample-based Approximate Regularization (SAR).
+This approach applies to hypothesis spaces that are linearly
+parameterized, i.e., in which the input x is transformed
+into a feature space φ(x) and the output is approximated
+by φ(x)> w. This type of hypothesis space includes SVMstyle approximators, feedforward neural networks, and various other types of regressors using features that are useful
+for particular application domains, such as SIFT, MFCC,
+etc (Lowe, 1999; Davis & Mermelstein, 1980). Based
+on the success of derivative-based penalties in the related
+RKHS and spline settings (Pearce & Wand, 2006), and
+on the empirical success of problem-specific features, it is
+desirable to obtain derivative-based regularizers that work
+with a wide range of feature transformations, e.g., ones not
+restricted to explicitly-computable RKHS kernels.
+The SAR method can be used to augment the standard
+l2 and l1 regularizers that are commonly used with “general” feature transforms (i.e., non-kernel transforms). Conveniently, the regularizers produced by SAR are of the
+Tikhonov-type (i.e., J(fw ) = w> Σw for some Σ), and
+can thus be applied efficiently with standard software. The
+computational complexity of SAR depends only loosely on
+the complexity of φ and not at all on the size of the training set, thus improving on costs of spline-based approaches
+to regularizing derivatives. We prove that the regularizers
+produced by SAR converge efficiently to the exact penalties they approximate. We also compare the loss of a SARregularized regression estimator to the loss of an estimator
+shaped by the exact regularizer approximated by SAR.
+In the rest of this paper, we present our generalization of
+smoothness-inducing, derivative-based regularizers (Section 2), present our approach for approximating them efficiently (Section 3), analyze its theoretical properties (Section 4), and present empirical results illustrating the power
+of the proposed approach (Section 5).
+
+Sample-based Approximate Regularization
+
+2. Smoothness-inducing regularizers
+Consider a function f : X → R and a measure ν ∈ M(X ).
+If f 0 (x) exists and is L2 (ν)-integrable, then for X = R a
+natural measure of the smoothness of f is:
+Z
+|f 0 (x)|2 dν ,
+(1)
+X
+
+One typically extends (1) to multi-dimensional domains
+X = Rd by integrating the squared norm of the gradient.
+We propose instead a more general form, expressible as:
+Z I
+J1 (f ) =
+(s> ∇f )2 dsx dν .
+(2)
+X
+
+Sx
+
+The inner integral is over the surface Sx of a hyper-sphere
+centred at x, according to a location-dependent measure
+over directions sx ∈ M(Sx ). Each s ∈ Sx corresponds
+to a unit-length vector pointing away from x in some direction. If sx is set to a uniform distribution over the unit
+hyper-sphere for all x ∈ X , then J1 (f ) is proportional
+to the integrated squared norm of ∇x f , due to the linearity of the dot-product. If sx is the set of delta functions
+on the coordinate vectors of X , J1 (f ) penalizes the integrated squared norm of ∇x f exactly, as in the typical multidimensional extension of (1). But, the generalized derivative penalty J1 (f ) allows flexibility in assigning locationdependent importance to the variation of f along particular directions. Moreover, as we will see, it is amenable to
+sample-based approximation.
+Another reasonable measure of the smoothness of f uses its
+second-order derivatives. In one dimension, if f 00 (x) exists
+and is L2 (ν)-integrable, then
+Z
+|f 00 (x)|2 dν
+(3)
+X
+
+gives the standard penalty used in, e.g., cubic smoothing
+splines (Wahba, 1990). We extend the penalty in (3) to
+multiple dimensions as follows:
+Z I
+2
+J2 (f ) =
+s> (Hx f )s dsx dν ,
+(4)
+X
+
+Sx
+
+where s ∈ Sx are again distinct unit-length vectors jointly
+covering all directions pointing away from x, and Hx f is
+the Hessian of f evaluated at x. When sx is uniform over
+Sx , J2 (f ) penalizes the squared Frobenius norm ||Hx f ||2F
+w.r.t. ν, which provides regularization that has proven useful in previous work (Rifai et al., 2011; Kim et al., 2009).
+As with (2), the generalized form in (4) encompasses a
+broad range of regularizers, due to flexibility in the choice
+of ν and sx , and is amenable to approximation.
+
+3. The SAR Method
+The goal of our approach is to efficiently approximate regularizers of the form (2) and (4). The functionals J1 and J2
+
+Algorithm 1 SAR( p̃x , p̃sx , N , φ, i,  )
+1: Σ̃i := zero matrix of size p × p.
+2: for j = 1 to N do
+3:
+Sample Xj from p̃x .
+4:
+Sample Sj from p̃sXj .
+5:
+Compute δi (Xj , Sj , φ) (see: (9) for defn.)
+6:
+Σ̃i := Σ̃i + δi (Xj , Sj , φ)δi (Xj , Sj , φ)> .
+7: end for
+1
+Σ̃i .
+8: return N
+
+both involve integrating some quantity w.r.t. ν and sx . SAR
+approximates the integrands in J1 and J2 efficiently using
+finite-difference approximations of directional derivatives
+and estimates the integrals using a Monte-Carlo approach
+based on samples from ν and sx . We call methods to sample from ν point samplers and methods to sample from sx
+direction samplers.
+We focus on linearly-parameterized functions fw (x) =
+φ(x)> w, where φ : X → Rp is a fixed feature transform,
+whose components are one-dimensional measurable functions {ϕi }pi=1 , and w ∈ Rp is a parameter vector. We denote the function space defined by the span of φ as F.
+Given a point sampler p̃x , a direction sampler p̃sx , a sample
+size N , and a derivative order i, Algorithm 1 produces a
+matrix Σ̃i that defines SAR with: J˜i (fw ) = w> Σ̃i w for
+functions fw ∈ F. To simultaneously regularize multiple
+derivative orders, their corresponding Σ̃i can be combined
+via element-wise summation.
+Once an approximate regularizer Σ̃i has been produced by
+SAR, any method for estimating Tikhonov-regularized linear models can be applied. The computational cost of SAR
+comes from lines 3-6 of Algorithm 1. Assuming efficient
+point/direction samplers p̃x /p̃sx , the feature extraction in
+line 5 and the outer products in line 6 dominate the cost of
+SAR. If the expected cost of computing φ(x) is cφ , the target derivative order is i, and φ(x) ∈ Rp , then line 5 costs
+cφ (i + 1) per sample and line 6 costs p2 per sample. Lines
+3-6 each execute N times when using N samples to compute Σ̃i . Depending on cφ and p, either line 5 or 6 may
+dominate the overall cost. The discussion section further
+considers computation costs.
+We now describe approaches for approximating the directional derivatives and for constructing samplers p̃x /p̃sx .
+3.1. Approximating directional derivatives
+For functions fw ∈ F, the first-order forward finite difference is given by 1 w> (φ(x + s) − φ(x)), thus:
+h∇x fw , si2 ≈ w> δ1 (x, s, φ)δ1 (x, s, φ)> w,
+
+(5)
+
+Sample-based Approximate Regularization
+
+in which we introduce the first-order finite difference vector
+δ1 (x, s, φ) , 1 (φ(x + s) − φ(x)).
+For a point x and direction s, the term s> (Hx f )s in (4) is
+equivalent to the second-order directional derivative of f ,
+at x, in direction s, with finite difference approximation:
+f (x) − 2f (x + s) + f (x + 2s)
+2
+For fw ∈ F, the square of this term is given by:
+s> (Hx f )s ≈
+
+(6)
+
+(s> (Hx fw )s)2 ≈ w> δ2 (x, s, φ)δ2 (x, s, φ)> w,
+
+(7)
+
+in which we use the second-order finite difference vector
+δ2 (x, s, φ) , 12 (φ(x) − 2φ(x + s) + φ(x + 2s)).
+Based on (5) and (7), the key to SAR is that the integrals in
+J1 and J2 can be approximated by:
+Z I
+
+>
+
+
+>
+δi (x, s, φ)δi (x, s, φ) dsx dν w,
+w
+(8)
+X
+
+S
+
+Algorithm 2 FuzzyPointSampler( Dn , N , L ).
+1: for j = 1 to N do
+2:
+Sample Xj from Dn uniformly at random.
+3:
+Sample a direction Sj uniformly at random.
+4:
+Sample a perturbation length j from L.
+0
+5:
+Add X̃j = Xj + j Sj to DN
+.
+6: end for
+0
+7: return DN
+.
+Algorithm 3 BlurryBoxSampler( Dn , N , L )
+1: Compute the minimal bounding box for the Dn .
+2: for j = 1 to N do
+3:
+Sample Xj uniformly from within the box.
+4:
+Sample a direction Sj uniformly at random.
+5:
+Sample a step length j from L.
+0
+6:
+Add X̃j = Xj + j Sj to DN
+.
+7: end for
+0
+.
+8: return DN
+
+in which we use finite difference vectors and i ∈ {1, 2}
+indicates the derivative order to regularize.
+To regularize higher-order derivatives with SAR, only the
+finite difference vectors used in (8) need to change:
+ 
+i
+X
+j i φ (x + (i − j)s)
+
+.
+(9)
+(−1)
+δi (x, s, φ) =
+i
+j
+j=0
+
+The second method samples approximately from the uniform distribution over X , to mimic the distribution implicit
+in the RKHS regularization accompanying Gaussian RBFs.
+Algorithm 3 samples from a uniform distribution over the
+smallest axis-aligned box enclosing Dn convolved with the
+isotropic distribution with length distribution L.
+
+When regularizing a single order i with fixed , the denominator i in (9) can be ignored, as it is constant for all δi .
+In this case, numerical precision (for i → 0) is not an issue. A similar idea can be applied when regularizing across
+multiple orders. Principled approaches to select  and minimize the side-effects from finite precision are subject for
+future work. We note that we have not run into any numerical problems in the experiments.
+
+We propose two methods to sample directions from sx . The
+first is to sample a unit direction uniformly at random. The
+second is to sample a unit direction uniformly at random,
+transform it by some matrix, and then rescale it to unit
+length. The first method produces a regularizer that penalizes derivatives in all directions equally, and the second
+biases the penalty based on the eigenvectors and eigenvalues of the transform matrix. Developing direction samplers
+with location-dependent biases, e.g., to emphasize invariance w.r.t. small translations/rotations in an object recognition task, is an interesting topic for future work.
+
+3.2. Sampling from ν and sx
+We now describe concrete methods to sample from ν and
+sx . Suppose we are given a set Dn = {X1 , X2 , . . . , Xn }
+of “training” input observations Xi ∈ Rd , drawn from the
+source distribution p(x). We will approximate ν using N
+0 1
+samples, contained in a set DN
+. A natural choice for the
+sampler is to draw values from an approximation to p(x)
+obtained by perturbing the existing points Dn , an approach
+based on the manifold/cluster assumption underlying most
+work on semi-supervised learning. Let L be a distribution over lengths, which determines the degree of “smoothing” to apply during sampling. Algorithm 2 samples from
+the empirical approximation to p(x), convolved with the
+isotropic distribution with length distribution L.
+1
+
+In the supervised learning setting, Dn contains label infor0
+mation as well, but we ignore it in the process of generating DN
+.
+In a semi-supervised setting, we can also use unlabelled data.
+
+4. Theoretical Analysis
+The goal of this section is twofold. First, we study the behaviour of a SAR-based regularized least-squares regression estimator (Theorem 1). Second, we focus on the convergence behaviour of the sample-based approximate regularizer J˜N (·) to the regularizer J(f ). We provide two
+results, one in the form of the supremum of the empirical process (Theorem 2) and the other in the form of
+the supremum of the modulus of continuity of the empirical process (Theorem 3). For simplicity, we only study
+the 1st -order derivative-based regularizer and its central
+difference-based SAR.
+Let us first define some notations.
+
+The gradient of a
+
+Sample-based Approximate Regularization
+
+function f : Rd → R is denoted by ∇f (x). We
+denote the central difference approximation of the gradient by (4ε f )(x) = [(4ε f )1 (x) · · · (4ε f )d (x)] with
+(x−εei )
+(4ε f )i (x) = f (x+εei )−f
+, where ei are the unit co2ε
+ordinate vectors.
+Given a probability distribution ν ∈ M(X ), the
+st
+regularizer2 is J(f )
+=
+R1 -order derivative-based
+2
+0
+0
+k∇f (x)k dν(x).
+Given DN
+= {X10 , . . . , XN
+}
+i.i.d.
+
+with Xi0 ∼ ν, we define the sample-based approxiPN
+2
+mate regularizer as: J˜N (f ) = N1 i=1 k4ε f (Xi0 )k .
+P
+2
+N
+We also define JN (f ) = N1 i=1 k∇f (Xi0 )k . Note
+that for fw ∈ F, we have J(fw ) = w> Σw with
+R Pd ∂φ(x) ∂φ(x) >
+the true Grammian Σ ,
+dν(x).
+i=1 xi
+xi
+Similarly, we have J˜N (fw )
+=
+w> Σ̃N w with
+the approximate empirical Grammian Σ̃N
+,
+PN Pd
+1
+>
+3
+(4
+φ)
+(X
+)(4
+φ)
+(X
+).
+For
+a
+fixed
+ε j
+i
+ε j
+i
+i=1
+j=1
+N
+L > 0, the truncation operator βL : F → F is defined as (βL f )(x) ,
+ f (x) when |f (x)| ≤ L and
+(βL f )(x) , sgn f (x) L otherwise.
+The regression setup is as follows.
+Let Dn =
+i.i.d.
+n
+{(Xi , Yi )}i=1 be a dataset with Xi ∼ µ. Assume that
+the probability distribution generating the data is such
+that |Y | ≤ L (almost surely) with L > 0. Denote by
+f ∗ (x) = E [Y |X = x] the regression function, which in
+general does not belong to F. Given Dn and an indepen0
+dent dataset DN
+, the SAR-based regression estimator fˆn is
+defined as the L-truncated estimator fˆn , βL f¯n , with
+n
+
+1X
+2
+(f (Xi ) − Y ) + λJ˜N (f ).
+f¯n ← argmin
+n
+f ∈F
+i=1
+
+(10)
+
+We now provide an upper bound on the performance of this
+estimator. To state our result, for k ≥ 1, we define
+ k
+
+ ∂ φ(x) 
+
+ .
+Dk (φ) , max sup 
+i=1,...,d x∈X
+∂xki 2
+If the k-th partial derivatives are not defined, we set
+Dk (φ) = ∞. For our results, we require the existence of
+D1 (φ) and D3 (φ). All proofs are deferred to the Supplementary Material.
+2
+If X is a proper open subset of Rd , for some samples X 0 close
+to the boundary of X , (4ε f )i (X 0 ) may not be defined (because
+one side can be outside the domain). If we ensure that supp(ν) is
+at least ε away from the boundary in the l∞ -norm, all the results
+hold with X ⊂ Rd instead of X = Rd .
+3
+Note that the meaning of subscripts of J and J˜ is different
+from Section 3. Here JN and J˜N refer to the use of N samples to
+estimate the 1st -order derivative (using the true derivative or its finite difference approximation, respectively), while in the previous
+section we used Ji and J˜i to refer to the ith -order derivative-based
+regularizer and its SAR version. No confusion should arise as we
+always use N to refer to the number of samples.
+
+Theorem 1. Assume that all {ϕi }pi=1 are three-time differentiable and supx∈X kφ(x)k2 ≤ R. Moreover, suppose
+that λmin (Σ̃N ), the smallest eigenvalue of Σ̃N , is bounded
+away from zero. There exist constants c1 , c2 > 0 such that
+for any fixed δ > 0, with probability at least 1−δ, we have:
+Z 
+2
+ˆ
+
+∗
+fn (x) − f (x) dµ(x) ≤
+( Z
+2
+
+min
+
+w∈Rp ,kfw k∞ ≤L
+
+2
+
+|fw − f ∗ (x)| dµ(x) + 2λJ(fw ) +
+
+λ kwk22 d
+
+2
+
+ 8D2 (φ) log(3/δ)
+1
+
+3N
+
++
+
+)
+
+ε2
+ε2
+D3 (φ)[2D1 (φ) + D3 (φ)]
+6
+6
++
+
+c2 L4 log(1/δ)
+c1 L6 R2 log(nL)
++
+.
+n
+λmin (Σ̃N ) nλ
+
+This result shows the effects of function approximation and
+estimation errors, the way regularization coefficient λ and
+J(fw ) determine their tradeoff,
+and the error caused by
+R
+SAR. The term minw∈Rp |fw − f ∗ (x)|2 dµ(x) + λJ(fw )
+is the [regularized] approximation error and indicates how
+well the target function f can be approximated in a subset
+of F. The subset is determined by the true regularization
+functional J(fw ) = w> Σw and λ. As usual in regularized estimators, increasing λ might increase the approximation error, but it decreases the estimation error O( log(n)
+nλ )
+on the other hand, and vice versa. If F as defined by the
+basis functions “matches” the target function (i.e., f ∗ can
+be well-approximated with a function in F with a small
+J(f )), we can learn the target function fast. This is how
+feature-engineering or data-dependent feature generation
+show their benefits. It is noticeable that this result does
+not depend on the dimension of the feature space p.
+Results similar to this part of the theorem are known in the
+supervised learning literature, cf. Theorem 21.1 of Györfi
+et al. (2002) for regularized regression in C k (R) (splines),
+Theorem 7.23 of Steinwart & Christmann (2008) for regularized loss in an RKHS, and Sridharan et al. (2009) for
+strongly convex objectives (which is satisfied for a convex
+loss and the l2 regularizer) and linear function spaces.
+The effect of using J˜N (f ) instead of the true regularizer
+2
+J(f ) in (10) appears in the O(kwk2 [ N1 + ε2 ]) term. The
+curious observation here is that the effect depends on the
+size of w, so if the true function can be well-approximated
+by a “simple” function (measured according to kwk2 ), we
+would not suffer much from the error caused by SAR.
+To better understand the behaviour of the bound, consider
+2
+the case that J(fw ) = kwk2 and the target function f ∗ belongs to F, i.e., f ∗ = fw∗ for some w∗ . Ignoring the constants and the logarithmic terms, by choosing λ = kw∗1k√n
+∗
+to optimize the tradeoff between λJ(fw
+) and
+
+1
+nλ ,
+
+we get
+
+Sample-based Approximate Regularization
+
+the upper bound of O(
+
+kw∗ k2
+√
+[1
+n
+
+R
+
++
+
+1
+2
+N + ε ]).
+∗
+2
+
+Remark 1. One could get |fw − f (x)| dµ(x) + λJ(fw )
+inside the minimizer instead of the current one, which
+has a multiplicative constant of 2, at the price of having
+kwk2
+kwk2
+O( √N2 + √1n ) instead of O( N 2 + n1 ). This depends on
+whether we use Bernstein’s inequality or Hoeffding’s inequality in the proofs.
+Remark 2. The quantity λmin (Σ̃N ) in the theorem is a ran0
+0
+dom function of DN
+and can be calculated given DN
+.
+We now depart from the context of regression and focus on
+the SAR procedure itself. The first result is a uniform upper
+bound on the difference
+between J(f ) and J˜N (f ) for
+ >
+	 any
+function f ∈ FB , φ w : w ∈ Rp , kwk2 ≤ B , i.e.,
+the ball with radius B w.r.t. the l2 -norm of w.
+Theorem 2 (Supremum of the Empirical Process
+|J˜N (f ) − J(f )|). Assume that all {ϕi }pi=1 are three-time
+differentiable. For any fixed δ > 0 and B > 0, we have:
+
+
+
+
+ε2
+B 2 ε2
+
+
+dD3 (φ) 2D1 (φ) + D3 (φ)
+sup J˜N (f ) − J(f ) ≤
+6
+6
+f ∈FB
+v
+
+
+u
+u 2p log 128B 2 dD12 (φ)N
+t
+δ
+1
+2
+2
++ 32B dD1 (φ)
++ ,
+N
+N
+
+with probability at least 1 − δ.
+This theorem shows the effects of the estimation error and
+the finite difference approximation error. p
+The simplified
+behaviour of the estimation error is O(B 2 Np ). The dependence on N and p is common to the usual uniform deviation bounds in statistical learning for functions from a
+p-dimensional linear vector space. The effect of the size of
+the function space also manifests itself through B 2 .
+The effect of the finite difference approximation error is
+O(B 2 ε2 ) – neglecting terms depending on the smoothness
+of the basis functions. The ε2 dependence is the usual
+residual error from the central difference approximation of
+a derivative. If instead we used a forward (or backward)
+estimate of the derivative, we would get ε behaviour. The
+dependence on B is because functions φ> w with larger
+kwk2 might have a larger derivatives, so their finite difference approximation would have a larger residual error.
+Theorem 2 provides an upper bound for the supremum of
+the empirical process only over a subset FB of F, but it
+does not provide a non-trivial result for the supremum of
+|J˜N (f ) − J(f )| over F. This is expected as for large w,
+the true regularizer J(fw ) would be large too, and the deviation of J˜N (fw ) around it can also be large. Nonetheless,
+we can still study the behaviour of the empirical process
+as a function of J(f ). This is known as the modulus of
+continuity result in the empirical process theory (or relative deviation of error). The following theorem provides
+such a result. Here we denote a ∨ b = max{a, b}.
+
+Theorem 3 (Modulus of Continuity for the Empirical Process |J˜N (f ) − J(f )|). Assume that all {ϕi }pi=1 are threetime differentiable. Suppose that λmin (Σ), the smallest
+eigenvalue of Σ, is bounded away from zero. W.l.o.g., assume that 256dD12 (φ) ≥ 1. Let α > 0. There exists c1 (α)
+such that for any fixed δ > 0, we have
+
+
+˜
+
+JN (f ) − J(f )
+sup
+1+α ≤
+f ∈F [J(f ) ∨ λmin (Σ)]
+v
+
+
+u
+"
+u 2p log 512dD12 (φ)c1 (α)N
+t
+δ
+1
+25 dD12 (φ)
++
+N
+λ1+α
+(Σ)
+min
+
+#
+ε2
+dε2
+D3 (φ) 2D1 (φ) + D3 (φ) ,
+3!
+3!
+with probability at least 1 − δ. Here c1 (α) can be chosen
+1
+as follows: For 0 < α ≤ 4e log(2)
+≈ 0.1327, c1 (α) =
+(−4α log(2))
+8[2 − W−14α
+] (in which W−1 is the lower branch
+log(2)
+of Lambert W -function), and c1 (β) = 16 otherwise.
+
+We can elucidate this result by seeing how it works in the
+context of Theorem 2, by restricting F to FB . In this case,
+J(f ) ≤ O(B 2 ), so we get supf ∈FB |J˜N (f ) − J(f )| ≤
+q
+c2 (d, D1 , D3 , Σ)B 2(1+α) [ p log(c1N(α)N/δ) +ε2 ] instead of
+q
+2 N/δ)
+c3 (d, D1 , D3 )B 2 [ p log(B
++ ε2 ] in Theorem 2. The
+N
+major difference is in the exponent of B. When α goes
+to zero, B 2(1+α) decreases, but the term c1 (α) inside the
+logarithm increases. As can be seen from the definition of
+c1 (α), when α → 0, c1 (α) blows up. Overall, even though
+Theorem 2 provides a slightly tighter upper bound on the
+error for FB , Theorem 3 can be considered a stronger result
+as it holds for all functions in F.
+Remark 3. The effect of the input space dimension d on
+SAR’s statistical properties, as can be seen in all results, is
+quite mild, and only appears in constants. SAR’s sampling
+is a typical Monte Carlo integration, for which convergence
+rate is dimension-independent. The minor effect of d is due
+to using finite differences and the way we have defined Dk .
+Finally it is worth mentioning that in the manifold regularization literature, there are results similar to Theorem 2. In
+particular, they provide conditions that the error between
+the various variants of the graph Laplacian-based and the
+Laplace-Beltrami-based regularizers goes to zero. For example, Bousquet et al. (2004) proved the asymptotic convergence for a fixed function. This should be compared to
+our much stronger uniform convergence rate over a function class – albeit the regularizers are different. Belkin &
+Niyogi (2008) showed the asymptotic uniform convergence
+over a class of functions, but did not provide a convergence
+rate. Hein (2006) extended that result and provided a convergence rate over a subset of Hölder-continuous functions.
+
+Sample-based Approximate Regularization
+
+In contrast to Theorem 1, the results in those papers did not
+consider the effect of error in regularization to the estimator (e.g., classifier or regression estimator), though Hein
+(2006) mentioned that his result could be used to prove
+consistency for algorithms that use graph Laplacian-based
+regularizers. This would be similar to using Theorem 2
+to prove error bounds, which is a path that we did not
+take. In the different context of transductive learning (or
+semi-supervised learning on graphs), Belkin et al. (2004)
+provided a generalization error result for regularized algorithms on graphs, with a graph Laplacian-based regularizer
+being one possible choice, using tools from algorithmic stability. None of these papers provides a modulus of continuity result similar to Theorem 3.
+
+5. Experiments
+Our first tests involved least-squares regression with inputs
+x ∈ R and outputs y ∈ R. The data distribution was designed to emphasize SAR’s ability to regularize heterogenous basis functions. This contrasts with standard RKHS
+regularization, which uses more restricted collections. The
+joint distribution over (x, y) was set so four cycles of a sin
+wave occurred over the input domain, each with a wavelength 2.5 times longer than the previous one. The wave
+amplitude was scaled linearly from 1 to 2 over the input domain. The density of x was set so the expected number of
+observations seen for each cycle was the same. The training y values were corrupted by zero-mean Gaussian noise
+with standard deviation scaling linearly from 0.2 to 0.4 over
+the input domain. Performance was measured using uncorrupted y values. We call this distribution SynthSin1d.
+The smooth sinusoid underlying SynthSin1d seems
+amenable to RKHS-regularized RBF regression, but causes
+problems due to large changes in the length scale of useful correlations over the input domain. When restricted to
+fixed bandwidth RBFs, the RKHS approach will always underperform on some part of the function not suited to the
+chosen bandwidth, as shown by results in Figure 1a.
+Using SynthSin1d, we compared the performance of SAR2
+regularization with L2 regularization and RKHS regularization of Gaussian RBFs. SAR2 and L2 regularization
+were applied to four RBFs anchored at each training point,
+with bandwidths γ ∈ {2, 4, 8, 16}. RKHS regularization
+was applied independently at each bandwidth, using the
+same RBFs, i.e., four RKHS-regularized solutions were
+learned for each train/test set. We compared the performance of the three methods on training sizes ∈ [50...100].
+For each training size, 100 training sets were sampled from
+SynthSin1d (with output noise) and, for each set, the function learned with each regularizer was tested on 5000 points
+sampled from SynthSin1d (without output noise). Regularization weights for each method were set independently for
+
+each training size, to maximize measured performance.
+We measured performance as the percentage of variance in
+the true function recovered by the learned approximation:
+P
+(ŷi − yi )2
+,
+(11)
+% variance recovered = 1 − Pi
+2
+j (yj − ȳ)
+in which ŷi gives the value of the learned approximation
+at test point xi , yi gives the value of the true function at
+xi , and ȳ gives the mean of the true function. The value
+of (11) approaches 1 as the approximation approaches the
+true function (i.e., larger values are better).
+Figure 1a plots the mean performance of each regularization method for each considered training set size, with error
+bars indicating the upper and lower quartiles over the 100
+tests at each size. The performance of RKHS regularization at each bandwidth is plotted in gray and the maximum
+performance is in red. In these tests, SAR2 significantly
+outperformed both L2 regularization using the same basis
+functions and RKHS regularization using any of the fixedbandwidth subsets of the basis functions.
+Our second tests extended the form of SynthSin1d to inputs
+(x1 , x2 ) ∈ R2 and outputs y ∈ R. We call this distribution
+SynthSin2d. Importantly, the value of y depended most
+strongly on x1 , making x2 relatively uninformative. We
+performed 100 tests at each of the same training sizes as
+for SynthSin1d. SAR2 and L2 regularization were applied
+to collections of three Gaussian RBFs anchored at each
+training point, with bandwidths γ ∈ {0.5, 2, 8}. RKHS
+regularization was applied independently for each fixedbandwidth RBF subset. Regularization weights for each
+method were set at each training size, to maximize measured performance. We also measured the performance
+of SAR2 regularization with direction sampling biased as
+follows: select a direction (x1 , x2 ) uniformly, multiply its
+x2 by 10, and then rescale (x1 , x2 ) to the desired length.
+A SAR regularizer computed subject to this bias more
+severely penalizes change in the estimated function along
+the x2 axis, which was known to be less informative.
+Figure 1b shows that SAR2 significantly improves on the
+performance of strong RKHS regularization applied to a
+more restricted set of basis functions and simple L2 regularization applied to an equally flexible set of basis functions. Adding a “correct” bias during regularizer construction further improves the advantage of SAR2, particularly
+for small training sets. Figure 1c/d qualitatively compares
+the behavior of L2 and biased SAR2 regularization. Biased
+SAR2 “interpolates” noticeably better than L2.
+5.1. Natural Data
+We write “full RBF” for RBFs based on the values of all
+features of an observation, and we write “univariate RBF”
+
+Sample-based Approximate Regularization
+SynthSin1d: accuracy vs. training samples
+
+SynthSin2d: accuracy vs. training samples
+1.0
+
+0.9
+
+0.8
+Gauss (max)
+Gauss (each)
+SAR2
+L2
+0.7
+50
+
+55
+
+60
+
+65
+
+70 75 80 85
+Training samples
+
+(a)
+
+90
+
+95
+
+100
+
+% variance recovered
+
+% variance recovered
+
+1.0
+
+SynthSin2d: L2, 36 samples
+
+SynthSin2d: SAR2 ï IvP (biased), 36 samples
+
+0.9
+
+2
+
+2
+
+0
+
+0
+Gauss (max)
+SAR2
+SAR2 (biased)
+L2
+
+0.8
+
+50
+
+55
+
+60
+
+65
+
+70 75 80 85
+Training samples
+
+90
+
+(b)
+
+95
+
+4
+ï2
+
+2
+
+4
+ï2
+
+2
+
+0
+
+0
+
+2
+
+4
+
+100
+
+ï2
+6
+
+8
+
+0
+
+0
+2
+
+(c) SynthSin2d: L2
+
+ï2
+
+4
+
+ï4
+
+6
+
+8
+
+ï4
+
+(d) SynthSin2d: SAR2+bias
+
+Figure 1. Full descriptions of the tests underlying these plots are given in the main text. (a) shows the performance of SAR2 on
+SynthSin1d when learning with Gaussian RBFs with multiple bandwidths, w.r.t. the number of training samples. We also plot the
+performance of L2 regularization applied to the same RBFs and the performance of RKHS-regularized regressions for each fixedbandwidth subset of the RBFs. The best performance of RKHS regularization over the considered bandwidths is highlighted in red and
+per-bandwidth performances are plotted separately in gray. (b) is analogous to (a), but for tests based on SynthSin2d. (b) also plots the
+performance of SAR2 with biased directional sampling, which penalizes non-linearity in the learned function more along the axis which,
+for SynthSin2d, was uninformative. (c)/(d) compare the qualitative behavior of L2 and biased SAR2 on SynthSin2d.
+
+We performed tests with training sets of size 150-450. For
+each size, 100 rounds of randomized cross validation were
+performed, with non-training examples used for evaluating
+performance. When boosting trees, we set the maximum
+depth to 3 and performed 250 rounds of boosting with a
+shrinkage factor of 0.1, which maximized measured performance. For other methods, we set regularization weights
+separately for each training size to maximize measured performance. Kernel bandwidths were selected to maximize
+performance with 300 training samples.
+L2, SAR4, and Gauss all used full Gaussian RBFs centered on each training point with bandwidth γ = 0.05 fixed
+across all tests. B-spline used 4th-order B-spline RBFs
+centered on each training point with bandwidth γ = 0.2.
+P-spline applied 4th-order regularization to 2nd-order additive B-spline bases with 30 knots per dimension. In addition to full RBFs, L2 and SAR4 used a collection of univariate RBFs, with the RBFs on each axis centered on the
+empirical deciles of the corresponding features. The standard deviation of each univariate RBF was set to the max-
+
+300 Samples
+
+SAR4
+
+1
+
+0.85
+
+SAR4
+L2
+Gauss
+BoostïTrees
+BïSpline
+PïSpline
+
+0.80
+
+150
+
+0.9
+0.8
+0.7
+0.7
+
+200
+
+250
+300
+350
+Training samples
+
+(a)
+
+400
+
+450
+
+0.8 0.9
+Gauss
+
+1
+
+0.8 0.9
+Trees
+
+1
+
+1
+SAR4
+
+We tested SAR with the “Boston housing” dataset from
+UCI/StatLib, which comprises 506 observations x ∈ R13
+describing features of neighborhoods in the Boston area
+(circa 1978), with the prediction target being the median
+value of homes in each neighborhood. We preprocessed
+the observations by setting features to zero mean and unit
+variance, and setting the targets to zero mean. We compared six methods: L2, SAR4, Gaussian RBFs, 4th-order
+B-spline RBFs, additive P-splines, and boosted Trees. We
+measured performance with respect to (11).
+
+Housing: accuracy vs. training samples
+0.90
+
+% variance recovered
+
+for RBFs based on the value of a single feature of an observation. RBFs were Gaussian and RKHS regularization
+was applied during estimation, unless noted otherwise.
+
+0.9
+0.8
+0.7
+0.7
+
+(b)
+
+Figure 2. (a) compares performance on the “Boston housing”
+data. Error bars give 95% confidence intervals. (b) shows perround outcomes of each train/test round at training set size 300. y
+axes give accuracy of SAR4 and x axes give accuracy of RKHSregularized Gaussian RBFs or boosted trees.
+
+imum of the distances to its upper and lower “neighbors”.
+The single binary feature in this dataset was represented by
+just two univariate RBFs, centered on its min/max values.
+Univariate RBF structure was not optimized.
+SAR4 estimated approximate regularizers for first through
+fourth-order derivatives and combined the resulting matrices naively, by an unweighted sum. SAR4 used a compound point sampler which drew 75% of its samples from
+the fuzzy point sampler in Algorithm 2 and 25% of its samples from the blurry box sampler in Algorithm 3. Both
+samplers were constructed strictly from the training set
+during each round of CV. An unbiased direction sampler
+with stochastic lengths was used. The length distributions
+L in point/direction sampling were set to the non-negative
+half of a normal distribution, with standard deviation set to
+0.5/0.2 times the median nearest-neighbor distance in the
+
+Sample-based Approximate Regularization
+Housing function convergence
+
+Housing matrix convergence
+
+0
+
+10
+
+ï2
+
+Function divergence
+
+Matrix divergence
+
+10
+
+ï1
+
+10
+
+ï3
+
+10
+
+ï4
+
+10
+
+ï5
+
+6. Discussion
+
+10
+ï2
+
+10
+
+2
+
+10
+
+4
+
+2
+
+10
+Approximation samples
+
+10
+
+(a)
+
+4
+
+10
+Approximation samples
+
+(b)
+
+USPS matrix convergence
+
+0
+
+USPS function convergence
+
+10
+
+1
+
+Function divergence
+
+Matrix divergence
+
+10
+
+ï1
+
+10
+
+ï2
+
+10
+
+0
+
+10
+
+ï1
+
+10
+
+2
+
+10
+
+4
+
+10
+Approximation samples
+
+(c)
+
+2
+
+10
+
+4
+
+10
+Approximation samples
+
+(d)
+
+Figure 3. SAR4 convergence on housing and USPS data. Left column: convergence of the regularizer matrix. Right column: convergence of the learned function. Parameters for (a)/(b) were as
+before, using 50 training sets of size 300. USPS results in (c)/(d)
+used 50 random training sets of size 500. y axes in (a)/(c) give
+supw:||w||2 ≤1 |J˜x (fw ) − J˜∞ (fw )|, which tracks convergence of
+the SAR-induced penalty. The lighter line plots empirical mean
+at √
+each sample size and the darker line plots the theoretical rate
+1/ N . y axes in (b)/(d) measure difference between the function
+induced by a regularizer based on x samples and a converged one.
+
+training set. A lower bound of 0.05 was set on the effective
+step length .4 The sampler parameters were not optimized.
+Figure 2 presents these tests. SAR4 consistently outperformed the other methods, as seen in 2a. Figure 2b examines relative performance more closely, by plotting results
+on individual train/test splits for training sets of size 300.
+SAR4 outperformed boosted trees and Gauss-RBF on most
+splits. Figure 3 examines SAR4’s convergence in this setting.
+Our final tests used the standard USPS/MNIST digit recognition datasets. We tested on 100 randomly sampled
+training sets of size 500/2500 and tested on points not
+seen in training. We compared standard L2, RKHS, and
+SAR4 regularization using sampler parameters matching
+those used for tests on the housing data. Each method
+used full Gaussian RBFs at each training point (as for
+an SVM), with bandwidth γ = 0.015/0.025, which
+were selected to maximize performance of RKHS regularization. We optimized the 1-vs-all squared hinge
+loss. Regularization weights were set to maximize measured performance. For L2/RKHS/SAR4 the mean and
+standard deviation of classification accuracy in these
+tests was 92.7(0.5)/94.0(0.4)/94.1(0.4) for USPS and
+94.5(0.02)/95.2(0.01)/95.4(0.02) for MNIST. Both RKHS
+and SAR4 significantly outperformed L2 on USPS. All
+4
+
+pairwise comparisons were significant on MNIST. Figure 3
+illustrates convergence of SAR on the USPS data. Note that
+MNIST tests used φ(x) ∈ R2500 for x ∈ R784 .
+
+This was always much less than the st. dev. of L.
+
+SAR provides a general approach to controlling complexity in a broad class of functions, i.e., those representable
+by linear combinations of a fixed set of basis functions, by
+minimizing the nth -order derivative. For n = 1, we provided bounds on the error in the regularizer produced by
+SAR and showed that the approximation process is reasonably sample-efficient. The main benefit of SAR is its flexibility, as can be seen from the empirical examination.
+Some other work in the manifold learning literature uses
+the data distribution to define data-dependent regularizers.
+For instance, Bousquet et al. (2004) defines a density-based
+regularizer. But, their practical implementation only considers a first-order derivative-based regularizer using Gaussian basis functions. SAR provides a more general framework to regularize higher-order derivatives, without requiring analytically tractable integrals.
+When the data belongs to a low-dimensional manifold, a
+common choice is to use the norm of the Laplace-Beltrami
+operator on the manifold. However, this norm cannot be
+computed analytically in most cases, so sample-based approximations are used, e.g., the graph Laplacian operator Zhu et al. (2003); Belkin et al. (2006).5 SAR is more
+general and is not designed with the goal of approximating
+the Laplace-Beltrami-based regularizer.
+SAR raises a number of other interesting questions. On the
+theoretical side, it would be interesting to analyze SAR for
+higher-order derivatives, establish the influence of structure
+in the point measure ν and direction measure sx , or make
+precise the relation between SAR and Laplacian-based regularization. On the practical side, developing heuristic
+approaches to reduce the effective sample complexity, as
+well as point and direction samplers that better leverage
+prior knowledge is desirable. Reducing the per-sample cost
+of SAR by leveraging techniques for reduced-rank kernel
+approximation in SVMs and implementing SAR so as to
+take advantage of sparsity in φ(x) both seem worthwhile,
+as they could significantly reduce the cost of the outerproducts in line 6 of Algorithm 1.
+
+Acknowledgments
+This work was supported by NSERC.
+5
+As discussed by Nadler et al. (2009), the use of the first-order
+derivative is not appropriate for high-dimensional input spaces, so
+one might use higher-order derivatives instead (Kim et al., 2009;
+Zhou & Belkin, 2011).
+
+Sample-based Approximate Regularization
+
+References
+Belkin, Mikhail and Niyogi, Partha. Towards a theoretical
+foundation for laplacian-based manifold methods. 74(8):
+1289–1308, 2008. 5
+Belkin, Mikhail, Matveeva, Irina, and Niyogi, Partha.
+Regularization and semi-supervised learning on large
+graphs. In Shawe-Taylor, John and Singer, Yoram (eds.),
+COLT, volume 3120 of Lecture Notes in Computer Science, pp. 624–638. Springer, 2004. 6
+Belkin, Mikhail, Niyogi, Partha, and Sindhwani, Vikas.
+Manifold regularization: A geometric framework for
+learning from labeled and unlabeled examples. Journal
+of Machine Learning Research (JMLR), 7:2399–2434,
+2006. 8
+Bousquet, Olivier, Chapelle, Olivier, and Hein, Matthias.
+Measure based regularization. In Thrun, Sebastian, Saul,
+Lawrence, and Schölkopf, Bernhard (eds.), Advances
+in Neural Information Processing Systems (NIPS - 16).
+MIT Press, 2004. 5, 8
+Davis, Steven B. and Mermelstein, Paul. Comparison of
+parametric representations for monosyllabic word recognition in continuously spoken sentences. IEEE Transactions on Acoustics, Speech, and Signal Processing, 28
+(4), 1980. 1
+Eilers, Paul H. C. and Marx, Brian D. Flexible smoothing
+with B-splines and penalties. Statistical Science, 11(2),
+1996. 1
+Györfi, László, Kohler, Michael, Krzyżak, Adam, and
+Walk, Harro. A Distribution-Free Theory of Nonparametric Regression. Springer Verlag, New York, 2002.
+4
+
+Nadler, Boaz, Srebro, Nathan, and Zhou, Xueyuan. Semisupervised learning with the graph laplacian: The limit
+of infinite unlabelled data. In Bengio, Y., Schuurmans,
+D., Lafferty, J., Williams, C. K. I., and Culotta, A.
+(eds.), Advances in Neural Information Processing Systems (NIPS - 22), pp. 1330–1338, 2009. 8
+Pearce, N. D. and Wand, M. P. Penalized splines and reproducing kernel methods. The American Statistician,
+60(3), 2006. 1
+Rifai, Salah, Mesnil, Gregoire, Vincent, Pascal, Muller,
+Xavier, Bengio, Yoshua, Dauphin, Yann, and Glorot,
+Xavier. Higher-order contractive auto-encoder. In
+European Conference on Machine Learning (ECML)
+and Principles and Practice of Knowledge Discovery in
+Databases (PKDD), 2011. 2
+Schölkopf, Bernhard and Smola, Alexander J. Learning
+with Kernels. MIT Press, Cambridge, MA, 2002. 1
+Sridharan, Karthik, Srebro, Nathan, and Shalev-Shwartz,
+Shie. Fast rates for regularized objectives. In Koller,
+D., Schuurmans, D., Bengio, Y., and Bottou, L. (eds.),
+Advances in Neural Information Processing Systems
+(NIPS - 21), 2009. 4
+Steinwart, Ingo and Christmann, Andreas. Support Vector
+Machines. Springer, 2008. 4
+Wahba, Grace. Spline Models for Observational Data.
+SIAM [Society for Industrial and Applied Mathematics],
+1990. 1, 2
+Wood, Simon N. Thin plate regression splines. Journal of
+the Royal Statistical Society, Series B, 65, 2003. 1
+Yuille, Alan L. and Grzywacz, Norberto M. The motion
+coherence theory. In Proceedings of the International
+Conference on Computer Vision, 1988. 1
+
+Hein, Matthias. Uniform convergence of adaptive graphbased regularization. In Proceedings of the 19th annual conference on Learning Theory (COLT), pp. 50–64,
+Berlin, Heidelberg, 2006. Springer-Verlag. 5, 6
+
+Zhou, Xueyuan and Belkin, Mikhail. Semi-supervised
+learning by higher order regularization. In International
+Conference on Artificial Intelligence and Statistics, pp.
+892–900, 2011. 8
+
+Kim, Kwang In, Steinke, Florian, and Hein, Matthias.
+Semi-supervised regression using Hessian energy with
+an application to semi-supervised dimensionality reduction. In Bengio, Y., Schuurmans, D., Lafferty, J.,
+Williams, C. K. I., and Culotta, A. (eds.), Advances in
+Neural Information Processing Systems (NIPS - 22), pp.
+979–987. 2009. 2, 8
+
+Zhu, Xiaojin, Ghahramani, Zoubin, and Lafferty, John.
+Semi-supervised learning using Gaussian fields and harmonic functions. In Proceedings of the 12th International Conference on Machine LearningProceedings of
+the 27th International Conference on Machine Learning
+(ICML), volume 3, pp. 912–919, 2003. 8
+
+Lowe, David G. Object recognition from local scaleinvariant features. In Proceedings of the seventh IEEE
+International Conference on Computer Vision (ICCV),
+1999. 1
+
+

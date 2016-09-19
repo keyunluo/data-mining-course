@@ -1,0 +1,1615 @@
+Nonmyopic ✏-Bayes-Optimal Active Learning of Gaussian Processes
+Trong Nghia Hoang†
+NGHIAHT @ COMP. NUS . EDU . SG
+Kian Hsiang Low†
+LOWKH @ COMP. NUS . EDU . SG
+Patrick Jaillet§
+JAILLET @ MIT. EDU
+Mohan Kankanhalli†
+MOHAN @ COMP. NUS . EDU . SG
+†
+Department of Computer Science, National University of Singapore, Republic of Singapore
+§
+Department of Electrical Engineering and Computer Science, Massachusetts Institute of Technology, USA
+
+Abstract
+
+A fundamental issue in active learning of
+Gaussian processes is that of the explorationexploitation trade-off. This paper presents a
+novel nonmyopic ✏-Bayes-optimal active learning (✏-BAL) approach that jointly and naturally
+optimizes the trade-off. In contrast, existing
+works have primarily developed myopic/greedy
+algorithms or performed exploration and exploitation separately. To perform active learning
+in real time, we then propose an anytime algorithm based on ✏-BAL with performance guarantee and empirically demonstrate using synthetic
+and real-world datasets that, with limited budget,
+it outperforms the state-of-the-art algorithms.
+
+1. Introduction
+Active learning has become an increasingly important focal
+theme in many environmental sensing and monitoring applications (e.g., precision agriculture, mineral prospecting
+(Low et al., 2007), monitoring of ocean and freshwater phenomena like harmful algal blooms (Dolan et al., 2009; Podnar et al., 2010), forest ecosystems, or pollution) where a
+high-resolution in situ sampling of the spatial phenomenon
+of interest is impractical due to prohibitively costly sampling budget requirements (e.g., number of deployed sensors, energy consumption, mission time): For such applications, it is thus desirable to select and gather the most
+informative observations/data for modeling and predicting
+the spatially varying phenomenon subject to some budget
+constraints, which is the goal of active learning and also
+known as the active sensing problem.
+To elaborate, solving the active sensing problem amounts
+to deriving an optimal sequential policy that plans/decides
+the most informative locations to be observed for minimizProceedings of the 31 st International Conference on Machine
+Learning, Beijing, China, 2014. JMLR: W&CP volume 32. Copyright 2014 by the author(s).
+
+ing the predictive uncertainty of the unobserved areas of
+a phenomenon given a sampling budget. To achieve this,
+many existing active sensing algorithms (Cao et al., 2013;
+Chen et al., 2012; 2013b; Krause et al., 2008; Low et al.,
+2008; 2009; 2011; 2012; Singh et al., 2009) have modeled
+the phenomenon as a Gaussian process (GP), which allows
+its spatial correlation structure to be formally characterized and its predictive uncertainty to be formally quantified
+(e.g., based on mean-squared error, entropy, or mutual information criterion). However, they have assumed the spatial correlation structure (specifically, the parameters defining it) to be known, which is often violated in real-world
+applications, or estimated crudely using sparse prior data.
+So, though they aim to select sampling locations that are
+optimal with respect to the assumed or estimated parameters, these locations tend to be sub-optimal with respect to
+the true parameters, thus degrading the predictive performance of the learned GP model.
+In practice, the spatial correlation structure of a phenomenon is usually not known. Then, the predictive performance of the GP modeling the phenomenon depends on
+how informative the gathered observations/data are for both
+parameter estimation as well as spatial prediction given
+the true parameters. Interestingly, as revealed in previous
+geostatistical studies (Martin, 2001; Müller, 2007), policies that are efficient for parameter estimation are not necessarily efficient for spatial prediction with respect to the
+true model. Thus, the active sensing problem involves a
+potential trade-off between sampling the most informative
+locations for spatial prediction given the current, possibly
+incomplete knowledge of the model parameters (i.e., exploitation) vs. observing locations that gain more information about the parameters (i.e., exploration):
+How then does an active sensing algorithm trade off between these two possibly conflicting sampling objectives?
+To tackle this question, one principled approach is to frame
+active sensing as a sequential decision problem that jointly
+and naturally optimizes the above exploration-exploitation
+
+Nonmyopic ✏-Bayes-Optimal Active Learning of Gaussian Processes
+
+trade-off while maintaining a Bayesian belief over the
+model parameters. This intuitively means a policy that
+biases towards observing informative locations for spatial
+prediction given the current model prior may be penalized
+if it entails a highly dispersed posterior over the model parameters. So, the resulting induced policy is guaranteed to
+be optimal in the expected active sensing performance. Unfortunately, such a nonmyopic Bayes-optimal policy cannot
+be derived exactly due to an uncountable set of candidate
+observations and unknown model parameters (Solomon &
+Zacks, 1970). As a result, most existing works (Diggle,
+2006; Houlsby et al., 2012; Park & Pillow, 2012; Zimmerman, 2006; Ouyang et al., 2014) have circumvented the
+trade-off by resorting to the use of myopic/greedy (hence,
+sub-optimal) policies.
+To the best of our knowledge, the only notable nonmyopic active sensing algorithm for GPs (Krause & Guestrin,
+2007) advocates tackling exploration and exploitation separately, instead of jointly and naturally optimizing their
+trade-off, to sidestep the difficulty of solving the Bayesian
+sequential decision problem. Specifically, it performs a
+probably approximately correct (PAC)-style exploration
+until it can verify that the performance loss of greedy exploitation lies within a user-specified threshold. But, such
+an algorithm is sub-optimal in the presence of budget constraints due to the following limitations: (a) It is unclear
+how an optimal threshold for exploration can be determined
+given a sampling budget, and (b) even if such a threshold
+is available, the PAC-style exploration is typically designed
+to satisfy a worst-case sample complexity rather than to be
+optimal in the expected active sensing performance, thus
+resulting in an overly-aggressive exploration (Section 4.1).
+This paper presents an efficient decision-theoretic planning
+approach to nonmyopic active sensing/learning that can
+still preserve and exploit the principled Bayesian sequential
+decision problem framework for jointly and naturally optimizing the exploration-exploitation trade-off (Section 3.1)
+and consequently does not incur the limitations of the algorithm of Krause & Guestrin (2007). In particular, although the exact Bayes-optimal policy to the active sensing problem cannot be derived (Solomon & Zacks, 1970),
+we show that it is in fact possible to solve for a nonmyopic ✏-Bayes-optimal active learning (✏-BAL) policy (Sections 3.2 and 3.3) given a user-defined bound ✏, which is
+the main contribution of our work here. In other words, our
+proposed ✏-BAL policy can approximate the optimal expected active sensing performance arbitrarily closely (i.e.,
+within an arbitrary loss bound ✏). In contrast, the algorithm
+of Krause & Guestrin (2007) can only yield a sub-optimal
+performance bound1 . To meet the real-time requirement
+1
+Its induced policy is guaranteed not to achieve worse than the
+optimal performance by more than a factor of 1/e.
+
+in time-critical applications, we then propose an asymptotically ✏-optimal, branch-and-bound anytime algorithm
+based on ✏-BAL with performance guarantee (Section 3.4).
+We empirically demonstrate using both synthetic and realworld datasets that, with limited budget, our proposed approach outperforms state-of-the-art algorithms (Section 4).
+
+2. Modeling Spatial Phenomena with
+Gaussian Processes (GPs)
+The GP can be used to model a spatial phenomenon of interest as follows: The phenomenon is defined to vary as
+a realization of a GP. Let X denote a set of sampling locations representing the domain of the phenomenon such
+that each location x 2 X is associated with a realized (random) measurement zx (Zx ) if x is observed/sampled (unobserved). Let ZX , {Zx }x2X denote a GP, that is, every
+finite subset of ZX has a multivariate Gaussian distribution
+(Chen et al., 2013a; Rasmussen & Williams, 2006). The
+GP is fully specified by its prior mean µx , E[Zx ] and
+covariance xx0 | , cov[Zx , Zx0 | ] for all x, x0 2 X , the
+latter of which characterizes the spatial correlation structure of the phenomenon and can be defined using a covariance function parameterized by . A common choice is the
+squared exponential covariance function:
+◆2 !
+P ✓
+X
+0 ]i
+1
+[s
+]
+[s
+x
+i
+x
+2
++( n )2 xx0
+xx0 | , ( s ) exp
+2 i=1
+`i
+where [sx ]i ([sx0 ]i ) is the i-th component of the P dimensional feature vector sx (sx0 ), the set of realized parameters ,
+2 ⇤ are, respectively,
+n , s , `1 , . . . , ` P
+the square root of noise variance, square root of signal variance, and length-scales, and xx0 is a Kronecker delta that
+is 1 if x = x0 and 0 otherwise.
+Supposing is known and a set zD of realized measurements is available for some set D ⇢ X of observed locations, the GP can exploit these observations to predict
+the measurement for any unobserved location x 2 X \ D
+as well as provide its corresponding predictive uncertainty
+using the Gaussian predictive distribution p(zx |zD , ) ⇠
+N (µx|D, , xx|D, ) with the following posterior mean and
+variance, respectively:
+1
+µx|D, , µx + ⌃xD| ⌃DD|
+(zD
+xx|D,
+
+,
+
+xx|
+
+µD )
+
+1
+⌃xD| ⌃DD|
+⌃Dx|
+
+(1)
+(2)
+
+where, with a slight abuse of notation, zD is to be perceived
+as a column vector in (1), µD is a column vector with mean
+components µx0 for all x0 2 D, ⌃xD| is a row vector with
+covariance components xx0 | for all x0 2 D, ⌃Dx| is the
+transpose of ⌃xD| , and ⌃DD| is a covariance matrix with
+components ux0 | for all u, x0 2 D. When the spatial
+
+Nonmyopic ✏-Bayes-Optimal Active Learning of Gaussian Processes
+
+correlation structure (i.e., ) is not known, a probabilistic
+belief bD ( ) , p( |zD ) can be maintained/tracked over all
+possible and updated using Bayes’ rule to the posterior
+belief bD[{x} ( ) given a newly available measurement zx :
+bD[{x} ( ) / p(zx |zD , ) bD ( ) .
+
+(3)
+
+Using belief bD , the predictive distribution p(zx |zD ) can be
+obtained by marginalizing out :
+X
+p(zx |zD ) =
+p(zx |zD , ) bD ( ) .
+(4)
+2⇤
+
+3. Nonmyopic ✏-Bayes-Optimal Active
+Learning (✏-BAL)
+3.1. Problem Formulation
+
+To cast active sensing as a Bayesian sequential decision problem, let us first define a sequential active sensing/learning policy ⇡ given a budget of N sampling locations: Specifically, the policy ⇡ , {⇡n }N
+n=1 is structured
+to sequentially decide the next location ⇡n (zD ) 2 X \ D
+to be observed at each stage n based on the current observations zD over a finite planning horizon of N stages.
+Recall from Section 1 that the active sensing problem involves planning/deciding the most informative locations to
+be observed for minimizing the predictive uncertainty of
+the unobserved areas of a phenomenon. To achieve this, we
+use the entropy criterion (Cover & Thomas, 1991) to measure the informativeness and predictive uncertainty. Then,
+the value under a policy ⇡ is defined to be the joint entropy
+of its selected observations when starting with some prior
+observations zD0 and following ⇡ thereafter:
+Z
+⇡
+V1 (zD0 ) , H[Z⇡ |zD0 ] ,
+p(z⇡ |zD0 ) log p(z⇡ |zD0 ) dz⇡
+(5)
+where Z⇡ (z⇡ ) is the set of random (realized) measurements taken by policy ⇡ and p(z⇡ |zD0 ) is defined in a similar manner to (4).
+
+To solve the active sensing problem, the notion of Bayesoptimality2 is exploited for selecting observations of largest
+possible joint entropy with respect to all possible induced
+sequences of future beliefs (starting from initial prior belief bD0 ) over candidate sets of model parameters , as
+detailed next. Formally, this entails choosing a sequential policy ⇡ to maximize V1⇡(zD0 ) (5), which we call the
+Bayes-optimal active learning (BAL) policy ⇡ ⇤ . That is,
+⇤
+V1⇤(zD0 ) , V1⇡ (zD0 ) = max⇡ V1⇡(zD0 ). When ⇡ ⇤ is
+plugged into (5), the following N -stage Bellman equations
+result from the chain rule for entropy:
+2
+
+Bayes-optimality is previously studied in reinforcement
+learning whose developed theories (Poupart et al., 2006; Hoang
+& Low, 2013) cannot be applied here because their assumptions
+of discrete-valued observations and Markov property do not hold.
+
+⇥
+⇤
+⇥ ⇤
+⇤
+Vn⇤ (zD ) = H Z⇡n⇤ (zD ) |zD +E Vn+1
+zD [ {Z⇡n⇤ (zD ) } |zD
+= max Q⇤n (zD , x)
+x2X \D
+
+⇥ ⇤
+⇤
+H[Zx |zD ] + E Vn+1
+(zD [ {Zx })|zD
+Z
+H[Zx |zD ] ,
+p(zx |zD ) log p(zx |zD ) dzx
+
+Q⇤n (zD , x) ,
+
+(6)
+
+for stage n = 1, . . . , N where p(zx |zD ) is defined in (4)
+and the expectation terms are omitted from the right-hand
+side (RHS) expressions of VN⇤ and Q⇤N at stage N . At each
+stage, the belief bD ( ) is needed to compute Q⇤n (zD , x)
+in (6) and can be uniquely determined from initial prior
+belief bD0 and observations zD\D0 using (3). To understand how the BAL policy ⇡ ⇤ jointly and naturally optimizes the exploration-exploitation trade-off, its selected location ⇡n⇤ (zD ) = arg maxx2X \D Q⇤n (z⇥D , x) at each
+⇤ stage
+n affects both the immediate payoff H Z⇡n⇤ (zD ) |zD given
+current belief bD (i.e., exploitation) as well as the posterior
+belief bD[{⇡n⇤ (zD )} , the latter of which influences expected
+⇤
+future payoff E[Vn+1
+(zD [ {Z⇡n⇤ (zD ) })|zD ] and builds in
+the information gathering option (i.e., exploration).
+Interestingly, the work of Low et al. (2009) has revealed
+that the above recursive formulation (6) can be perceived as
+the sequential variant of the well-known maximum entropy
+sampling problem (Shewry & Wynn, 1987) and established
+an equivalence result that the maximum-entropy observations selected by ⇡ ⇤ achieve a dual objective of minimizing
+the posterior joint entropy (i.e., predictive uncertainty) remaining in the unobserved locations of the phenomenon.
+Unfortunately, the BAL policy ⇡ ⇤ cannot be derived exactly because the stage-wise entropy and expectation terms
+in (6) cannot be evaluated in closed form due to an uncountable set of candidate observations and unknown model parameters (Section 1). To overcome this difficulty, we
+show in the next subsection how it is possible to solve for
+an ✏-BAL policy ⇡✏ , that is, the joint entropy of its selected
+observations closely approximates that of ⇡ ⇤ within an arbitrary loss bound ✏ > 0.
+3.2. ✏-BAL Policy
+The key idea underlying the design and construction of our
+proposed nonmyopic ✏-BAL policy ⇡ ✏ is to approximate
+the entropy and expectation terms in (6) at every stage using a form of truncated sampling to be described next:
+Definition 1 (⌧ -Truncated Observation) Define random
+measurement Zbx by truncating Zx at ⌧b and ⌧b as follows:
+8
+< ⌧b if Zx  ⌧b,
+Zx if ⌧b < Zx < ⌧b,
+Zbx ,
+:
+⌧b if Zx ⌧b.
+Then, Zbx has a distribution of mixed type with its continuous component defined as f (Zbx = zx |zD ) , p(Zx =
+zx |zD ) for ⌧b < zx < ⌧b and its discrete component deR1
+fined as f (Zbx = ⌧b|zD ) , P (Zx
+⌧b|zD ) = ⌧b p(Zx =
+
+Nonmyopic ✏-Bayes-Optimal Active Learning of Gaussian Processes
+
+zx |zD )dzx and f (Zbx = ⌧b|zD ) , P (Zx 
+R ⌧b
+p(Zx = zx |zD )dzx .
+1
+Let µ(D, ⇤) , maxx2X \D,
+minx2X \D, 2⇤ µx|D, , and
+⌧b , max µ(D, ⇤)
+
+2⇤
+
+⌧b|zD ) =
+
+µx|D, , µ(D, ⇤)
+
+⌧ , |µ(D, ⇤) + ⌧ |
+
+,
+
+(7)
+
+for some 0  ⌧  ⌧b. Then, a realized measurement of Zbx
+is said to be a ⌧ -truncated observation for location x.
+
+Specifically, given that a set zD of realized measurements is
+available, a finite set of S ⌧ -truncated observations {zxi }Si=1
+can be generated for every candidate location x 2 X \ D
+at each stage n by identically and independently sampling
+from p(zx |zD ) (4) and then truncating each of them according to zxi
+zxi min |zxi |, ⌧b /|zxi |. These generated ⌧ truncated observations can be exploited for approximating
+Vn⇤ (6) through the following Bellman equations:
+Vn✏ (zD ) , max Q✏n (zD , x)
+x2X \D
+S
+X
+
+1
+Q✏n (zD , x) ,
+S
+
+i=1
+
+in (6), and (b) computing Q✏n does not involve utilizing the
+⇤
+✏
+values of Vn+1
+but that of its approximation Vn+1
+instead.
+To facilitate capturing the error due to finite truncated sampling described in (a), the following intermediate function
+is introduced:
+S
+1X
+⇤
+⇤
+Wn (zD , x) ,
+log p zxi |zD + Vn+1
+zD [ {zxi }
+S i=1
+(9)
+for stage n = 1, . . . , N such that there is no VN⇤ +1 term on
+the RHS expression of WN⇤ at stage N . The first lemma below reveals that if the error |Q⇤n (zD , x) Wn⇤ (zD , x)| due
+to finite truncated sampling can be bounded for all tuples
+(n, zD , x) generated at stage n = n0 , . . . , N by (8) to compute Vn✏0 for 1  n0  N , then Q✏n0 (8) can approximate
+Q⇤n0 (6) arbitrarily closely:
+Lemma 1 Suppose that a set zD0 of observations, a budget
+of N n0 +1 sampling locations for 1  n0  N , S 2 Z+ ,
+and > 0 are given. If
+|Q⇤n (zD , x)
+
+(8)
+
+✏
+log p zxi |zD + Vn+1
+zD [ zxi
+
+for stage n = 1, . . . , N such that there is no VN✏ +1
+term on the RHS expression of Q✏N at stage N . Like
+the BAL policy ⇡ ⇤ (Section 3.1), the location ⇡n✏ (zD ) =
+arg maxx2X \D Q✏n (zD , x) selected by our ✏-BAL policy
+⇡ ✏ at each stage n also jointly and naturally optimizes the
+trade-off betweenP
+exploitation (i.e., by maximizing immeS
+diate payoff S 1 i=1 log p(z⇡i ✏ (zD ) |zD ) given the curn
+rent belief bD ) vs. exploration (i.e., by improving posterior belief bD[{⇡n✏ (zD )} to maximize average future payoff
+PS
+✏
+S 1 i=1 Vn+1
+(zD [ {z⇡i ✏ (zD ) })). Unlike the determinisn
+tic BAL policy ⇡ ⇤ , our ✏-BAL policy ⇡ ✏ is stochastic due
+to its use of the above truncated sampling procedure.
+3.3. Theoretical Analysis
+The main difficulty in analyzing the active sensing performance of our stochastic ✏-BAL policy ⇡ ✏ (i.e., relative
+to that of BAL policy ⇡ ⇤ ) lies in determining how its ✏Bayes optimality can be guaranteed by choosing appropriate values of the truncated sampling parameters S and ⌧
+(Section 3.2). To achieve this, we have to formally understand how S and ⌧ can be specified and varied in terms of
+the user-defined loss bound ✏, budget of N sampling locations, domain size |X | of the phenomenon, and properties/parameters characterizing the spatial correlation structure of the phenomenon (Section 2), as detailed below.
+The first step is to show that Q✏n (8) is in fact a good approximation of Q⇤n (6) for some chosen values of S and ⌧ . There
+are two sources of error arising in such an approximation:
+(a) In the truncated sampling procedure (Section 3.2), only
+a finite set of ⌧ -truncated observations is generated for approximating the stage-wise entropy and expectation terms
+
+Wn⇤ (zD , x)| 
+
+(10)
+
+for all tuples (n, zD , x) generated at stage n = n0 , . . . , N
+by (8) to compute Vn✏0 (zD0 ), then, for all x0 2 X \ D0 ,
+|Q⇤n0 (zD0 , x0 )
+
+Q✏n0 (zD0 , x0 )|  (N
+
+n0 + 1) . (11)
+
+Its proof is given in Appendix A.1. The next two lemmas
+show that, with high probability, the error |Q⇤n (zD , x)
+Wn⇤ (zD , x)| due to finite truncated sampling can indeed be
+bounded from above by (10) for all tuples (n, zD , x) generated at stage n = n0 , . . . , N by (8) to compute Vn✏0 for
+1  n0  N :
+
+Lemma 2 Suppose that a set zD0 of observations, a budget
+of N n0 +1 sampling locations for 1  n0  N , S 2 Z+ ,
+and > 0 are given. For all tuples (n, zD , x) generated at
+stage n = n0 , . . . , N by (8) to compute Vn✏0 (zD0 ),
+◆
+✓
+⇣
+⌘
+2S 2
+P |Q⇤n (zD , x) Wn⇤ (zD , x)| 
+1 2 exp
+T2
+✓ 2 2N 2
+◆
+N  ⌧
+o
+where T , O
++N
+log
++log
+|⇤|
+by setting
+2
+n
+n
+0 s
+1
+✓ 2 ✓ 2 2N
+◆◆
+2
+N
+
++
+o
+o
+⌧ = O@ o log o
++N log
++log |⇤| A
+2
+n
+
+n
+
+with ,
+
+2
+n,
+
+and
+
+,1+2
+2
+n
+
+, min (
+2⇤
+
+2
+o
+
+defined as follows:
+max
+
+x0 ,u2X \D:x0 6=u, 2⇤,D
+n)
+
+2
+
+, and
+
+2
+o
+
+x0 u|D,
+
+, max (
+2⇤
+
+s)
+
+2
+
+/
++(
+
+uu|D,
+n)
+
+2
+
+.
+
+, (12)
+(13)
+
+Refer to Appendix A.2 for its proof.
+Remark 1. Deriving such a probabilistic bound in Lemma 2
+typically involves the use of concentration inequalities for
+the sum of independent bounded random variables like the
+Hoeffding’s, Bennett’s, or Bernstein’s inequalities. However, since the originally Gaussian distributed observations
+
+Nonmyopic ✏-Bayes-Optimal Active Learning of Gaussian Processes
+
+are unbounded, sampling from p(zx |zD ) (4) without truncation will generate unbounded versions of {zxi }Si=1 and
+consequently make each summation term log p(zxi |zD )+
+⇤
+Vn+1
+(zD [ {zxi }) on the RHS expression of Wn⇤ (9) unbounded, hence invalidating the use of these concentration
+inequalities. To resolve this complication, our trick is to
+exploit the truncated sampling procedure (Section 3.2) to
+generate bounded ⌧ -truncated observations (Definition 1)
+(i.e., |zxi |  ⌧b for i = 1, . . . , S), thus resulting in each
+⇤
+summation term log p(zxi |zD ) + Vn+1
+(zD [ {zxi }) being
+bounded (Appendix A.2). This enables our use of Hoeffding’s inequality to derive the probabilistic bound.
+Remark 2. It can be observed from Lemma 2 that the
+amount of truncation has to be reduced (i.e., higher chosen value of ⌧ ) when (a) a tighter bound on the error
+|Q⇤n (zD , x) Wn⇤ (zD , x)| due to finite truncated sampling
+is desired, (b) a greater budget of N sampling locations
+is available, (c) a larger space ⇤ of candidate model parameters is preferred, (d) the spatial phenomenon varies
+with more intensity and less noise (i.e., assuming all candidate signal and noise variance parameters, respectively,
+( s )2 and ( n )2 are specified close to the true large signal and small noise variances), and (e) its spatial correlation structure yields a bigger . To elaborate on (e),
+note that Lemma 2 still holds for any value of  larger
+than that set in (12): Since | x0 u|D, |2  x0 x0 |D, uu|D,
+for all x0 6= u 2 X \ D due to the symmetric positivedefiniteness of ⌃(X \D)(X \D)|D, ,  can be set to 1 +
+p
+2 maxx0 ,u2X \D, 2⇤,D
+Then, supx0 x0 |D, / uu|D, .
+posing all candidate length-scale parameters are specified
+close to the true length-scales, a phenomenon with extreme
+length-scales tending to 0 (i.e., with white-noise process
+measurements) or 1 (i.e., with constant measurements)
+will produce highly similar x0 x0 |D, for all x0 2 X \ D,
+thus resulting in smaller  and hence smaller ⌧ .
+Remark 3. Alternatively, it can be proven that Lemma 2
+and the subsequent results hold by setting  = 1 if a certain structural property of the spatial correlation structure
+(i.e., for all zD (D ✓ X ) and 2 ⇤, ⌃DD| is diagonally
+dominant) is satisfied, as shown in Lemma 9 (Appendix B).
+Consequently, the  term can be removed from T and ⌧ .
+Lemma 3 Suppose that a set zD0 of observations, a budget of N n0 + 1 sampling locations for 1  n0  N ,
+S 2 Z+ , and
+> 0 are given. The probability that
+|Q⇤n (zD , x) Wn⇤ (zD , x)|  (10) holds for all tuples
+(n, zD , x) generated at stage n = n0 , . . . , N by (8) to compute Vn✏0 (zD0 ) is at least 1 2(S|X |)N exp( 2S 2 /T 2 )
+where T is previously defined in Lemma 2.
+Its proof is found in Appendix A.3. The first step is concluded with our first main result, which follows from Lemmas 1 and 3. Specifically, it chooses the values of S and
+⌧ such that the probability of Q✏n (8) approximating Q⇤n
+
+(6) poorly (i.e., |Q⇤n (zD , x) Q✏n (zD , x)| > N ) can be
+bounded from above by a given 0 < < 1:
+Theorem 1 Suppose that a set zD of observations, a budget of N
+n + 1 sampling locations for 1  n  N ,
+> 0, and 0 < < 1 are given. The probability that
+|Q⇤n (zD , x) Q✏n (zD , x)|  N holds for all x 2 X \ D
+is at least 1
+by setting
+◆◆
+✓ 2✓
+T
+N |X |T 2
+1
+S = O 2 N log
++log
+2
+where T is previously defined in Lemma 2. By assuming
+N,
+p
+|⇤|, o , n , , and |X | as constants, ⌧ = O( log(1/
+))
+✓
+◆!
+2
+(log (1/ ))
+log (1/ )
+and hence S = O
+log
+.
+2
+Its proof is provided in Appendix A.4.
+Remark. It can be observed from Theorem 1 that the number of generated ⌧ -truncated observations has to be increased (i.e., higher chosen value of S) when (a) a lower
+probability of Q✏n (8) approximating Q⇤n (6) poorly (i.e.,
+|Q⇤n (zD , x) Q✏n (zD , x)| > N ) is desired, and (b) a larger
+domain X of the phenomenon is given. The influence of ,
+N , |⇤|, o , n , and  on S is similar to that on ⌧ , as previously reported in Remark 2 after Lemma 2.
+Thus far, we have shown in the first step that, with high
+probability, Q✏n (8) approximates Q⇤n (6) arbitrarily closely
+for some chosen values of S and ⌧ (Theorem 1). The next
+step uses this result to probabilistically bound the performance loss in terms of Q⇤n by observing location ⇡n✏ (zD )
+selected by our ✏-BAL policy ⇡ ✏ at stage n and following
+the BAL policy ⇡ ⇤ thereafter:
+Lemma 4 Suppose that a set zD of observations, a budget of N
+n + 1 sampling locations for 1  n  N ,
+> 0, and 0 <
+< 1 are given. Q⇤n (zD , ⇡n⇤ (zD ))
+⇤
+✏
+Qn (zD , ⇡n (zD ))  2N holds with probability at least
+1
+by setting S and ⌧ according to that in Theorem 1.
+See Appendix A.5 for its proof. The final step extends
+Lemma 4 to obtain our second main result. In particular,
+it bounds the expected active sensing performance loss of
+our stochastic ✏-BAL policy ⇡ ✏ relative to that of BAL policy ⇡ ⇤ , that is, policy ⇡ ✏ is ✏-Bayes-optimal:
+Theorem 2 Given a set zD0 of prior observations, a budget of N sampling locations, and ✏ > 0, V1⇤ (zD0 )
+✏
+E⇡✏ [V1⇡ (zD0 )]  ✏ by setting and substituting
+=
+✏/(4N 2 ) and = ✏/(2N (N log( o / n )p
++ log |⇤|)) into
+S and ⌧ in Theorem 1 to give ⌧ = !
+O( log(1/✏)) and
+✓
+◆
+2
+(log (1/✏))
+log (1/✏)
+S=O
+log
+.
+2
+✏
+✏2
+Its proof is given in Appendix A.6.
+Remark 1. The number of generated ⌧ -truncated observations and the amount of truncation have to be, respectively,
+
+Nonmyopic ✏-Bayes-Optimal Active Learning of Gaussian Processes
+
+increased and reduced (i.e., higher chosen values of S and
+⌧ ) when a tighter user-defined loss bound ✏ is desired.
+Remark 2. The deterministic BAL policy ⇡ is Bayesoptimal among all candidate stochastic policies ⇡ since
+E⇡ [V1⇡ (zD0 )]  V1⇤ (zD0 ), as proven in Appendix A.7.
+⇤
+
+3.4. Anytime ✏-BAL (h↵, ✏i-BAL) Algorithm
+Unlike the BAL policy ⇡ ⇤ , our ✏-BAL policy ⇡ ✏ can be derived exactly because its time complexity is independent of
+the size of the set of all possible originally Gaussian distributed observations, which is uncountable. But, the cost
+of deriving ⇡ ✏ is exponential in the length N of planning
+horizon since it has to compute the values Vn✏ (zD ) (8) for
+all (S|X |)N possible states (n, zD ). To ease this computational burden, we propose an anytime algorithm based on
+✏-BAL that can produce a good policy fast and improve its
+approximation quality over time, as discussed next.
+The key intuition behind our anytime ✏-BAL algorithm
+(h↵, ✏i-BAL of Algo. 1) is to focus the simulation of greedy
+exploration paths through the most uncertain regions of the
+state space (i.e., in terms of the values Vn✏(zD )) instead of
+evaluating the entire state space like ⇡ ✏ . To achieve this,
+our h↵, ✏i-BAL algorithm maintains both lower and upper
+✏
+heuristic bounds (respectively, V ✏n(zD ) and V n(zD )) for
+each encountered state (n, zD ), which are exploited for representing the uncertainty of its corresponding value Vn✏(zD )
+to be used in turn for guiding the greedy exploration (or,
+put differently, pruning unnecessary, bad exploration of the
+state space while still guaranteeing policy optimality).
+To elaborate, each simulated exploration path (EXPLORE
+of Algo. 1) repeatedly selects a sampling location x and
+its corresponding ⌧ -truncated observation zxi at every stage
+until the last stage N is reached. Specifically, at each stage
+n of the simulated path, the next states (n + 1, zD [ {zxi })
+✏
+with uncertainty |V n+1 (zD [{zxi }) V ✏n+1 (zD [{zxi })| exceeding ↵ (line 6) are identified (lines 7-8), among which
+the one with largest lower bound V ✏n+1 (zD [ {zxi }) (line
+10) is prioritized/selected for exploration (if more than one
+exists, ties are broken by choosing the one with most uncer✏
+tainty, that is, largest upper bound V n+1 (zD [ {zxi }) (line
+11)) while the remaining unexplored ones are placed in the
+set U (line 12) to be considered for future exploration (lines
+3-6 in h↵, ✏i-BAL). So, the simulated path terminates if the
+uncertainty of every next state is at most ↵; the uncertainty
+of a state at the last stage N is guaranteed to be zero (14).
+Then, the algorithm backtracks up the path to update/tighten the bounds of previously visited states (line 7
+in h↵, ✏i-BAL and
+✓ line 14 in EXPLORE) as follows:
+◆
+✏
+
+V n (zD )
+V ✏n (zD )
+
+✏
+
+✏
+
+min V n (zD ), max Qn (zD , x)
+x2X \D
+✓
+◆
+✏
+max V n (zD ), max Q✏n (zD , x)
+x2X \D
+
+(14)
+
+Algorithm 1 h↵, ✏i-BAL(zD0 )
+h↵, ✏i-BAL zD0
+
+1:
+2:
+3:
+4:
+5:
+6:
+7:
+8:
+
+U
+(1, zD0 )
+✏
+while |V 1 zD0
+V ✏1 zD0 | > ↵ do
+✏
+V
+arg max(n,z )2U V n(zD )
+0
+
+n , zD 0
+
+D
+
+arg max(n,z
+0
+
+✏
+
+D )2V
+
+V n(zD )
+
+U
+U \ n , zD 0
+EXPLORE(n0 , zD0 , U ) /⇤ U is passed by reference ⇤/
+UPDATE(n0 , zD0 )
+h↵,✏i
+return ⇡1
+zD0
+arg maxx2X \D0 Q✏ (zD0 , x)
+1
+
+EXPLORE(n, zD , U )
+1: T
+;
+2: for all x 2 X \ D do
+i S
+3: {zx }i=1 sample from p(zx |zD ) (4)
+4: for i = 1, . . . , S do
+i
+i
+i
+i
+5:
+zx
+zx
+min |zx
+|, ⌧b /|zx
+|
+✏
+i
+i
+6:
+if |V n+1 zD [ zx
+V ✏n+1 zD [ zx
+| > ↵ then
+i
+7:
+T
+T [ n + 1, zD [ zx
+i
+8:
+parent n + 1, zD [ zx
+(n, zD )
+9: if |T | > 0 then
+10: V arg max(n+1,z [{zi })2T V ✏n+1 zD [ zxi
+D
+
+x
+
+11: (n + 1, zD0 ) arg max(n+1,zD [{zxi })2V V ✏n+1
+12: U U [ (T \ {(n + 1, zD0 )})
+13: EXPLORE(n + 1, zD0 , U )
+14: Update V ✏n (zD ) and V ✏n (zD ) using (14)
+
+i
+zD [ zx
+
+UPDATE(n, zD )
+
+1:
+2:
+3:
+4:
+
+✏
+
+Update V n (zD ) and V ✏n (zD ) using (14)
+if n > 1 then
+(n 1, zD0 )
+parent(n, zD )
+UPDATE(n 1, zD0 )
+
+✏
+
+Qn (zD , x) ,
+Q✏n (zD , x) ,
+
+S
+1X
+S i=1
+S
+1X
+
+S
+
+i=1
+
+✏
+
+log p zxi |zD + V n+1 zD [ zxi
+log p zxi |zD + V ✏n+1 zD [ zxi
+✏
+
+for stage n = 1, . . . , N such that there is no V N +1
+✏
+(V ✏N +1 ) term on the RHS expression of QN (Q✏N ) at stage
+N . When the planning time runs out, we provide the
+h↵,✏i
+greedy policy induced by the lower bound: ⇡1 (zD0 ) ,
+✏
+arg maxx2X \D0 Q1(zD0 , x) (line 8 in h↵, ✏i-BAL).
+Central to the anytime performance of our h↵, ✏i-BAL
+algorithm is the computational efficiency of deriving in✏
+formed initial heuristic bounds V ✏n(zD ) and V n(zD ) where
+✏
+✏
+✏
+V n(zD )  Vn (zD )  V n(zD ). Due to lack of space,
+we have shown in Appendix A.8 how they can be derived
+efficiently. We have also derived a theoretical guarantee
+similar to that of Theorem 2 on the expected active sensing performance of our h↵, ✏i-BAL policy ⇡ h↵,✏i , as shown
+in Appendix A.9. We have analyzed the time complexity
+of simulating k exploration paths in our h↵, ✏i-BAL algorithm to be O(kN S|X |(|⇤|(N 3 + |X |N 2 + S|X |) + +
+log(kN S|X |))) (Appendix A.10) where O( ) denotes the
+cost of initializing the heuristic bounds at each state. In
+practice, h↵, ✏i-BAL’s planning horizon can be shortened to
+reduce its computational cost further by limiting the depth
+of each simulated path to strictly less than N . In that case,
+
+Nonmyopic ✏-Bayes-Optimal Active Learning of Gaussian Processes
+5
+
+10.5
+10
+9.5
+
+5
+
+x 10
+
+19
+18
+
+Entropy (nat)
+
+11
+
+RMSPE
+
+although the resulting ⇡
+’s performance has not been
+theoretically analyzed, Section 4.1 demonstrates empirically that it outperforms the state-of-the-art algorithms.
+
+APGD
+IE
+ITE
+π ⟨α,ϵ⟩ (N’ = 2)
+π ⟨α,ϵ⟩ (N’ = 3)
+
+11.5
+
+4
+
+Time (ms)
+
+12
+
+h↵,✏i
+
+3
+2
+1
+
+4. Experiments and Discussion
+This section evaluates the active sensing performance and
+time efficiency of our h↵, ✏i-BAL policy ⇡ h↵,✏i (Section 3) empirically under limited sampling budget using
+two datasets featuring a simple, simulated spatial phenomenon (Section 4.1) and a large-scale, real-world traffic
+phenomenon (i.e., speeds of road segments) over an urban
+road network (Section 4.2). All experiments are run on a
+Mac OS X machine with Intel Core i7 at 2.66 GHz.
+4.1. Simulated Spatial Phenomenon
+The domain of the phenomenon is discretized into a finite
+set of sampling locations X = {0, 1, . . . , 99}. The phenomenon is a realization of a GP (Section 2) parameterized
+⇤
+⇤
+⇤
+by ⇤ = { n = 0.25, s = 10.0, ` = 1.0}. For sim⇤
+⇤
+plicity, we assume that n and s are known, but the
+⇤
+true length-scale ` = 1 is not. So, a uniform prior belief
+bD0 =; is maintained over a set L = {1, 6, 9, 12, 15, 18, 21}
+of 7 candidate length-scales ` . Using root mean squared
+prediction error (RMSPE) as the performance metric, the
+performance of our h↵, ✏i-BAL policies ⇡ h↵,✏i with planning horizon length N 0 = 2, 3 and ↵ = 1.0 are compared to that of the state-of-the-art GP-based active learning algorithms: (a) The a priori greedy design (APGD)
+policy (Shewry & Wynn,
+P 1987) iteratively selects and
+adds arg maxx2X \Sn
+2⇤ bD0 ( )H[ZSn [{x} |zD0 , ] to
+the current set Sn of sampling locations (where S0 = ;)
+until SN is obtained, (b) the implicit exploration (IE) polIE
+icy greedily selects
+P and observes sampling location x =
+arg maxx2X \D
+2⇤ bD ( )H[Zx |zD , ] and updates the
+belief from bD to bD[{xIE } over L; if the upper bound on
+the performance advantage of using ⇡ ⇤ over APGD policy is less than a pre-defined threshold, it will use APGD
+with the remaining sampling budget, and (c) the explicit
+exploration via independent tests (ITE) policy performs a
+⇤
+PAC-based binary search, which is guaranteed to find `
+with high probability, and then uses APGD to select the
+remaining locations to be observed.
+Both nonmyopic IE and ITE policies are proposed by
+Krause & Guestrin (2007): IE is reported to incur the lowest prediction error empirically while ITE is guaranteed not
+to achieve worse than the optimal performance by more
+than a factor of 1/e. Fig. 1a shows results of the active
+sensing performance of the tested policies averaged over 20
+realizations of the phenomenon drawn independently from
+the underlying GP model described earlier. It can be observed that the RMSPE of every tested policy decreases
+with a larger budget of N sampling locations. Notably,
+our h↵, ✏i-BAL policies perform better than the APGD, IE,
+
+17
+16
+15
+14
+
+V ϵ1 (z D )
+ϵ
+V 1 (z D )
+
+13
+
+9
+
+12
+8.5
+5
+
+10
+
+15
+
+20
+
+25
+
+Budget of N sampling locations
+
+(a)
+
+0
+0
+
+200
+
+400
+
+600
+
+No. of simulated paths
+
+(b)
+
+800
+
+0
+
+200
+
+400
+
+600
+
+800
+
+No. of simulated paths
+
+(c)
+
+Figure 1. Graphs of (a) RMSPE of APGD, IE, ITE, and h↵, ✏iBAL policies with planning horizon length N 0 = 2, 3 vs. budget
+of N sampling locations, (b) stage-wise online processing cost of
+✏
+h↵, ✏i-BAL policy with N 0 = 3 and (c) gap between V 1 (zD0 )
+✏
+and V 1 (zD0 ) vs. number of simulated paths.
+
+and ITE policies, especially when N is small. The performance gap between our h↵, ✏i-BAL policies and the other
+policies decreases as N increases, which intuitively means
+that, with a tighter sampling budget (i.e., smaller N ), it is
+more critical to strike a right balance between exploration
+and exploitation.
+Fig. 2 shows the stage-wise sampling designs produced by
+the tested policies with a budget of N = 15 sampling
+locations. It can be observed that our h↵, ✏i-BAL policy
+achieves a better balance between exploration and exploita⇤
+tion and can therefore discern ` much faster than the IE
+and ITE policies while maintaining a fine spatial coverage
+of the phenomenon. This is expected due to the following
+issues faced by IE and ITE policies: (a) The myopic exploration of IE tends not to observe closely-spaced locations
+(Fig. 2a), which are in fact informative towards estimating the true length-scale, and (b) despite ITE’s theoretical
+⇤
+guarantee in finding ` , its PAC-style exploration is too
+aggressive, hence completely ignoring how informative the
+posterior belief bD over L is during exploration. This leads
+to a sub-optimal exploration behavior that reserves too little budget for exploitation and consequently entails a poor
+spatial coverage, as shown in Fig. 2b.
+Our h↵, ✏i-BAL policy can resolve these issues by jointly
+and naturally optimizing the trade-off between observing
+the most informative locations for minimizing the predictive uncertainty of the phenomenon (i.e., exploitation) vs.
+the uncertainty surrounding its length-scale (i.e., exploration), hence enjoying the best of both worlds (Fig. 2c). In
+fact, we notice that, after observing 5 locations, our h↵, ✏iBAL policy can focus 88.10% of its posterior belief on
+⇤
+` while IE only assigns, on average, about 18.65% of its
+⇤
+posterior belief on ` , which is hardly more informative
+⇤
+than the prior belief bD0 (` ) = 1/7 ⇡ 14.28%. Finally,
+Fig. 1b shows that the online processing cost of h↵, ✏i-BAL
+per sampling stage grows linearly in the number of simulated paths while Fig. 1c reveals that its approximation
+✏
+quality improves (i.e., gap between V 1 (zD0 ) and V ✏1 (zD0 )
+decreases) with increasing number of simulated paths. Interestingly, it can be observed from Fig. 1c that although
+h↵, ✏i-BAL needs about 800 simulated paths (i.e., 400 s)
+✏
+to close the gap between V 1 (zD0 ) and V ✏1 (zD0 ), V ✏1 (zD0 )
+
+Nonmyopic ✏-Bayes-Optimal Active Learning of Gaussian Processes
+Stages
+
+Stages
+
+Stages
+
+1-5
+
+1-5
+
+1-9
+
+1-9
+
+1 - 13
+
+1 - 13
+
+1 - 12
+
+1 - 15
+
+1 - 15
+
+1 - 15
+
+0
+
+10
+
+20
+
+30
+
+40
+
+50
+
+60
+
+Spatial Field
+
+70
+
+80
+
+90
+
+100
+
+(a) IE policy
+
+Exploration: Find the true lengthscale by binary search
+
+Exploration: Observing closely-spaced
+locations to identify true length-scale
+
+1-4
+1-8
+
+Exploitation: Too little remaining
+budget entails poor coverage
+0
+
+10
+
+20
+
+30
+
+40
+
+50
+
+60
+
+70
+
+Spatial Field
+
+80
+
+90
+
+Exploitation: Sufficient budget
+remaining to achieve even coverage
+0
+
+100
+
+10
+
+20
+
+(b) ITE policy
+
+30
+
+40
+
+50
+
+60
+
+70
+
+Spatial Field
+
+80
+
+90
+
+100
+
+(c) h↵, ✏i-BAL policy
+
+Figure 2. Stage-wise sampling designs produced by (a) IE, (b) ITE, and (c) h↵, ✏i-BAL policy with a planning horizon length N 0 = 3
+using a budget of N = 15 sampling locations. The final sampling designs are depicted in the bottommost rows of the figures.
+
+4.2. Real-World Traffic Phenomenon
+Fig. 3a shows the traffic phenomenon (i.e., speeds (km/h)
+of road segments) over an urban road network X comprising 775 road segments (e.g., highways, arterials, slip roads,
+etc.) in Tampines area, Singapore during lunch hours on
+June 20, 2011. The mean speed is 52.8 km/h and the standard deviation is 21.0 km/h. Each road segment x 2 X
+is specified by a 4-dimensional vector of features: length,
+number of lanes, speed limit, and direction. The phenomenon is modeled as a relational GP (Chen et al., 2012)
+whose correlation structure can exploit both the road segment features and road network topology information. The
+⇤
+⇤
+⇤
+true parameters ⇤ = { n , s , ` } are set as the maximum likelihood estimates learned using the entire dataset.
+⇤
+⇤
+⇤
+We assume that n and s are known, but ` is not.
+So, a uniform prior belief bD0 =; is maintained over a set
+⇤
+L = {` i }6i=0 of 7 candidate length-scales ` 0 = ` and
+⇤
+` i = 2(i + 1)` for i = 1, . . . , 6.
+The performance of our h↵, ✏i-BAL policies with planning
+horizon length N 0 = 3, 4, 5 are compared to that of APGD
+and IE policies (Section 4.1) by running each of them on
+a mobile probe to direct its active sensing along a path
+of adjacent road segments according to the road network
+topology; ITE cannot be used here as it requires observing road segments separated by a pre-computed distance
+during exploration (Krause & Guestrin, 2007), which violates the topological constraints of the road network since
+the mobile probe cannot “teleport”. Fig. 3 shows results
+of the tested policies averaged over 5 independent runs: It
+can be observed from Fig. 3b that our h↵, ✏i-BAL policies
+outperform APGD and IE policies due to their nonmyopic
+exploration behavior. In terms of the total online processing cost, Fig. 3c shows that h↵, ✏i-BAL incurs < 4.5 hours
+given a budget of N = 240 road segments, which can be
+afforded by modern computing power. To illustrate the behavior of each policy, Figs. 3d-f show, respectively, the
+road segments observed (shaded in black) by the mobile
+
+80
+
+3400
+
+64
+
+3350
+
+48
+
+3300
+
+32
+
+3250
+
+16
+
+3200
+
+0
+
+8550
+
+8600
+
+8650
+
+8700
+
+8750
+
+8800
+
+8850
+
+8900
+
+8950
+
+20
+19
+18
+17
+
+6
+
+10
+
+4
+
+10
+
+π ⟨α ,ϵ ⟩ (N’ = 3)
+π ⟨α ,ϵ ⟩ (N’ = 4)
+π ⟨α ,ϵ ⟩ (N’ = 5)
+
+16
+15
+
+9000
+
+10
+
+APGD
+IE
+π ⟨α ,ϵ ⟩ (N’ = 3)
+π ⟨α ,ϵ ⟩ (N’ = 4)
+π ⟨α ,ϵ ⟩ (N’ = 5)
+
+21
+
+Time (ms)
+
+96
+
+3450
+
+RMSPE (km/h)
+
+3500
+
+3150
+8500
+
+8
+
+22
+
+3550
+
+only takes about 100 simulated paths (i.e., 50 s). This implies the actual computation time needed for h↵, ✏i-BAL to
+reach V1✏ (zD0 ) (via its lower bound V ✏1 (zD0 )) is much less
+than that required to verify the convergence of V ✏1 (zD0 ) to
+V1✏ (zD0 ) (i.e., by checking the gap). This is expected since
+h↵, ✏i-BAL explores states with largest lower bound first
+(Section 3.4).
+
+2
+
+60
+
+120
+
+180
+
+240
+
+10
+
+Budget of N road segments
+
+(a)
+
+60
+
+(b)
+
+3550
+
+120
+
+180
+
+240
+
+Budget of N road segments
+
+(c)
+
+3550
+
+3550
+
+3500
+
+96
+
+3500
+
+96
+
+3500
+
+96
+
+3450
+
+80
+
+3450
+
+80
+
+3450
+
+80
+
+3400
+
+64
+
+3400
+
+64
+
+3400
+
+64
+
+3350
+
+48
+
+3350
+
+48
+
+3350
+
+48
+
+3300
+
+32
+
+3300
+
+32
+
+3300
+
+32
+
+3250
+
+16
+
+3250
+
+16
+
+3250
+
+3200
+
+0
+
+3200
+
+0
+
+3200
+
+3150
+8500
+
+8550
+
+8600
+
+8650
+
+8700
+
+8750
+
+8800
+
+(d)
+
+8850
+
+8900
+
+8950
+
+9000
+
+3150
+8500
+
+8550
+
+8600
+
+8650
+
+8700
+
+8750
+
+8800
+
+(e)
+
+8850
+
+8900
+
+8950
+
+9000
+
+3150
+8500
+
+16
+
+0
+
+8550
+
+8600
+
+8650
+
+8700
+
+8750
+
+8800
+
+(f)
+
+8850
+
+8900
+
+8950
+
+9000
+
+Figure 3. (a) Traffic phenomenon (i.e., speeds (km/h) of road segments) over an urban road network in Tampines area, Singapore,
+graphs of (b) RMSPE of APGD, IE, and h↵, ✏i-BAL policies with
+horizon length N 0 = 3, 4, 5 and (c) total online processing cost of
+h↵, ✏i-BAL policies with N 0 = 3, 4, 5 vs. budget of N segments,
+and (d-f) road segments observed (shaded in black) by respective
+APGD, IE, and h↵, ✏i-BAL policies (N 0 = 5) with N = 60.
+
+probe running APGD, IE, and h↵, ✏i-BAL policies with
+N 0 = 5 given a budget of N = 60. It can be observed
+from Figs. 3d-e that both APGD and IE cause the probe to
+move away from the slip roads and highways to low-speed
+segments whose measurements vary much more smoothly;
+this is expected due to their myopic exploration behavior.
+In contrast, h↵, ✏i-BAL nonmyopically plans the probe’s
+path and can thus direct it to observe the more informative
+slip roads and highways with highly varying measurements
+(Fig. 3f) to achieve better performance.
+
+5. Conclusion
+This paper describes and theoretically analyzes an ✏-BAL
+approach to nonmyopic active learning of GPs that can
+jointly and naturally optimize the exploration-exploitation
+trade-off. We then provide an anytime h↵, ✏i-BAL algorithm based on ✏-BAL with real-time performance guarantee and empirically demonstrate using synthetic and realworld datasets that, with limited budget, it outperforms the
+state-of-the-art GP-based active learning algorithms.
+Acknowledgments. This work was supported by Singapore National Research Foundation in part under its International Research Center @ Singapore Funding Initiative and administered by the Interactive Digital Media Programme Office and in part through the Singapore-MIT Alliance for Research and Technology Subaward Agreement
+No. 52.
+
+Nonmyopic ✏-Bayes-Optimal Active Learning of Gaussian Processes
+
+References
+Cao, N., Low, K. H., and Dolan, J. M. Multi-robot informative path planning for active sensing of environmental
+phenomena: A tale of two algorithms. In Proc. AAMAS,
+pp. 7–14, 2013.
+Chen, J., Low, K. H., Tan, C. K.-Y., Oran, A., Jaillet, P.,
+Dolan, J. M., and Sukhatme, G. S. Decentralized data
+fusion and active sensing with mobile sensors for modeling and predicting spatiotemporal traffic phenomena.
+In Proc. UAI, pp. 163–173, 2012.
+Chen, J., Cao, N., Low, K. H., Ouyang, R., Tan, C. K.-Y.,
+and Jaillet, P. Parallel Gaussian process regression with
+low-rank covariance matrix approximations. In Proc.
+UAI, pp. 152–161, 2013a.
+Chen, J., Low, K. H., and Tan, C. K.-Y. Gaussian processbased decentralized data fusion and active sensing for
+mobility-on-demand system. In Proc. RSS, 2013b.
+Cover, T. and Thomas, J. Elements of Information Theory.
+John Wiley & Sons, NY, 1991.
+Diggle, P. J. Bayesian geostatistical design. Scand. J.
+Statistics, 33(1):53–64, 2006.
+Dolan, J. M., Podnar, G., Stancliff, S., Low, K. H., Elfes,
+A., Higinbotham, J., Hosler, J. C., Moisan, T. A., and
+Moisan, J. Cooperative aquatic sensing using the telesupervised adaptive ocean sensor fleet. In Proc. SPIE
+Conference on Remote Sensing of the Ocean, Sea Ice,
+and Large Water Regions, volume 7473, 2009.
+Hoang, T. N. and Low, K. H. A general framework for interacting Bayes-optimally with self-interested agents using arbitrary parametric model and model prior. In Proc.
+IJCAI, pp. 1394–1400, 2013.
+
+Low, K. H., Dolan, J. M., and Khosla, P. Adaptive multirobot wide-area exploration and mapping. In Proc. AAMAS, pp. 23–30, 2008.
+Low, K. H., Dolan, J. M., and Khosla, P. Informationtheoretic approach to efficient adaptive path planning for
+mobile robotic environmental sensing. In Proc. ICAPS,
+pp. 233–240, 2009.
+Low, K. H., Dolan, J. M., and Khosla, P. Active Markov
+information-theoretic path planning for robotic environmental sensing. In Proc. AAMAS, pp. 753–760, 2011.
+Low, K. H., Chen, J., Dolan, J. M., Chien, S., and Thompson, D. R. Decentralized active robotic exploration and
+mapping for probabilistic field classification in environmental sensing. In Proc. AAMAS, pp. 105–112, 2012.
+Martin, R. J. Comparing and contrasting some environmental and experimental design problems. Environmetrics,
+12(3):303–317, 2001.
+Müller, W. G. Collecting Spatial Data: Optimum Design
+of Experiments for Random Fields. Springer, 3rd edition,
+2007.
+Ouyang, R., Low, K. H., Chen, J., and Jaillet, P. Multirobot active sensing of non-stationary Gaussian processbased environmental phenomena. In Proc. AAMAS,
+2014.
+Park, M. and Pillow, J. W. Bayesian active learning with
+localized priors for fast receptive field characterization.
+In Proc. NIPS, pp. 2357–2365, 2012.
+Podnar, G., Dolan, J. M., Low, K. H., and Elfes, A. Telesupervised remote surface water quality sensing. In Proc.
+IEEE Aerospace Conference, 2010.
+Poupart, P., Vlassis, N., Hoey, J., and Regan, K. An analytic solution to discrete Bayesian reinforcement learning. In Proc. ICML, pp. 697–704, 2006.
+
+Houlsby, N., Hernandez-Lobato, J. M., Huszar, F., and
+Ghahramani, Z. Collaborative Gaussian processes for
+preference learning. In Proc. NIPS, pp. 2105–2113,
+2012.
+
+Rasmussen, C. E. and Williams, C. K. I. Gaussian Processes for Machine Learning. MIT Press, 2006.
+
+Krause, A. and Guestrin, C. Nonmyopic active learning
+of Gaussian processes: An exploration-exploitation approach. In Proc. ICML, pp. 449–456, 2007.
+
+Singh, A., Krause, A., Guestrin, C., and Kaiser, W. J. Efficient informative sensing using multiple robots. J. Artificial Intelligence Research, 34:707–755, 2009.
+
+Krause, A., Singh, A., and Guestrin, C. Near-optimal sensor placements in Gaussian processes: Theory, efficient
+algorithms and empirical studies. JMLR, 9:235–284,
+2008.
+
+Solomon, H. and Zacks, S. Optimal design of sampling
+from finite populations: A critical review and indication
+of new research areas. J. American Statistical Association, 65(330):653–677, 1970.
+
+Low, K. H., Gordon, G. J., Dolan, J. M., and Khosla,
+P. Adaptive sampling for multi-robot wide-area exploration. In Proc. IEEE ICRA, pp. 755–760, 2007.
+
+Zimmerman, D. L. Optimal network design for spatial prediction, covariance parameter estimation, and empirical
+prediction. Environmetrics, 17(6):635–652, 2006.
+
+Shewry, M. C. and Wynn, H. P. Maximum entropy sampling. J. Applied Statistics, 14(2):165–170, 1987.
+
+

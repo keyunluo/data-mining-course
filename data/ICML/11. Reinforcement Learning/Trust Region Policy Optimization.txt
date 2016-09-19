@@ -1,0 +1,1226 @@
+Trust Region Policy Optimization
+John Schulman
+JOSCHU @ EECS . BERKELEY. EDU
+Sergey Levine
+SLEVINE @ EECS . BERKELEY. EDU
+Philipp Moritz
+PCMORITZ @ EECS . BERKELEY. EDU
+Michael Jordan
+JORDAN @ CS . BERKELEY. EDU
+Pieter Abbeel
+PABBEEL @ CS . BERKELEY. EDU
+University of California, Berkeley, Department of Electrical Engineering and Computer Sciences
+
+Abstract
+In this article, we describe a method for optimizing control policies, with guaranteed monotonic
+improvement. By making several approximations to the theoretically-justified scheme, we develop a practical algorithm, called Trust Region
+Policy Optimization (TRPO). This algorithm is
+effective for optimizing large nonlinear policies such as neural networks. Our experiments
+demonstrate its robust performance on a wide variety of tasks: learning simulated robotic swimming, hopping, and walking gaits; and playing
+Atari games using images of the screen as input.
+Despite its approximations that deviate from the
+theory, TRPO tends to give monotonic improvement, with little tuning of hyperparameters.
+
+1 Introduction
+Most algorithms for policy optimization can be classified
+into three broad categories: policy iteration methods, which
+alternate between estimating the value function under the
+current policy and improving the policy (Bertsekas, 2005);
+policy gradient methods, which use an estimator of the gradient of the expected cost obtained from sample trajectories (Peters & Schaal, 2008a) (and which, as we later
+discuss, have a close connection to policy iteration); and
+derivative-free optimization methods, such as the crossentropy method (CEM) and covariance matrix adaptation
+(CMA), which treat the cost as a black box function to be
+optimized in terms of the policy parameters (Fu et al., 2005;
+Szita & Lörincz, 2006).
+General derivative-free stochastic optimization methods
+such as CEM and CMA are preferred on many problems, because they achieve good results while being simple to understand and implement. For example, while
+Tetris is a classic benchmark problem for approximate dyProceedings of the 31 st International Conference on Machine
+Learning, Lille, France, 2015. JMLR: W&CP volume 37. Copyright 2015 by the author(s).
+
+namic programming (ADP) methods, stochastic optimization methods are difficult to beat on this task (Gabillon
+et al., 2013). For continuous control problems, methods
+like CMA have been successful at learning control policies for challenging tasks like locomotion when provided
+with hand-engineered policy classes with low-dimensional
+parameterizations (Wampler & Popović, 2009). The inability of ADP and gradient-based methods to consistently
+beat gradient-free random search is unsatisfying, since
+gradient-based optimization algorithms enjoy much better
+sample complexity guarantees than gradient-free methods
+(Nemirovski, 2005). Continuous gradient-based optimization has been very successful at learning function approximators for supervised learning tasks with huge numbers of
+parameters, and extending their success to reinforcement
+learning would allow for efficient training of complex and
+powerful policies.
+In this article, we first prove that minimizing a certain surrogate loss function guarantees policy improvement with
+non-trivial step sizes. Then we make a series of approximations to the theoretically-justified algorithm, yielding a
+practical algorithm, which we call trust region policy optimization (TRPO). We describe two variants of this algorithm: first, the single-path method, which can be applied
+in the model-free setting; second, the vine method, which
+requires the system to be restored to particular states, which
+is typically only possible in simulation. These algorithms
+are scalable and can optimize nonlinear policies with tens
+of thousands of parameters, which have previously posed a
+major challenge for model-free policy search (Deisenroth
+et al., 2013). In our experiments, we show that the same
+TRPO methods can learn complex policies for swimming,
+hopping, and walking, as well as playing Atari games directly from raw images.
+
+2
+
+Preliminaries
+
+Consider an infinite-horizon discounted Markov decision
+process (MDP), defined by the tuple (S, A, P, c, ⇢0 , ),
+where S is a finite set of states, A is a finite set of actions,
+P : S ⇥ A ⇥ S ! R is the transition probability distribution, c : S ! R is the cost function, ⇢0 : S ! R is
+
+Trust Region Policy Optimization
+
+the distribution of the initial state s0 , and
+discount factor.
+
+2 (0, 1) is the
+
+Let ⇡ denote a stochastic policy ⇡ : S ⇥ A ! [0, 1], and
+let ⌘(⇡) denote its expected discounted cost:
+"1
+#
+X
+t
+⌘(⇡) = Es0 ,a0 ,...
+c(st ) , where
+
+states s for which
+P the expected advantage is positive (i.e.,
+bad), that is, a ⇡
+˜ (a|s)A⇡ (s, a) > 0. The complex dependency of ⇢⇡˜ (s) on ⇡
+˜ makes Equation (2) difficult to optimize directly. Instead, we introduce the following local
+approximation to ⌘:
+X
+X
+L⇡ (˜
+⇡ ) = ⌘(⇡) +
+⇢⇡ (s)
+⇡
+˜ (a|s)A⇡ (s, a).
+(3)
+
+We will use the following standard definitions of the stateaction value function Q⇡ , the value function V⇡ , and the
+advantage function A⇡ :
+"1
+#
+X
+l
+Q⇡ (st , at ) = Est+1 ,at+1 ,...
+c(st+l ) ,
+
+L⇡✓0 (⇡✓0 ) = ⌘(⇡✓0 ),
+
+t=0
+
+s0 ⇠ ⇢0 (s0 ), at ⇠ ⇡(at |st ), st+1 ⇠ P (st+1 |st , at ).
+
+V⇡ (st ) = Eat ,st+1 ,...
+
+"
+
+l=0
+
+1
+X
+
+l
+
+#
+
+A⇡ (s, a) = Q⇡ (s, a) V⇡ (s), where
+at ⇠ ⇡(at |st ), st+1 ⇠ P (st+1 |st , at ) for t
+
+0.
+
+The following useful identity expresses the expected cost
+of another policy ⇡
+˜ in terms of the advantage over ⇡, accumulated over timesteps (see Kakade & Langford (2002) for
+the proof, which we also reprise in Appendix A using the
+notation in this paper):
+"1
+#
+X
+t
+⌘(˜
+⇡ ) = ⌘(⇡) + Es0 ,a0 ,s1 ,a1 ,...
+A⇡ (st , at ) , where
+t=0
+
+s0 ⇠ ⇢0 (s0 ), at ⇠ ⇡
+˜ (at |st ), st+1 ⇠ P (st+1 |st , at ). (1)
+
+Let ⇢⇡ be the (unnormalized) discounted visitation frequencies
+⇢⇡ (s) = (P (s0 = s)+ P (s1 = s)+
+
+2
+
+P (s2 = s)+. . . ),
+
+where s0 ⇠ ⇢0 and the actions are chosen according to
+⇡. Rearranging Equation (1) to sum over states instead of
+timesteps, we obtain
+X
+X
+⌘(˜
+⇡ ) = ⌘(⇡) +
+⇢⇡˜ (s)
+⇡
+˜ (a|s)A⇡ (s, a). (2)
+s
+
+a
+
+This equation implies that any policy update ⇡ ! ⇡
+˜ that
+has
+a
+non-positive
+expected
+advantage
+at
+every
+state
+s,
+i.e.,
+P
+˜ (a|s)A⇡ (s, a)  0, is guaranteed to reduce ⌘, or
+a⇡
+leave it constant in the case that the expected advantage
+is zero everywhere. This implies the classic result that the
+update performed by exact policy iteration, which uses the
+deterministic policy ⇡
+˜ (s) = arg mina A⇡ (s, a), improves
+the policy if there is at least one state-action pair with a
+negative advantage value and nonzero state visitation probability (otherwise it has converged). However, in the approximate setting, it will typically be unavoidable, due to
+estimation and approximation error, that there will be some
+
+a
+
+Note that L⇡ uses the visitation frequency ⇢⇡ rather than
+⇢⇡˜ , ignoring changes in state visitation density due to
+changes in the policy. However, if we have a parameterized policy ⇡✓ , where ⇡✓ (a|s) is a differentiable function
+of the parameter vector ✓, then L⇡ matches ⌘ to first order
+(see Kakade & Langford (2002)). That is, for any parameter value ✓0 ,
+
+r✓ L⇡✓0 (⇡✓ )
+
+c(st+l ) ,
+
+l=0
+
+s
+
+✓=✓0
+
+= r✓ ⌘(⇡✓ )
+
+✓=✓0
+
+(4)
+
+.
+
+Equation (4) implies that a sufficiently small step ⇡✓0 ! ⇡
+˜
+that improves L⇡✓old will also improve ⌘, but does not give
+us any guidance on how big of a step to take. To address
+this issue, Kakade & Langford (2002) proposed a policy
+updating scheme called conservative policy iteration, for
+which they could provide explicit lower bounds on the improvement of ⌘.
+To define the conservative policy iteration update, let ⇡old
+denote the current policy, and assume that we can solve
+⇡ 0 = arg min⇡0 L⇡old (⇡ 0 ). The new policy ⇡new is taken to
+be the following mixture policy:
+⇡new (a|s) = (1
+
+↵)⇡old (a|s) + ↵⇡ 0 (a|s)
+
+(5)
+
+Kakade and Langford proved the following result for this
+update:
+⌘(⇡new )  L⇡old (⇡new )+
+
+(1
+
+2✏
+(1 ↵))(1
+
+)
+
+↵2 , (6)
+
+where ✏ is the maximum advantage (positive or negative)
+of ⇡ 0 relative to ⇡:
+(7)
+
+✏ = max|Ea⇠⇡0 (a|s) [A⇡ (s, a)]|
+s
+
+Since ↵, 2 [0, 1], Equation (6) implies the following simpler bound, which we refer to in the next section:
+⌘(⇡new )  L⇡old (⇡new ) +
+
+2✏
+(1
+
+)2
+
+↵2 .
+
+(8)
+
+This bound is only slightly weaker when ↵ ⌧ 1, which
+is typically the case in the conservative policy iteration
+method of Kakade & Langford (2002). Note, however, that
+so far this bound only applies to mixture policies generated by Equation (5). This policy class is unwieldy and
+restrictive in practice, and it is desirable for a practical policy update scheme to be applicable to all general stochastic
+policy classes.
+
+Trust Region Policy Optimization
+
+3 Monotonic Improvement Guarantee for
+General Stochastic Policies
+Equation (6), which applies to conservative policy iteration, implies that a policy update that improves the righthand side is guaranteed to improve the true expected cost
+objective ⌘. Our principal theoretical result is that the policy improvement bound in Equation (6) can be extended
+to general stochastic policies, rather than just mixture polices, by replacing ↵ with a distance measure between ⇡
+and ⇡
+˜ . Since mixture policies are rarely used in practice,
+this result is crucial for extending the improvement guarantee to practical problems. The particular distance measure
+we use is the total variation
+divergence, which is defined
+P
+by DT V (p k q) = 12 i |pi qi | for discrete probability
+max
+distributions p, q.1 Define DTV
+(⇡, ⇡
+˜ ) as
+max
+DTV
+(⇡, ⇡
+˜ ) = max DT V (⇡(·|s) k ⇡
+˜ (·|s)).
+s
+
+We provide two proofs in the appendix. The first proof extends Kakade and Langford’s result using the fact that the
+random variables from two distributions with total variation divergence less than ↵ can be coupled, so that they are
+equal with probability 1 ↵. The second proof uses perturbation theory to prove a slightly stronger version of Equation (8), with a more favorable definition of ✏ that depends
+on ⇡
+˜.
+Next, we note the following relationship between the total variation divergence and the KL divergence (Pollard
+(2000), Ch. 3): DT V (p k q)2  DKL (p k q). Let
+max
+DKL
+(⇡, ⇡
+˜ ) = maxs DKL (⇡(·|s) k ⇡
+˜ (·|s)). The following bound then follows directly from Equation (8):
+2✏
+(1
+
+s
+
+a
+
+end for
+
+(9)
+
+max
+Theorem 1. Let ↵ = DTV
+(⇡old , ⇡new ), and let ✏ =
+maxs |Ea⇠⇡0 (a|s) [A⇡ (s, a)]|. Then Equation (8) holds.
+
+max
+⌘(˜
+⇡ )  L⇡ (˜
+⇡ ) + CDKL
+(⇡, ⇡
+˜ ), where C =
+
+Algorithm 1 Approximate policy iteration algorithm guaranteeing non-increasing expected cost ⌘
+Initialize ⇡0 .
+for i = 0, 1, 2, . . . until convergence do
+Compute all advantage values A⇡i (s, a).
+Solve the constrained optimization problem
+
+✓
+◆
+2✏
+max
+⇡i+1 = arg min L⇡i (⇡) +
+DKL
+(⇡i , ⇡)
+(1
+)2
+⇡
+where ✏ = max max|A⇡ (s, a)|
+s
+a
+X
+X
+and L⇡i (⇡) = ⌘(⇡i )+
+⇢⇡i(s) ⇡(a|s)A⇡i (s, a)
+
+.
+)2
+(10)
+
+is a type of majorization-minimization (MM) algorithm
+(Hunter & Lange, 2004), which is a class of methods that
+also includes expectation maximization. In the terminology of MM algorithms, Mi is the surrogate function that
+majorizes ⌘ with equality at ⇡i . This algorithm is also reminiscent of proximal gradient methods and mirror descent.
+Trust region policy optimization, which we propose in the
+following section, is an approximation to Algorithm 1,
+which uses a constraint on the KL divergence rather than
+a penalty to robustly allow large updates.
+
+4
+
+Optimization of Parameterized Policies
+
+In the previous section, we considered the policy optimization problem independently of the parameterization of ⇡
+and under the assumption that the policy can be evaluated
+at all states. We now describe how to derive a practical
+algorithm from these theoretical foundations, under finite
+sample counts and arbitrary parameterizations.
+
+Algorithm 1 describes an approximate policy iteration
+scheme based on the policy improvement bound in Equation (10). Note that for now, we assume exact evaluation of
+the advantage values A⇡ .
+
+Since we consider parameterized policies ⇡✓ (a|s) with parameter vector ✓, we will overload our previous notation
+to use functions of ✓ rather than ⇡, e.g. ⌘(✓) := ⌘(⇡✓ ),
+˜ := L⇡ (⇡ ˜), and DKL (✓ k ✓)
+˜ := DKL (⇡✓ k ⇡ ˜). We
+L✓ (✓)
+✓
+✓
+✓
+will use ✓old to denote the previous policy parameters that
+we wish to improve upon.
+
+It follows from Equation (10) that Algorithm 1 is guaranteed to generate a sequence of monotonically improving
+policies ⌘(⇡0 )
+⌘(⇡1 )
+⌘(⇡2 )
+. . . . To see this, let
+max
+Mi (⇡) = L⇡i (⇡) + CDKL
+(⇡i , ⇡). Then
+
+The preceding section shows that ⌘(✓)  L✓old (✓) +
+max
+CDKL
+(✓old , ✓), with equality at ✓ = ✓old . Thus, by performing the following minimization, we are guaranteed to
+improve the true objective ⌘:
+
+⌘(⇡i+1 )  Mi (⇡i+1 ) by Equation (10)
+⌘(⇡i ) = Mi (⇡i ), therefore,
+⌘(⇡i+1 ) ⌘(⇡i )  Mi (⇡i+1 ) M (⇡i ).
+
+max
+minimize [L✓old (✓) + CDKL
+(✓old , ✓)] .
+
+(11)
+
+Thus, by minimizing Mi at each iteration, we guarantee
+that the true objective ⌘ is non-increasing. This algorithm
+1
+Our result is straightforward to extend to continuous states
+and actions by replacing the sums with integrals.
+
+✓
+
+In practice, if we used the penalty coefficient C recommended by the theory above, the step sizes would be very
+small. One way to take larger steps in a robust way is to use
+a constraint on the KL divergence between the new policy
+
+Trust Region Policy Optimization
+
+and the old policy, i.e., a trust region constraint:
+minimize L✓old (✓)
+✓
+
+sn an
+
+(12)
+
+max
+subject to DKL
+(✓old , ✓)  .
+
+This problem imposes a constraint that the KL divergence
+is bounded at every point in the state space. While it is
+motivated by the theory, this problem is impractical to solve
+due to the large number of constraints. Instead, we can use
+a heuristic approximation which considers the average KL
+divergence:
+⇢
+
+DKL (✓1 , ✓2 ) := Es⇠⇢ [DKL (⇡✓1 (·|s) k ⇡✓2 (·|s))] .
+We therefore propose solving the following optimization
+problem to generate a policy update:
+minimize L✓old (✓)
+✓
+
+sampling
+trajectories
+
+trajectories
+
+(13)
+
+⇢✓
+
+subject to DKLold (✓old , ✓)  .
+Similar policy updates have been proposed in prior work
+(Bagnell & Schneider, 2003; Peters & Schaal, 2008b; Peters et al., 2010), and we compare our approach to prior
+methods in Section 7 and in the experiments in Section 8.
+Our experiments also show that this type of constrained
+update has similar empirical performance to the maximum
+KL divergence constraint in Equation (12).
+
+5 Sample-Based Estimation of the Objective
+and Constraint
+
+ρ0
+
+all state-action
+pairs used in
+objective
+
+sn
+
+two rollouts
+using CRN
+
+1
+
+a2
+ρ0
+
+rollout set
+
+Figure 1. Left: illustration of single path procedure. Here, we
+generate a set of trajectories via simulation of the policy and incorporate all state-action pairs (sn , an ) into the objective. Right:
+illustration of vine procedure. We generate a set of “trunk” trajectories, and then generate “branch” rollouts from a subset of the
+reached states. For each of these states sn , we perform multiple
+actions (a1 and a2 here) and perform a rollout after each action,
+using common random numbers (CRN) to reduce the variance.
+
+Our optimization problem in Equation (14) is exactly
+equivalent to the following one, written in terms of expectations:
+
+⇡✓ (a|s)
+minimize Es⇠⇢✓old ,a⇠q
+Q✓old (s, a)
+(15)
+✓
+q(a|s)
+subject to Es⇠⇢✓old [DKL (⇡✓old (·|s) k ⇡✓ (·|s))]  .
+All that remains is to replace the expectations by sample
+averages and replace the Q value by an empirical estimate.
+The following sections describe two different schemes for
+performing this estimation.
+
+The previous section proposed a constrained optimization
+problem on the policy parameters (Equation (13)), which
+optimizes an estimate of the expected cost ⌘ subject to a
+constraint on the change in the policy at each update. This
+section describes how the objective and constraint functions can be approximated using Monte Carlo simulation.
+
+The first sampling scheme, which we call single path, is
+the one that is typically used for policy gradient estimation (Bartlett & Baxter, 2011), and is based on sampling
+individual trajectories. The second scheme, which we call
+vine, involves constructing a rollout set and then performing multiple actions from each state in the rollout set. This
+method has mostly been explored in the context of policy iteration methods (Lagoudakis & Parr, 2003; Gabillon et al.,
+2013).
+
+We seek to solve the following optimization problem, obtained by expanding L✓old in Equation (13):
+
+5.1
+
+minimize
+✓
+
+X
+s
+
+⇢✓old (s)
+
+X
+
+⇡✓ (a|s)A✓old (s, a)
+
+a
+
+⇢✓
+
+subject to DKLold (✓old , ✓)  .
+
+(14)
+
+P
+We first replace s ⇢✓old (s) [. . . ] in the objective by the expectation 1 1 Es⇠⇢✓old [. . . ]. Next, we replace the advantage values A✓old by the Q-values Q✓old in Equation (14),
+which only changes the objective by a constant. Last, we
+replace the sum over the actions by an importance sampling
+estimator. Using q to denote the sampling distribution, the
+contribution of a single sn to the loss function is
+
+X
+⇡✓ (a|sn )
+⇡✓ (a|sn )A✓old (sn , a) = Ea⇠q
+A✓old (sn , a) .
+q(a|sn )
+a
+
+Single Path
+
+In this estimation procedure, we collect a sequence of
+states by sampling s0 ⇠ ⇢0 and then simulating the policy ⇡✓old for some number of timesteps to generate a trajectory s0 , a0 , s1 , a1 , . . . , sT 1 , aT 1 , sT . Hence, q(a|s) =
+⇡✓old (a|s). Q✓old (s, a) is computed at each state-action pair
+(st , at ) by taking the discounted sum of future costs along
+the trajectory.
+5.2
+
+Vine
+
+In this estimation procedure, we first sample s0 ⇠ ⇢0 and
+simulate the policy ⇡✓i to generate a number of trajectories. We then choose a subset of N states along these trajectories, denoted s1 , s2 , . . . , sN , which we call the “rollout set”. For each state sn in the rollout set, we sample
+K actions according to an,k ⇠ q(·|sn ). Any choice of
+
+Trust Region Policy Optimization
+
+q(·|sn ) with a support that includes the support of ⇡✓i (·|sn )
+will produce a consistent estimator. In practice, we found
+that q(·|sn ) = ⇡✓i (·|sn ) works well on continuous problems, such as robotic locomotion, while the uniform distribution works well on discrete tasks, such as the Atari
+games, where it can sometimes achieve better exploration.
+For each action an,k sampled at each state sn , we estimate Q̂✓i (sn , an,k ) by performing a rollout (i.e., a short
+trajectory) starting with state sn and action an,k . We can
+greatly reduce the variance of the Q-value differences between rollouts by using the same random number sequence
+for the noise in each of the K rollouts, i.e., common random
+numbers. See (Bertsekas, 2005) for additional discussion
+on Monte Carlo estimation of Q-values and (Ng & Jordan,
+2000) for a discussion of common random numbers in reinforcement learning.
+In small, finite action spaces, we can generate a rollout for
+every possible action from a given state. The contribution
+to L✓old from a single state sn is as follows:
+Ln (✓) =
+
+K
+X
+
+k=1
+
+(16)
+
+⇡✓ (ak |sn )Q̂(sn , ak ),
+
+where the action space is A = {a1 , a2 , . . . , aK }. In large
+or continuous state spaces, we can construct an estimator
+of the surrogate loss using importance sampling. The selfnormalized estimator (Owen (2013), Chapter 8) of L✓old
+obtained at a single state sn is
+Ln (✓) =
+
+PK
+
+⇡✓ (an,k |sn )
+k=1 ⇡✓old (an,k |sn ) Q̂(sn , an,k )
+
+PK
+
+⇡✓ (an,k |sn )
+k=1 ⇡✓old (an,k |sn )
+
+,
+
+(17)
+
+assuming
+that
+we
+performed
+K
+actions
+an,1 , an,2 , . . . , an,K from state sn . This self-normalized
+estimator removes the need to use a baseline for the
+Q-values (note that the gradient is unchanged by adding a
+constant to the Q-values). Averaging over sn ⇠ ⇢(⇡), we
+obtain an estimator for L✓old , as well as its gradient.
+The vine and single path methods are illustrated in Figure 1.
+We use the term vine, since the trajectories used for sampling can be likened to the stems of vines, which branch at
+various points (the rollout set) into several short offshoots
+(the rollout trajectories).
+The benefit of the vine method over the single path method
+that is our local estimate of the objective has much lower
+variance given the same number of Q-value samples in the
+surrogate loss. That is, the vine method gives much better estimates of the advantage values. The downside of the
+vine method is that we must perform far more calls to the
+simulator for each of these advantage estimates. Furthermore, the vine method requires us to generate multiple trajectories from each state in the rollout set, which limits this
+algorithm to settings where the system can be reset to an
+
+arbitrary state. In contrast, the single path algorithm requires no state resets and can be directly implemented on a
+physical system (Peters & Schaal, 2008b).
+
+6
+
+Practical Algorithm
+
+Here we present two practical policy optimization algorithm based on the ideas above, which use either the single
+path or vine sampling scheme from the preceding section.
+The algorithms repeatedly perform the following steps:
+1. Use the single path or vine procedures to collect a set
+of state-action pairs along with Monte Carlo estimates
+of their Q-values.
+2. By averaging over samples, construct the estimated
+objective and constraint in Equation (15).
+3. Approximately solve this constrained optimization
+problem to update the policy’s parameter vector ✓.
+We use the conjugate gradient algorithm followed by
+a line search, which is altogether only slightly more
+expensive than computing the gradient itself. See Appendix C for details.
+With regard to (3), we construct the Fisher information matrix (FIM) by analytically computing the Hessian
+of the KL divergence, rather than using the covariance
+matrix of the gradients. That is, we estimate Aij as
+PN
+1
+@2
+n=1 @✓i @✓j DKL (⇡✓old (·|sn ) k ⇡✓ (·|sn )), rather than
+N
+P
+N
+1
+@
+@
+The anan=1 @✓i log ⇡✓ (an |sn ) @✓j log ⇡✓ (an |sn ).
+N
+lytic estimator integrates over the action at each state sn ,
+and does not depend on the action an that was sampled.
+As described in Appendix C, this analytic estimator has
+computational benefits in the large-scale setting, since it
+removes the need to store a dense Hessian or all policy gradients from a batch of trajectories. The rate of improvement
+in the policy is similar to the empirical FIM, as shown in
+the experiments.
+Let us briefly summarize the relationship between the theory from Section 3 and the practical algorithm we have described:
+• The theory justifies optimizing a surrogate loss with a
+penalty on KL divergence. However, the large penalty
+coefficient (22✏ )2 leads to prohibitively small steps,
+so we would like to decrease this coefficient. Empirically, it is hard to robustly choose the penalty coefficient, so we use a hard constraint instead of a penalty,
+with parameter (the bound on KL divergence).
+max
+• The constraint on DKL
+(✓old , ✓) is hard for numerical
+optimization and estimation, so instead we constrain
+DKL (✓old , ✓).
+
+• Our theory ignores estimation error for the advantage
+function. Kakade & Langford (2002) consider this error in their derivation, and the same arguments would
+
+Trust Region Policy Optimization
+
+hold in the setting of this paper, but we omit them for
+simplicity.
+
+7 Connections with Prior Work
+As mentioned in Section 4, our derivation results in a policy update that is related to several prior methods, providing a unifying perspective on a number of policy update
+schemes. The natural policy gradient (Kakade, 2002) can
+be obtained as a special case of the update in Equation (13)
+by using a linear approximation to L and a quadratic approximation to the DKL constraint, resulting in the following problem:
+h
+i
+minimize r✓ L✓old (✓) ✓=✓ · (✓ ✓old )
+(18)
+✓
+
+old
+
+1
+subject to (✓old ✓)T A(✓old )(✓old ✓)  ,
+2
+where A(✓old )ij =
+@ @
+Es⇠⇢⇡ [DKL (⇡(·|s, ✓old ) k ⇡(·|s, ✓))]
+@✓i @✓j
+
+✓=✓old
+
+.
+
+The update is ✓new = ✓old
+A(✓old ) r✓ L(✓) ✓=✓ ,
+old
+where the Lagrange multiplier
+is typically treated as
+an algorithm parameter. This differs from our approach,
+which enforces the constraint at each update. Though this
+difference might seem subtle, our experiments demonstrate
+that it significantly improves the algorithm’s performance
+on larger problems.
+1
+
+We can also obtain the standard policy gradient update by
+using an `2 constraint or penalty:
+h
+i
+minimize r✓ L✓old (✓) ✓=✓ · (✓ ✓old )
+(19)
+✓
+
+1
+subject to k✓
+2
+
+old
+
+✓old k2  .
+
+The policy iteration update can also be obtained by solving
+the unconstrained problem minimize⇡ L⇡old (⇡), using L as
+defined in Equation (3).
+Several other methods employ an update similar to Equation (13). Relative entropy policy search (REPS) (Peters
+et al., 2010) constrains the state-action marginals p(s, a),
+while TRPO constrains the conditionals p(a|s). Unlike
+REPS, our approach does not require a costly nonlinear optimization in the inner loop. Levine and Abbeel (2014) also
+use a KL divergence constraint, but its purpose is to encourage the policy not to stray from regions where the estimated
+dynamics model is valid, while we do not attempt to estimate the system dynamics explicitly. Pirotta et al. (2013)
+also build on and generalize Kakade and Langford’s results,
+and they derive different algorithms from the ones here.
+
+8 Experiments
+We designed our experiments to investigate the following
+questions:
+
+Figure 2. 2D robot models used for locomotion experiments.
+From left to right: swimmer, hopper, walker. The hopper and
+walker present a particular challenge, due to underactuation and
+contact discontinuities.
+
+1. What are the performance characteristics of the single
+path and vine sampling procedures?
+2. TRPO is related to prior methods (e.g. natural policy
+gradient) but makes several changes, most notably by
+using a fixed KL divergence rather than a fixed penalty
+coefficient. How does this affect the performance of
+the algorithm?
+3. Can TRPO be used to solve challenging large-scale
+problems? How does TRPO compare with other
+methods when applied to large-scale problems, with
+regard to final performance, computation time, and
+sample complexity?
+To answer (1) and (2), we compare the performance of
+the single path and vine variants of TRPO, several ablated
+variants, and a number of prior policy optimization algorithms. With regard to (3), we show that both the single
+path and vine algorithm can obtain high-quality locomotion controllers from scratch, which is considered to be a
+hard problem. We also show that these algorithms produce
+competitive results when learning policies for playing Atari
+games from images using convolutional neural networks
+with tens of thousands of parameters.
+8.1 Simulated Robotic Locomotion
+We conducted the robotic locomotion experiments using
+the MuJoCo simulator (Todorov et al., 2012). The three
+simulated robots are shown in Figure 2. The states of the
+robots are their generalized positions and velocities, and the
+controls are joint torques. Underactuation, high dimensionality, and non-smooth dynamics due to contacts make these
+tasks very challenging. The following models are included
+in our evaluation:
+1. Swimmer. 10-dimensional state space, linear reward for forward progress and a quadratic penalty on
+joint effort to produce the cost cost(x, u) = vx +
+10 5 kuk2 . The swimmer can propel itself forward by
+making an undulating motion.
+2. Hopper. 12-dimensional state space, same cost as the
+swimmer, with a bonus of +1 for being in a nonterminal state. We ended the episodes when the hop-
+
+Trust Region Policy Optimization
+Fully
+connected
+layer
+
+Mean
+parameters
+
+Sampling
+
+Joint angles and kinematics
+
+Input
+layer
+
+Control
+
+Standard
+deviations
+
+30 units
+
+Screen input
+
+Input
+layer
+
+Conv.
+layer
+
+Conv.
+layer
+
+4⇥4
+
+4⇥4
+
+4⇥4
+
+4⇥4
+
+4⇥4
+
+4⇥4
+
+4⇥4
+
+4⇥4
+
+16 filters
+
+16 filters
+
+Hidden
+layer
+
+Action
+Sampling
+probabilities
+
+Control
+
+20 units
+
+Figure 3. Neural networks used for the locomotion task (top) and
+for playing Atari games (bottom).
+
+per fell over, which was defined by thresholds on the
+torso height and angle.
+3. Walker. 18-dimensional state space. For the walker,
+we added a penalty for strong impacts of the feet
+against the ground to encourage a smooth walk rather
+than a hopping gait.
+We used = 0.01 for all experiments. See Table 2 in the
+Appendix for more details on the experimental setup and
+parameters used. We used neural networks to represent the
+policy, with the architecture shown in Figure 3, and further
+details provided in Appendix D. To establish a standard
+baseline, we also included the classic cart-pole balancing
+problem, based on the formulation from Barto et al. (1983),
+using a linear policy with six parameters that is easy to optimize with derivative-free black-box optimization methods.
+The following algorithms were considered in the comparison: single path TRPO; vine TRPO; reward-weighted regression (RWR), an EM-like policy search method (Peters
+& Schaal, 2007); relative entropy policy search (REPS)
+(Peters et al., 2010); cross-entropy method (CEM), a
+gradient-free method (Szita & Lörincz, 2006); covariance
+matrix adaption (CMA), another gradient-free method
+(Hansen & Ostermeier, 1996); natural gradient, the classic
+natural policy gradient algorithm (Kakade, 2002), which
+differs from single path by the use of a fixed penalty coefficient (Lagrange multiplier) instead of the KL divergence
+constraint; empirical FIM, identical to single path, except
+that the FIM is estimated using the covariance matrix of
+the gradients rather than the analytic estimate; max KL,
+which was only tractable on the cart-pole problem, and uses
+the maximum KL divergence in Equation (12), rather than
+the average divergence, allowing us to evaluate the quality
+of this approximation. The parameters used in the experiments are provided in Appendix E. For the natural gra-
+
+Figure 4. Learning curves for locomotion tasks, averaged across
+five runs of each algorithm with random initializations. Note that
+for the hopper and walker, a score of 1 is achievable without any
+forward velocity, indicating a policy that simply learned balanced
+standing, but not walking.
+
+dient method, we swept through the possible values of the
+penalty coefficient (i.e. the step size) in factors of three, and
+took the best coefficient according to the final performance.
+Learning curves showing the cost averaged across five runs
+of each algorithm are shown in Figure 4. Single path and
+vine TRPO solved all of the problems, yielding the best
+solutions. Natural gradient performed well on the two
+easier problems, but was unable to generate hopping and
+walking gaits that made forward progress. These results
+provide empirical evidence that constraining the KL divergence is a more robust way to choose step sizes and
+make fast, consistent progress, compared to using a fixed
+penalty. CEM and CMA are derivative-free algorithms,
+hence their sample complexity scales unfavorably with the
+number of parameters, and they performed poorly on the
+larger problems. The max KL method learned somewhat
+slower than our final method, due to the more restrictive form of the constraint, but overall the result suggests
+that the average KL divergence constraint has a similar effect as the theorecally justified maximum KL divergence.
+Videos of the policies learned by TRPO may be viewed on
+the project website: http://sites.google.com/
+site/trpopaper/.
+Note that TRPO learned all of the gaits with generalpurpose policies and simple cost functions, using minimal
+prior knowledge. This is in contrast with most prior methods for learning locomotion, which typically rely on handarchitected policy classes that explicitly encode notions of
+balance and stepping (Tedrake et al., 2004; Geng et al.,
+2006; Wampler & Popović, 2009).
+8.2 Playing Games from Images
+To evaluate TRPO on a partially observed task with complex observations, we trained policies for playing Atari
+
+Trust Region Policy Optimization
+B. Rider
+
+Breakout
+
+Enduro
+
+Pong
+
+Q*bert
+
+Seaquest
+
+S. Invaders
+
+354
+7456
+
+1.2
+31.0
+
+0
+368
+
+20.4
+3.0
+
+157
+18900
+
+110
+28010
+
+179
+3690
+
+Deep Q Learning (Mnih et al., 2013)
+
+4092
+
+168.0
+
+470
+
+20.0
+
+1952
+
+1705
+
+581
+
+UCC-I (Guo et al., 2014)
+
+5702
+
+380
+
+741
+
+21
+
+20025
+
+2995
+
+692
+
+1425.2
+859.5
+
+10.8
+34.2
+
+534.6
+430.8
+
+20.9
+20.9
+
+1973.5
+7732.5
+
+1908.6
+788.4
+
+568.4
+450.2
+
+Random
+Human (Mnih et al., 2013)
+
+TRPO - single path
+TRPO - vine
+
+Table 1. Performance comparison for vision-based RL algorithms on the Atari domain. Our algorithms (bottom rows) were run once
+on each task, with the same architecture and parameters. Performance varies substantially from run to run (with different random
+initializations of the policy), but we could not obtain error statistics due to time constraints.
+
+games, using raw images as input. The games require
+learning a variety of behaviors, such as dodging bullets and
+hitting balls with paddles. Aside from the high dimensionality, challenging elements of these games include delayed
+rewards (no immediate penalty is incurred when a life is
+lost in Breakout or Space Invaders); complex sequences of
+behavior (Q*bert requires a character to hop on 21 different platforms); and non-stationary image statistics (Enduro
+involves a changing and flickering background).
+We tested our algorithms on the same seven games reported
+on in (Mnih et al., 2013) and (Guo et al., 2014). The images were preprocessed following the protocol in Mnih et al
+(2013), and the policy was represented by the convolutional
+neural network shown in Figure 3, with two convolutional
+layers with 16 channels and stride 2, followed by one fullyconnected layer with 20 units, yielding 33,500 parameters.
+
+that optimizes a certain objective subject to a trust region
+constraint.
+In the domain of robotic locomotion, we successfully
+learned controllers for swimming, walking and hopping
+in a physics simulator, using general purpose neural networks and minimally informative costs. To our knowledge,
+no prior work has learned controllers from scratch for all
+of these tasks, using a generic policy search method and
+non-engineered, general-purpose policy representations. In
+the game-playing domain, we learned convolutional neural network policies that used raw images as inputs. This
+requires optimizing extremely high-dimensional policies,
+and only two prior methods report successful results on this
+task.
+
+The results of the vine and single path algorithms are summarized in Table 1, which also includes an expert human
+performance and two recent methods: deep Q-learning
+(Mnih et al., 2013), and a combination of Monte-Carlo Tree
+Search with supervised training (Guo et al., 2014), called
+UCC-I. The 500 iterations of our algorithm took about 30
+hours (with slight variation between games) on a 16-core
+computer. While our method only outperformed the prior
+methods on some of the games, it consistently achieved reasonable scores. Unlike the prior methods, our approach
+was not designed specifically for this task. The ability to
+apply the same policy search method to methods as diverse as robotic locomotion and image-based game playing
+demonstrates the generality of TRPO.
+
+Since the method we proposed is scalable and has strong
+theoretical foundations, we hope that it will serve as a
+jumping-off point for future work on training large, rich
+function approximators for a range of challenging problems. At the intersection of the two experimental domains
+we explored, there is the possibility of learning robotic control policies that use vision and raw sensory data as input, providing a unified scheme for training robotic controllers that perform both perception and control. The use
+of more sophisticated policies, including recurrent policies
+with hidden state, could further make it possible to roll state
+estimation and control into the same policy in the partiallyobserved setting. By combining our method with model
+learning, it would also be possible to substantially reduce
+its sample complexity, making it applicable to real-world
+settings where samples are expensive.
+
+9 Discussion
+
+Acknowledgements
+
+We proposed and analyzed trust region methods for optimizing stochastic control policies. We proved monotonic
+improvement for an algorithm that repeatedly optimizes
+a local approximation to the expected cost of the policy
+with a KL divergence penalty, and we showed that an approximation to this method that incorporates a KL divergence constraint achieves good empirical results on a range
+of challenging policy learning tasks, outperforming prior
+methods. Our analysis also provides a perspective that
+unifies policy gradient and policy iteration methods, and
+shows them to be special limiting cases of an algorithm
+
+We thank Emo Todorov and Yuval Tassa for providing the
+MuJoCo simulator, and Bruno Scherrer, Tom Erez, Greg
+Wayne, and the anonymous ICML reviewers for insightful
+comments. This research was funded in part by the Office
+of Naval Research through a Young Investigator Award and
+under grant number N00014-11-1-0688, DARPA through
+a Young Faculty Award, by the Army Research Office
+through the MAST program.
+
+Trust Region Policy Optimization
+
+References
+Bagnell, J. A. and Schneider, J. Covariant policy search.
+IJCAI, 2003.
+Bartlett, P. L. and Baxter, J. Infinite-horizon policygradient estimation. arXiv preprint arXiv:1106.0665,
+2011.
+Barto, A., Sutton, R., and Anderson, C. Neuronlike adaptive elements that can solve difficult learning control
+problems. IEEE Transactions on Systems, Man and Cybernetics, (5):834–846, 1983.
+Bertsekas, D. Dynamic programming and optimal control,
+volume 1. 2005.
+Deisenroth, M., Neumann, G., and Peters, J. A survey on
+policy search for robotics. Foundations and Trends in
+Robotics, 2(1-2):1–142, 2013.
+Fu, Michael C, Glover, Fred W, and April, Jay. Simulation
+optimization: a review, new developments, and applications. In Proceedings of the 37th conference on Winter
+simulation, pp. 83–95. Winter Simulation Conference,
+2005.
+Gabillon, Victor, Ghavamzadeh, Mohammad, and Scherrer, Bruno. Approximate dynamic programming finally
+performs well in the game of Tetris. In Advances in Neural Information Processing Systems, 2013.
+Geng, T., Porr, B., and Wörgötter, F. Fast biped walking
+with a reflexive controller and realtime policy searching.
+In Advances in Neural Information Processing Systems
+(NIPS), 2006.
+Guo, X., Singh, S., Lee, H., Lewis, R. L., and Wang, X.
+Deep learning for real-time atari game play using offline Monte-Carlo tree search planning. In Advances in
+Neural Information Processing Systems, pp. 3338–3346,
+2014.
+Hansen, Nikolaus and Ostermeier, Andreas. Adapting arbitrary normal mutation distributions in evolution strategies: The covariance matrix adaptation. In Evolutionary
+Computation, 1996., Proceedings of IEEE International
+Conference on, pp. 312–317. IEEE, 1996.
+Hunter, David R and Lange, Kenneth. A tutorial on MM algorithms. The American Statistician, 58(1):30–37, 2004.
+Kakade, Sham. A natural policy gradient. In Advances in
+Neural Information Processing Systems, pp. 1057–1063.
+MIT Press, 2002.
+Kakade, Sham and Langford, John. Approximately optimal approximate reinforcement learning. In ICML, volume 2, pp. 267–274, 2002.
+Lagoudakis, Michail G and Parr, Ronald. Reinforcement
+learning as classification: Leveraging modern classifiers.
+In ICML, volume 3, pp. 424–431, 2003.
+Levin, D. A., Peres, Y., and Wilmer, E. L. Markov chains
+and mixing times. American Mathematical Society,
+2009.
+Levine, Sergey and Abbeel, Pieter. Learning neural network policies with guided policy search under unknown
+dynamics. In Advances in Neural Information Process-
+
+ing Systems, pp. 1071–1079, 2014.
+Martens, J. and Sutskever, I. Training deep and recurrent
+networks with hessian-free optimization. In Neural Networks: Tricks of the Trade, pp. 479–535. Springer, 2012.
+Mnih, V., Kavukcuoglu, K., Silver, D., Graves, A.,
+Antonoglou, I., Wierstra, D., and Riedmiller, M. Playing
+Atari with deep reinforcement learning. arXiv preprint
+arXiv:1312.5602, 2013.
+Nemirovski, Arkadi. Efficient methods in convex programming. 2005.
+Ng, A. Y. and Jordan, M. PEGASUS: A policy search
+method for large mdps and pomdps. In Uncertainty in
+artificial intelligence (UAI), 2000.
+Owen, Art B. Monte Carlo theory, methods and examples.
+2013.
+Pascanu, Razvan and Bengio, Yoshua. Revisiting natural gradient for deep networks.
+arXiv preprint
+arXiv:1301.3584, 2013.
+Peters, J. and Schaal, S. Reinforcement learning of motor skills with policy gradients. Neural Networks, 21(4):
+682–697, 2008a.
+Peters, J., Mülling, K., and Altün, Y. Relative entropy policy search. In AAAI Conference on Artificial Intelligence,
+2010.
+Peters, Jan and Schaal, Stefan. Reinforcement learning by
+reward-weighted regression for operational space control. In Proceedings of the 24th international conference
+on Machine learning, pp. 745–750. ACM, 2007.
+Peters, Jan and Schaal, Stefan. Natural actor-critic. Neurocomputing, 71(7):1180–1190, 2008b.
+Pirotta, Matteo, Restelli, Marcello, Pecorino, Alessio, and
+Calandriello, Daniele. Safe policy iteration. In Proceedings of The 30th International Conference on Machine
+Learning, pp. 307–315, 2013.
+Pollard, David. Asymptopia: an exposition of statistical
+asymptotic theory. 2000. URL http://www.stat.
+yale.edu/˜pollard/Books/Asymptopia.
+Szita, István and Lörincz, András. Learning tetris using
+the noisy cross-entropy method. Neural computation, 18
+(12):2936–2941, 2006.
+Tedrake, R., Zhang, T., and Seung, H. Stochastic policy
+gradient reinforcement learning on a simple 3d biped.
+In IEEE/RSJ International Conference on Intelligent
+Robots and Systems, 2004.
+Todorov, Emanuel, Erez, Tom, and Tassa, Yuval. MuJoCo:
+A physics engine for model-based control. In Intelligent Robots and Systems (IROS), 2012 IEEE/RSJ International Conference on, pp. 5026–5033. IEEE, 2012.
+Wampler, Kevin and Popović, Zoran. Optimal gait and
+form for animal locomotion. In ACM Transactions on
+Graphics (TOG), volume 28, pp. 60. ACM, 2009.
+Wright, Stephen J and Nocedal, Jorge. Numerical optimization, volume 2. Springer New York, 1999.
+
+

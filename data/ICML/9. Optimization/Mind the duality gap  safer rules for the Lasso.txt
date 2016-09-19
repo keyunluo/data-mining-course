@@ -1,0 +1,1180 @@
+Mind the duality gap: safer rules for the Lasso
+
+Olivier Fercoq
+Alexandre Gramfort
+Joseph Salmon
+Institut Mines-Télécom, Télécom ParisTech, CNRS LTCI
+46 rue Barrault, 75013, Paris, France
+
+OLIVIER . FERCOQ @ TELECOM - PARISTECH . FR
+ALEXANDRE . GRAMFORT @ TELECOM - PARISTECH . FR
+JOSEPH . SALMON @ TELECOM - PARISTECH . FR
+
+Abstract
+
+one can mention dictionary learning (Mairal, 2010), biostatistics (Haury et al., 2012) and medical imaging (Lustig
+et al., 2007; Gramfort et al., 2012) to name a few.
+
+Screening rules allow to early discard irrelevant
+variables from the optimization in Lasso problems, or its derivatives, making solvers faster. In
+this paper, we propose new versions of the socalled safe rules for the Lasso. Based on duality
+gap considerations, our new rules create safe test
+regions whose diameters converge to zero, provided that one relies on a converging solver. This
+property helps screening out more variables, for
+a wider range of regularization parameter values.
+In addition to faster convergence, we prove that
+we correctly identify the active sets (supports)
+of the solutions in finite time. While our proposed strategy can cope with any solver, its performance is demonstrated using a coordinate descent algorithm particularly adapted to machine
+learning use cases. Significant computing time
+reductions are obtained with respect to previous
+safe rules.
+
+1. Introduction
+Since the mid 1990’s, high dimensional statistics has attracted considerable attention, especially in the context of
+linear regression with more explanatory variables than observations: the so-called p ą n case. In such a context, the
+least squares with `1 regularization, referred to as the Lasso
+(Tibshirani, 1996) in statistics, or Basis Pursuit (Chen et al.,
+1998) in signal processing, has been one of the most popular tools. It enjoys theoretical guarantees (Bickel et al.,
+2009), as well as practical benefits: it provides sparse solutions and fast convex solvers are available. This has made
+the Lasso a popular method in modern data-science toolkits. Among successful fields where it has been applied,
+Proceedings of the 32 nd International Conference on Machine
+Learning, Lille, France, 2015. JMLR: W&CP volume 37. Copyright 2015 by the author(s).
+
+Many algorithms exist to approximate Lasso solutions, but
+it is still a burning issue to accelerate solvers in high dimensions. Indeed, although some other variable selection
+and prediction methods exist (Fan & Lv, 2008), the best
+performing methods usually rely on the Lasso. For stability selection methods (Meinshausen & Bühlmann, 2010;
+Bach, 2008; Varoquaux et al., 2012), hundreds of Lasso
+problems need to be solved. For non-convex approaches
+such as SCAD (Fan & Li, 2001) or MCP (Zhang, 2010),
+solving the Lasso is often a required preliminary step (Zou,
+2006; Zhang & Zhang, 2012; Candès et al., 2008).
+Among possible algorithmic candidates for solving the
+Lasso, one can mention homotopy methods (Osborne et al.,
+2000), LARS (Efron et al., 2004), and approximate homotopy (Mairal & Yu, 2012), that provide solutions for the full
+Lasso path, i.e., for all possible choices of tuning parameter λ. More recently, particularly for p ą n, coordinate
+descent approaches (Friedman et al., 2007) have proved to
+be among the best methods to tackle large scale problems.
+Following the seminal work by El Ghaoui et al. (2012),
+screening techniques have emerged as a way to exploit the
+known sparsity of the solution by discarding features prior
+to starting a Lasso solver. Such techniques are coined safe
+rules when they screen out coefficients guaranteed to be
+zero in the targeted optimal solution. Zeroing those coefficients allows to focus more precisely on the non-zero ones
+(likely to represent signal) and helps reducing the computational burden. We refer to (Xiang et al., 2014) for a concise
+introduction on safe rules. Other alternatives have tried to
+screen the Lasso relaxing the “safety”. Potentially, some
+variables are wrongly disregarded and post-processing is
+needed to recover them. This is for instance the strategy
+adopted for the strong rules (Tibshirani et al., 2012).
+The original basic safe rules operate as follows: one
+
+Mind the duality gap: safer rules for the Lasso
+
+chooses a fixed tuning parameter λ, and before launching
+any solver, tests whether a coordinate can be zeroed or not
+(equivalently if the corresponding variable can be disregarded or not). We will refer to such safe rules as static
+safe rules. Note that the test is performed according to a
+safe region, i.e., a region containing a dual optimal solution of the Lasso problem. In the static case, the screening
+is performed only once, prior any optimization iteration.
+Two directions have emerged to improve on static strategies.
+• The first direction is oriented towards the resolution
+of the Lasso for a large number of tuning parameters.
+Indeed, practitioners commonly compute the Lasso
+over a grid of parameters and select the best one in a
+data-driven manner, e.g., by cross-validation. As two
+consecutive λ1 s in the grid lead to similar solutions,
+knowing the first solution may help improve screening for the second one. We call sequential safe rules
+such strategies, also referred to as recursive safe rules
+in (El Ghaoui et al., 2012). This road has been pursued in (Wang et al., 2013; Xu & Ramadge, 2013; Xiang et al., 2014), and can be thought of as a “warm
+start” of the screening (in addition to the warm start of
+the solution itself). When performing sequential safe
+rules, one should keep in mind that generally, only an
+approximation of the previous dual solution is computed. Though, the safety of the rule is guaranteed
+only if one uses the exact solution. Neglecting this issue, leads to “unsafe” rules: relevant variables might
+be wrongly disregarded.
+• The second direction aims at improving the screening by interlacing it throughout the optimization algorithm itself: although screening might be useless at the
+beginning of the algorithm, it might become (more)
+efficient as the algorithm proceeds towards the optimal solution. We call these strategies dynamic safe
+rules following (Bonnefoy et al., 2014a;b).
+Based on convex optimization arguments, we leverage duality gap computations to propose a simple strategy unifying both sequential and dynamic safe rules. We coined
+GAP SAFE rules such safe rules.
+
+finite time the active variables of the optimal solution (or
+equivalently the inactive variables), and the tests become
+more and more precise as the optimization algorithm proceeds. We also show that our new GAP SAFE rules, built
+on dual gap computations, are converging safe rules since
+their associated safe regions have a diameter converging to
+zero. We also explain how our GAP SAFE tests are sequential by nature. Application of our GAP SAFE rules
+with a coordinate descent solver for the Lasso problem is
+proposed in Section 4. Using standard data-sets, we report
+the time improvement compared to prior safe rules.
+1.1. Model and notation
+We denote by rds the set t1, . . . , du for any integer d P N.
+Our observation vector is y P Rn and the design matrix
+X “ rx1 , ¨ ¨ ¨ , xp s P Rnˆp has p explanatory variables (or
+features) column-wise. We aim at approximating y as a
+linear combination of few variables xj ’s, hence expressing
+y as Xβ where β P Rp is a sparse vector. The standard
+Euclidean norm is written } ¨ }, the `1 norm } ¨ }1 , the `8
+norm } ¨ }8 , and the matrix transposition of a matrix Q is
+denoted by QJ . We denote ptq` “ maxp0, tq.
+For such a task, the Lasso is often considered (see
+Bühlmann & van de Geer (2011) for an introduction). For a
+tuning parameter λ ą 0, controlling the trade-off between
+data fidelity and sparsity of the solutions, a Lasso estimator
+β̂ pλq is any solution of the primal optimization problem
+β̂ pλq P arg min
+βPRp
+
+1
+2
+kXβ ´ yk2 ` λ kβk1 .
+2
+looooooooooooomooooooooooooon
+
+(1)
+
+“Pλ pβq
+
+
+
+(
+
+Denoting ∆X “ θ P Rn : xJ
+j θ ď 1, @j P rps the
+dual feasible set, a dual formulation of the Lasso reads (see
+for instance Kim et al. (2007) or Xiang et al. (2014)):
+1
+λ2 
+y
+
+2
+2
+θ̂pλq “ arg max kyk2 ´
+(2)
+θ ´  .
+2
+2
+λ 2
+θP∆X ĂRn looooooooooooomooooooooooooon
+“Dλ pθq
+
+We can reinterpret Eq. (2) as θ̂pλq “ Π∆X py{λq, where
+ΠC refers to the projection onto a closed convex set C. In
+particular, this ensures that the dual solution θ̂pλq is always
+unique, contrarily to the primal β̂ pλq .
+
+The main contributions of this paper are 1) the introduction
+of new safe rules which demonstrate a clear practical improvement compared to prior strategies 2) the definition of
+a theoretical framework for comparing safe rules by looking at the convergence of their associated safe regions.
+
+1.2. A KKT detour
+
+In Section 2, we present the framework and the basic concepts which guarantee the soundness of static and dynamic
+screening rules. Then, in Section 3, we introduce the new
+concept of converging safe rules. Such rules identify in
+
+The Karush-Khun-Tucker (KKT) conditions state:
+#
+pλq
+pλq
+tsignpβ̂j qu if β̂j ‰ 0,
+J pλq
+@j P rps, xj θ̂ P
+(4)
+pλq
+r´1, 1s
+if β̂j “ 0.
+
+For the Lasso problem, a primal solution β̂ pλq P Rp and the
+dual solution θ̂pλq P Rn are linked through the relation:
+y “ X β̂ pλq ` λθ̂pλq .
+
+(3)
+
+Mind the duality gap: safer rules for the Lasso
+Rule
+
+Center
+
+Static Safe (El Ghaoui et al., 2012)
+
+y{λ
+
+Dynamic ST3 (Xiang et al., 2011)
+
+y{λ ´ δxj ‹
+y{λ
+
+Dynamic Safe (Bonnefoy et al., 2014a)
+θ̂
+
+Sequential (Wang et al., 2013)
+
+pλt´1 q
+
+θk
+
+GAP SAFE sphere (proposed)
+
+Radius
+y
+q
+q
+Rλ p λmax
+
+Ingredients
+1
+2
+
+qλ pθk q2 ´ δ 2 q
+pR
+qλ pθk q
+R
+ˇ
+ˇ
+ˇ
+ˇ 1
+ˇ λt´1 ´ λ1t ˇ }y}
+a
+rλt pβk , θk q “ λ1t 2Gλt pβk , θk q
+
+λmax “ }X J y}8 “ |xJ
+j ‹ y|
+`λ
+˘
+max
+δ“
+´ 1 {}xj ‹ }
+λ
+θk P ∆X (e.g., as in (11) )
+exact θ̂pλt´1 q required
+dual gap for βk , θk
+
+Table 1. Review of some common safe sphere tests.
+
+See for instance (Xiang et al., 2014) for more details. The
+KKT conditions lead to the fact that for λ ě λmax “
+}X J y}8 , 0 P Rp is a primal solution. It can be considered as the mother of all safe screening rules. So from now
+on, we assume that λ ď λmax for all the considered λ’s.
+
+2. Safe rules
+Safe rules exploit the KKT condition (4). This equation impλq
+pλq
+plies that β̂j “ 0 as soon as |xJ
+| ă 1. The main chalj θ̂
+lenge is that the dual optimal solution is unknown. Hence, a
+safe rule aims at constructing a set C Ă Rn containing θ̂pλq .
+We call such a set C a safe region. Safe regions are all the
+more helpful that for many j’s, µC pxj q :“ supθPC |xJ
+j θ| ă
+pλq
+
+1, hence for many j’s, β̂j
+
+“ 0.
+
+Practical benefits are obtained if one can construct a region
+C for which it is easy to compute its support function, denoted by σC and defined for any x P Rn by:
+σC pxq “ max xJ θ .
+
+(5)
+
+θPC
+
+Cast differently, for any safe region C, any j P rps, and any
+primal optimal solution β̂ pλq , the following holds true:
+pλq
+
+If µC pxj q “ maxpσC pxj q, σC p´xj qq ă 1 then β̂j “ 0.
+(6)
+We call safe test or safe rule, a test associated to C and
+screening out explanatory variables thanks to Eq. (6).
+Remark 1. Reminding that the support function of a set is
+the same as the support function of its closed convex hull
+(Hiriart-Urruty & Lemaréchal, 1993)[Proposition V.2.2.1],
+we restrict our search to closed convex safe regions.
+Based on a safe region C one can partition the explanatory
+variables into a safe active set Aλ pCq and a safe zero set
+Z λ pCq where:
+Apλq pCq “ tj P rps : µC pxj q ě 1u,
+
+(7)
+
+Z pλq pCq “ tj P rps : µC pxj q ă 1u.
+
+(8)
+
+Remark 2. If C “ tθ̂pλq u, the safe active set is the equicorpλq
+relation set Apλq pCq “ Eλ :“ tj P rps : |xJ
+| “ 1u
+j θ̂
+(in most cases (Tibshirani, 2013) it is exactly the active set
+of β̂ pλq ). If the Lasso has a unique solution, its support
+is exactly the equicorrelation set. If it is not unique, the
+equicorrelation set contains all the solutions’ supports and
+there exists a Lasso solution whose support is exactly this
+set (Tibshirani, 2013)[Lemma 12]. The other extreme case
+is when C “ ∆X , and Apλq pCq “ rps. Here, no variable is
+screened out: Z pλq pCq “ H and the screening is useless.
+We now consider common safe regions whose support
+functions are easy to obtain in closed form. For simplicity
+we focus only on balls and domes, though more complicated regions could be investigated (Xiang et al., 2014).
+2.1. Sphere tests
+Following previous work on safe rules, we call sphere tests,
+tests relying on balls as safe regions. For a sphere test, one
+chooses a ball containing θ̂pλq with center c and radius r,
+i.e., C “ Bpc, rq. Due to their simplicity, safe spheres have
+been the most commonly investigated safe regions (see for
+instance Table 1 for a brief review). The corresponding test
+is defined as follows:
+pλq
+
+If µBpc,rq pxj q “ |xJ
+j c| ` r}xj } ă 1, then β̂j
+
+“ 0. (9)
+
+Note that for a fixed center, the smaller the radius, the better
+the safe screening strategy.
+Example 1. The first introduced sphere test (El Ghaoui
+et al., 2012) consists in using the center c “ y{λ and radius
+r “ |1{λ ´ 1{λmax |}y}. Given that θ̂pλq “ Π∆X py{λq,
+this is a safe region since y{λmax P ∆X and }y{λmax ´
+Π∆X py{λq} ď }y}|1{λ ´ 1{λmax |. However, one can
+check that this static safe rule is useless as soon as
+˜
+¸
+1 ` |xJ
+λ
+j y|{p}xj }}y}q
+ď min
+.
+(10)
+λmax
+1 ` λmax {p}xj }}y}q
+jPrps
+
+pλq
+
+Note that for nested safe regions C1 Ă C2 then A pC1 q Ă
+Apλq pC2 q. Consequently, a natural goal is to find safe regions as small as possible: narrowing safe regions can only
+increase the number of screened out variables.
+
+2.2. Dome tests
+Other popular safe regions are domes, the intersection between a ball and a half-space. This kind of safe region has
+
+Mind the duality gap: safer rules for the Lasso
+
+of the primal) then with the previous display and (3), we
+can show that limkÑ`8 θk “ θ̂pλq . Moreover, the convergence of the primal is unaltered by safe rules: screening
+out unnecessary coefficients of βk , can only decrease the
+distance between βk and β̂ pλq .
+
+Figure 1. Representation of the dome Dpc, r, α, wq (dark blue).
+In our case, note that α is positive.
+
+been considered for instance in (El Ghaoui et al., 2012; Xiang & Ramadge, 2012; Xiang et al., 2014; Bonnefoy et al.,
+2014b). We denote Dpc, r, α, wq the dome with ball center
+c, ball radius r, oriented hyperplane with unit normal vector w and parameter α such that c ´ αrw is the projection
+of c on the hyperplane (see Figure 1 for an illustration in
+the interesting case α ą 0).
+Remark 3. The dome is non-trivial whenever α P r´1, 1s.
+When α “ 0, one gets simply a hemisphere.
+For the dome test one needs to compute the support function for C “ Dpc, r, α, wq. Interestingly, as for balls, it can
+be obtained in a closed form. Due to its length though, the
+formula is deferred to the Appendix (see also (Xiang et al.,
+2014)[Lemma 3] for more details).
+2.3. Dynamic safe rules
+For approximating a solution β̂ pλq of the Lasso primal
+problem Pλ , iterative algorithms are commonly used. We
+denote βk P Rp the current estimate after k iterations of
+any iterative algorithm (see Section 4 for a specific study
+on coordinate descent). Dynamic safe rules aim at discovering safe regions that become narrower as k increases. To
+do so, one first needs dual feasible points: θk P ∆X . Following El Ghaoui et al. (2012) (see also (Bonnefoy et al.,
+2014a)), this can be achieved by a simple transformation of
+the current residuals ρk “ y ´ Xβk , defining θk as
+#
+θk “ αk ρk”,
+´ J
+¯
+ı
+y ρk
+´1
+1
+,
+αk “ min max λkρ
+2 , kX J ρ k
+J
+kX ρk k8 .
+k 8
+kk
+(11)
+Such dual feasible θk is proportional to ρk , and is the closest point (for the norm } ¨ }) to y{λ in ∆X with such a property, i.e., θk “ Π∆X XSpanpρk q py{λq. A reason for choosing
+this dual point is that the dual optimal solution θ̂pλq is the
+projection of y{λ on the dual feasible set ∆X , and the optimal θ̂pλq is proportional to y ´ X β̂ pλq , cf. Equation (3).
+Remark 4. Note that if limkÑ`8 βk “ β̂ pλq (convergence
+
+Example 2. Note that any dual feasible point θ P ∆X immediately provides a ball that contains θ̂pλq since
+
+
+ 
+
+y
+ 1 y 
+
+ pλq y 
+qλ pθq.
+´
+´
+ď
+θ
+θ
+
+ :“ R
+θ̂ ´  “ min
+θ 1 P∆X
+λ
+λ
+λ
+(12)
+`
+˘
+qλ pθk q corresponds to the simplest safe
+The ball B y{λ, R
+region introduced in (Bonnefoy et al., 2014a;b) (cf. Figure 2
+for more insights). When the algorithm proceeds, one expects that θk gets closer to θ̂pλq , so }θk ´ y{λ} should get
+closer to }θ̂pλq ´ y{λ}. Similarly to Example 1, this dynamic rule becomes useless once λ is too small. More precisely, this occurs as soon as
+¸
+˜
+1 ` |xJ
+λ
+j y|{p}xj }}y}q
+.
+ď min
+λmax
+jPrps
+λmax }θ̂pλq }{}y} ` λmax {p}xj }}y}q
+(13)
+Noticing that }θ̂pλq } ď }y{λ} (since Π∆X is a contraction
+and 0 P ∆X ) and proceeding as for (10), one can show that
+this dynamic safe rule is inefficient when:
+¸
+˜
+|xJ
+λ
+j y|
+ď min
+.
+(14)
+λmax
+λmax
+jPrps
+This is a critical threshold, yet the screening might stop
+even at a larger λ thanks to Eq. (13). In practice the bound
+in Eq. (13) cannot be evaluated a priori due to the term
+}θ̂pλq }). Note also that the bound in Eq. (14) is close to the
+one in Eq. (10), explaining the similar behavior observed
+in our experiments (see Figure 3 for instance).
+
+3. New contributions on safe rules
+3.1. Support discovery in finite time
+Let us first introduce the notions of converging safe regions
+and converging safe tests.
+Definition 1. Let pCk qkPN be a sequence of closed convex
+sets in Rn containing θ̂pλq . It is a converging sequence of
+safe regions for the Lasso with parameter λ if the diameters
+of the sets converge to zero. The associated safe screening
+rules are referred to as converging safe tests.
+Not only converging safe regions are crucial to speed up
+computation, but they are also helpful to reach exact active
+set identification in a finite number of steps. More precisely, we prove that one recovers the equicorrelation set of
+the Lasso (cf. Remark 2) in finite time with any converging strategy: after a finite number of steps, the equicorrelation set Eλ is exactly identified. Such a property is
+
+Mind the duality gap: safer rules for the Lasso
+
+(a) Location of the dual optimal (b) Refined location of the dual (c) Proposed GAP SAFE sphere (d) Proposed GAP SAFE dome
+(orange).
+(orange).
+optimal θ̂pλq (dark blue).
+θ̂pλq in the annulus.
+Figure 2. Our new GAP SAFE sphere and dome (in orange). The dual optimal solution θ̂pλq must lie in the dark blue region; β is any
+point in Rp , and θ is any point in the dual feasible set ∆X . Remark that the GAP SAFE dome is included in the GAP SAFE sphere, and
+that it is the convex hull of the dark blue region.
+
+sometimes referred to as finite identification of the support
+(Liang et al., 2014). This is summarized in the following.
+Theorem 1. Let pCk qkPN be a sequence of converging
+safe regions. The estimated support provided by Ck ,
+Apλq pCk q “ tj P rps : maxθPCk |θJ xj | ě 1u, satisfies
+limkÑ8 Apλq pCk q “ Eλ , and there exists k0 P N such that
+@k ě k0 one gets Apλq pCk q “ Eλ .
+Proof. The main idea of the proof is to use that
+limkÑ8 Ck “ tθ̂pλq u, limkÑ8 µCk pxq “ µtθ̂pλq u pxq “
+|xJ θ̂pλq | and that the set Apλq pCk q is discrete. Details are
+delayed to the Appendix.
+Remark 5. A more general result is proved for a specific algorithm (Forward-Backward) in Liang et al. (2014).
+Interestingly, our scheme is independent of the algorithm
+considered (e.g., Forward-Backward (Beck & Teboulle,
+2009), Primal Dual (Chambolle & Pock, 2011), coordinatedescent (Tseng, 2001; Friedman et al., 2007)) and relies
+only on the convergence of a sequence of safe regions.
+3.2. GAP SAFE regions: leveraging the duality gap
+In this section, we provide new dynamic safe rules built on
+converging safe regions.
+Theorem 2. Let us take any pβ, θq P Rp ˆ ∆X . Denote
+`
+˘
+pλ pβq :“ 1 kyk2 ´kXβ ´ yk2 ´2λ kβk 1{2 , R
+qλ pθq :“
+R
+1 `
+λ
+pλq
+kθ ´ y{λk , θ̂b
+the dual optimal Lasso solution and
+q
+pλ pβq2 , then
+r̃λ pβ, θq :“ Rλ pθq2 ´ R
+
+1998) for a reminder on weak and strong duality). Fix
+θ P ∆X and β P Rp , then it holds that
+1
+λ2 
+y
+1
+
+2
+2
+2
+kyk ´
+θ ´  ď kXβ ´ yk ` λ kβk1 .
+2
+2
+λ
+2
+Hence,
+
+y
+
+
+θ ´  ě
+λ
+
+c´
+¯
+2
+2
+kyk ´ kXβ ´ yk ´ 2λ kβk1
+
+`
+
+λ
+
+. (16)
+
+pλ pβq. ComIn particular, this provides }θ̂pλq ´ y{λ} ě R
+pλq
+bining (12) and (16), asserts that θ̂
+belongs to the anqλ pθq, R
+pλ pβqq :“ tz P Rn : R
+pλ pβq ď
+nulus Apy{λ, R
+q
+}z ´ y{λ} ď Rλ pθqu (the light blue zone in Figure 2).
+Remind that the dual feasible set ∆X is convex, hence
+qλ pθqq is also convex. Thanks to (16),
+∆X X Bpy{λ, R
+qλ pθqq “ ∆X XApy{λ, R
+qλ pθq, R
+pλ pβqq, and
+∆X XBpy{λ, R
+q
+p
+then ∆X X Apy{λ, Rλ pθq, Rλ pβqq is convex too. Hence,
+qλ pθq, R
+pλ pβqq and so
+θ̂pλq is inside the annulus Apy{λ, R
+pλq
+qλ pθq, R
+pλ pβqq by convexity (see
+is rθ, θ̂ s Ď Apy{λ, R
+Figure 2,(a) and Figure 2,(b)). Moreover, θ̂pλq is the
+point of rθ, θ̂pλq s which is closest to y{λ. The farthest
+where θ̂pλq can be according to this information would be
+pλ pβqq
+if rθ, θ̂pλq s were tangent to the inner ball Bpy{λ, R
+pλq
+p
+and }θ̂
+´ y{λ} “ Rλ pβq. Let us denote θint such a
+pλ pβq
+point. The tangency property reads kθint ´ y{λk “ R
+and pθ ´ θint qJ py{λ ´ θint q “ 0. Hence, with the later
+qλ pθq, kθ ´ y{λk2 “ kθ ´ θint k2 `
+and the definition of R
+2
+2
+qλ pθq2 ´ R
+pλ pβq2 .
+kθint ´ y{λk and kθ ´ θint k “ R
+
+(15)
+
+Since by construction θ̂pλq cannot be further away from θ
+than θint (again, insights
+from Figure
+` can be gleaned
+˘ 2), we
+qλ pθq2 ´ R
+pλ pβq2 q1{2 .
+conclude that θ̂pλq P B θ, pR
+
+Proof. The construction of the ball Bpθ, r̃λ pβ, θqq is based
+on the weak duality theorem (cf. (Rockafellar & Wets,
+
+Remark 6. Choosing β “ 0 and θ “ y{λmax , then one
+recovers the static safe rule given in Example 1.
+
+´
+¯
+θ̂pλq P B θ, r̃λ pβ, θq .
+
+Mind the duality gap: safer rules for the Lasso
+
+With the definition of the primal (resp. dual) objective for
+Pλ pβq, (resp. Dλ pθq), the duality gap reads as Gλ pβ, θq “
+Pλ pβq´Dλ pθq. Remind that if Gλ pβ, θq ď , then one has
+Pλ pβq ´ Pλ pβ̂ pλq q ď , which is a standard stopping criterion for Lasso solvers. The next proposition establishes a
+connection between the radius rλ pβ, θq and the duality gap
+Gλ pβ, θq.
+Proposition 1. For any pβ, θq P Rp ˆ ∆X , the following
+holds
+r̃λ pβ, θq2 ď rλ pβ, θq2 :“
+
+2
+Gλ pβ, θq.
+λ2
+
+(17)
+
+qλ pθq2 “ kθ ´ y{λk2 and
+Proof. Use the fact that R
+2
+pλ pβq2 ě pkyk ´ kXβ ´ yk2 ´ 2λ kβk q{λ2 .
+R
+1
+If we could choose the “oracle” θ “ θ̂pλq and β “ β̂ pλq
+in (15) then we would obtain a zero radius. Since those
+quantities are unknown, we rather pick dynamically the
+current available estimates given by an optimization algorithm: β “ βk and θ “ θk as in Eq. (11). Introducing GAP
+SAFE spheres and domes as below, Proposition 2 ensures
+that they are converging safe regions.
+GAP SAFE sphere:
+Ck “ B pθk , rλ pβ, θqq .
+
+(18)
+
+GAP SAFE dome:
+¨
+˛
+˜
+¸2
+y
+y
+q
+p
+θ
+´
+`
+θ
+R
+pθ
+q
+R
+pβ
+q
+k
+k
+λ k
+λ k
+λ ‚
+Ck “ D˝ λ
+.
+,
+,2
+´ 1,
+qλ pθk q
+2
+2
+}θk ´ λy }
+R
+(19)
+Proposition 2. For any converging primal sequence
+pβk qkPN , and dual sequence pθk qkPN defined as in Eq. (11),
+then the GAP SAFE sphere and the GAP SAFE dome are
+converging safe regions.
+Proof. For the GAP SAFE sphere the result follows
+from strong duality, Remark 4 and Proposition 1 yield
+limkÑ8 rλ pβk , θk q “ 0, since limkÑ8 θk “ θ̂pλq and
+limkÑ8 βk “ β̂ pλq . For the GAP SAFE dome, one can
+check that it is included in the GAP SAFE sphere, therefore
+inherits the convergence (see also Figure 2,(c) and (d)).
+
+3.3. GAP SAFE rules : sequential for free
+As a byproduct, our dynamic screening tests provide a
+warm start strategy for the safe regions, making our GAP
+SAFE rules inherently sequential. The next proposition
+shows their efficiency when attacking a new tuning parameter, after having solved the Lasso for a previous λ, even
+only approximately. Handling approximate solutions is a
+critical issue to produce safe sequential strategies: without
+taking into account the approximation error, the screening
+might disregard relevant variables, especially the one near
+the safe regions boundaries. Except for λmax , it is unrealistic to assume that one can dispose of exact solutions.
+Consider λ0 “ λmax and a non-increasing sequence of
+T ´ 1 tuning parameters pλt qtPrT ´1s in p0, λmax q. In practice, we choose the common grid (Bühlmann & van de
+Geer, 2011)[2.12.1]): λt “ λ0 10´δt{pT ´1q (for instance
+in Figure 3, we considered δ “ 3). The next result controls
+how the duality gap, or equivalently, the diameter of our
+GAP SAFE regions, evolves from λt´1 to λt .
+Proposition 3. Suppose that t ě 1 and pβ, θq P Rp ˆ ∆X .
+Reminding rλ2 t pβ, θq “ 2Gλt pβ, θq{λ2t , the following holds
+˙
+ˆ
+λt´1
+2
+rλ2 t´1 pβ, θq
+(20)
+rλt pβ, θq “
+λt
+
+2
+λt 
+Xβ ´ y 
+ ´ p λt´1 ´ 1q kθk2 .
+` p1 ´
+q
+λt´1  λt 
+λt
+Proof. Details are given in the Appendix.
+This proposition motivates to screen sequentially as follows: having pβ, θq P Rp ˆ ∆X such that Gλt´1 pβ, θq ď ,
+then, we can screen using the GAP SAFE sphere with center θ and radius rλ pβ, θq. The adaptation to the GAP SAFE
+dome is straightforward and consists in replacing θk , βk , λ
+by θ, β, λt in the GAP SAFE dome definition.
+Remark 8. The basic sphere test of (Wang et al., 2013) requires the exact dual solution θ “ θ̂pλt´1 q for center, and
+has radius |1{λt ´ 1{λt´1 | kyk, which is strictly larger than
+ours. Indeed, if one has access to dual and primal optimal solutions at λt´1 , i.e., pθ, βq “ pθ̂pλt´1 q , β̂ pλt´1 q q, then
+rλ2 t´1 pβ, θq “ 0, θ “ py ´ Xβq{λt´1 and
+˙
+λ2t´1
+λt
+λt´1
+2
+p1
+´
+q
+´
+p
+´
+1q
+kθk ,
+λ2t
+λt´1
+λt
+˙2
+ˆ
+1
+1
+2
+ď
+´
+kyk ,
+λt
+λt´1
+ˆ
+
+Remark 7. The radius rλ pβk , θk q can be compared
+with the radius considered for the Dynamic Safe rule
+and Dynamic ST3 (Bonnefoy et al., 2014a) respectively:
+qλ pθk q “ }θk ´ y{λ}2 and pR
+qλ pθk q2 ´ δ 2 q1{2 , where
+R
+δ “ pλmax {λ ´ 1q{ kxj ‹ k. We have proved that
+limkÑ8 rλ pβk , θk q “ 0, but a weaker property is satisfied
+qλ pθk q “ R
+qλ pθ̂pλq q “
+by the two other radius: limkÑ8 R
+pλq
+2
+2
+qλ pθ̂ q ´ y{λ} and limkÑ8 pR
+qλ pθk q ´ δ 2 q1{2 “
+}R
+qλ pθ̂pλq q2 ´ δ 2 q1{2 ą 0.
+pR
+
+rλ2 t pβ, θq “
+
+since }θ} ď }y}{λt´1 for θ “ θ̂pλt´1 q .
+Note that contrarily to former sequential rules (Wang et al.,
+2013), our introduced GAP SAFE rules still work when one
+has only access to approximations of θ̂pλt´1 q .
+
+Mind the duality gap: safer rules for the Lasso
+
+4. Experiments
+4.1. Coordinate Descent
+Screening procedures can be used with any optimization
+algorithm. We chose coordinate descent because it is well
+suited for machine learning tasks, especially with sparse
+and/or unstructured design matrix X. Coordinate descent
+requires to extract efficiently columns of X which is typically not easy in signal processing applications where X is
+commonly an implicit operator (e.g. Fourier or wavelets).
+Algorithm 1 Coordinate descent with GAP SAFE rules
+input X, y, , K, f, pλt qtPrT ´1s
+Initialization:
+λ0 “ λmax
+β λ0 “ 0
+for t P rT ´ 1s do
+β Ð β λt´1 (previous -solution)
+for k P rKs do
+if k mod f “ 1 then
+Compute θ and C thanks to (11) and (18) or (19)
+Get Aλt pCq “ tj P rps : µC pxj q ě 1u as in (7)
+if Gλt pβ, θq ď  then
+β λt Ð β
+break
+for j P Aλt pCq do
+`
+xJ pXβ´yq ˘
+βj Ð ST kxλtk2 , βj ´ j kx k2
+j
+j
+# STpu, xq “ signpxq p|x| ´ uq` (softthreshold)
+output pβ λt qtPrT ´1s
+We implemented the screening rules of Table 1 based on the
+coordinate descent in Scikit-learn (Pedregosa et al., 2011).
+This code is written in Python and Cython to generate low
+level C code, offering high performance. A low level language is necessary for this algorithm to scale. Two implementations were written to work efficiently with both
+dense data stored as Fortran ordered arrays and sparse data
+stored in the compressed sparse column (CSC) format. Our
+pseudo-code is presented in Algorithm 1. In practice, we
+perform the dynamic screening tests every f “ 10 passes
+through the entire (active) variables. Iterations are stopped
+when the duality gap is smaller than the target accuracy.
+The naive computation
+of θk in (11) involves the compu
+tation of X J ρk 8 (ρk being the current residual), which
+costs Opnpq operations. This can be avoided as one knows
+when using a safe rule that the index achieving the maximum for this norm is in Aλt pCq. Indeed, by construcJ
+tion arg maxjPAλt pCq |xJ
+j θk | “ arg maxjPrps |xj θk | “
+J
+arg maxjPrps |xj ρk |. In practice the evaluation of the dual
+gap is therefore not a Opnpq but Opnqq where q is the size
+of Aλt pCq. In other words, using screening also speeds up
+
+Figure 3. Proportion of active variables as a function of λ and the
+number of iterations K on the Leukemia dataset. Better strategies
+have longer range of λ with (red) small active sets.
+
+the evaluation of the stopping criterion.
+We did not compare our method against the strong rules
+of Tibshirani et al. (2012) because they are not safe and
+therefore need complex post-processing with parameters to
+tune. Also we did not compare against the sequential rule
+of Wang et al. (2013) (e.g., EDDP) because it requires the
+exact dual optimal solution of the previous Lasso problem,
+which is not available in practice and can prevent the solver
+from actually converging: this is a phenomenon we always
+observed on our experiments.
+4.2. Number of screened variables
+Figure 3 presents the proportion of variables screened by
+several safe rules on the standard Leukemia dataset. The
+screening proportion is presented as a function of the number of iterations K. As the SAFE screening rule of El
+Ghaoui et al. (2012) is sequential but not dynamic, for a
+given λ the proportion of screened variables does not depend on K. The rules of Bonnefoy et al. (2014a) are more
+efficient on this dataset but they do not benefit much from
+the dynamic framework. Our proposed GAP SAFE tests
+screen much more variables, especially when the tuning parameter λ gets small, which is particularly relevant in practice. Moreover, even for very small λ’s (notice the logarithmic scale) where no variable is screened at the beginning
+of the optimization procedure, the GAP SAFE rules manage to screen more variables, especially when K increases.
+Finally, the figure demonstrates that the GAP SAFE dome
+test only brings marginal improvement over the sphere.
+
+Mind the duality gap: safer rules for the Lasso
+5
+
+Time (s)
+
+3
+2
+
+-log10(duality gap)
+
+-log10(duality gap)
+
+Figure 5. Time to reach convergence using various screening rules
+on bag of words from the 20newsgroup dataset (sparse data: with
+n “ 961, p “ 10094).
+
+In all cases, Lasso paths are computed as required to estimate optimal regularization parameters in practice (when
+using cross-validation one path is computed for each fold).
+For each Lasso path, solutions are obtained for T “ 100
+values of λ’s, as detailed in Section 3.3. Remark that the
+grid used is the default one in both Scikit-Learn and the
+glmnet R package. With our proposed GAP SAFE screening we obtain on all datasets substantial gains in computational time. We can already get an up to 3x speedup when
+we require a duality gap smaller than 10´4 . The interest of the screening is even clearer for higher accuracies:
+GAP SAFE sphere is 11x faster than its competitors on the
+Leukemia dataset, at accuracy 10´8 . One can observe that
+with the parameter grid used here, the larger is p compared
+to n, the higher is the gain in computation time.
+In our experiments, the other safe screening rules did not
+show much speed-up. As one can see on Figure 3, those
+screening rules keep all the active variables for a wide range
+of λ’s. The algorithm is thus faster for large λ’s but slower
+afterwards, since we still compute the screening tests. Even
+if one can avoid some of these useless computations thanks
+to formulas like (14) or (10), the corresponding speed-up
+
+10
+
+8
+
+No screening
+SAFE (El Ghaoui et al.)
+ST3 (Bonnefoy et al.)
+SAFE (Bonnefoy et al.)
+GAP SAFE (sphere)
+GAP SAFE (dome)
+
+6
+
+180
+160
+140
+120
+100
+80
+60
+40
+20
+0
+
+4
+
+The main interest of variable screening is to reduce computation costs. Indeed, the time to compute the screening
+itself should not be larger than the gains it provides. Hence,
+we compared the time needed to compute Lasso paths to
+prescribed accuracy for different safe rules. Figures 4, 5
+and 6 illustrate results on three datasets. Figure 4 presents
+results on the dense, small scale, Leukemia dataset. Figure 5 presents results on a medium scale sparse dataset
+obtained with bag of words features extracted from the
+20newsgroup dataset (comp.graphics vs. talk.religion.misc
+with TF-IDF removing English stop words and words occurring only once or more than 95% of the time). Text
+feature extraction was done using Scikit-Learn. Figure 6
+focuses on the large scale sparse RCV1 (Reuters Corpus
+Volume 1) dataset, cf. (Schmidt et al., 2013).
+
+Time (s)
+
+4.3. Gains in the computation of Lasso paths
+
+2
+
+Figure 4. Time to reach convergence using various screening rules
+on the Leukemia dataset (dense data: n “ 72, p “ 7129).
+
+10
+
+8
+
+4
+
+0
+
+6
+
+1
+2
+
+0
+
+5
+4
+
+8
+
+1
+
+No screening
+SAFE (El Ghaoui et al.)
+ST3 (Bonnefoy et al.)
+SAFE (Bonnefoy et al.)
+GAP SAFE (sphere)
+GAP SAFE (dome)
+
+6
+
+6
+
+2
+
+4
+
+3
+
+2
+
+Time (s)
+
+4
+
+7
+
+No screening
+SAFE (El Ghaoui et al.)
+ST3 (Bonnefoy et al.)
+SAFE (Bonnefoy et al.)
+GAP SAFE (sphere)
+GAP SAFE (dome)
+
+-log10(duality gap)
+
+Figure 6. Computation time to reach convergence using different
+screening strategies on the RCV1 (Reuters Corpus Volume 1)
+dataset (sparse data with n “ 20242 and p “ 47236).
+
+would not be significant.
+
+5. Conclusion
+We have presented new results on safe rules for accelerating algorithms solving the Lasso problem (see Appendix
+for extension to the Elastic Net). First, we have introduced
+the framework of converging safe rules, a key concept independent of the implementation chosen. Our second contribution was to leverage duality gap computations to create
+two safer rules satisfying the aforementioned convergence
+properties. Finally, we demonstrated the important practical benefits of those new rules by applying them to standard
+dense and sparse datasets using a coordinate descent solver.
+Future works will extend our framework to generalized linear model and group-Lasso.
+
+Acknowledgment
+We acknowledge the support from Chair Machine Learning for Big Data at Télécom ParisTech and from the Orange/Télécom ParisTech think tank phi-TAB. This work
+benefited from the support of the ”FMJH Program Gaspard
+Monge in optimization and operation research”, and from
+the support to this program from EDF.
+
+Mind the duality gap: safer rules for the Lasso
+
+References
+Bach, F. Bolasso: model consistent Lasso estimation
+through the bootstrap. In ICML, 2008.
+Beck, A. and Teboulle, M. A fast iterative shrinkagethresholding algorithm for linear inverse problems.
+SIAM J. Imaging Sci., 2(1):183–202, 2009.
+Bickel, P. J., Ritov, Y., and Tsybakov, A. B. Simultaneous
+analysis of Lasso and Dantzig selector. Ann. Statist., 37
+(4):1705–1732, 2009.
+Bonnefoy, A., Emiya, V., Ralaivola, L., and Gribonval, R.
+A dynamic screening principle for the lasso. In EUSIPCO, 2014a.
+Bonnefoy, A., Emiya, V., Ralaivola, L., and Gribonval,
+R. Dynamic Screening: Accelerating First-Order Algorithms for the Lasso and Group-Lasso. ArXiv e-prints,
+2014b.
+Bühlmann, P. and van de Geer, S. Statistics for highdimensional data. Springer Series in Statistics. Springer,
+Heidelberg, 2011. Methods, theory and applications.
+Candès, E. J., Wakin, M. B., and Boyd, S. P. Enhancing
+sparsity by reweighted l1 minimization. J. Fourier Anal.
+Applicat., 14(5-6):877–905, 2008.
+Chambolle, A. and Pock, T. A first-order primal-dual algorithm for convex problems with applications to imaging.
+J. Math. Imaging Vis., 40(1):120–145, 2011.
+Chen, S. S., Donoho, D. L., and Saunders, M. A. Atomic
+decomposition by basis pursuit. SIAM J. Sci. Comput.,
+20(1):33–61 (electronic), 1998.
+
+Gramfort, A., Kowalski, M., and Hämäläinen, M. Mixednorm estimates for the M/EEG inverse problem using
+accelerated gradient methods. Physics in Medicine and
+Biology, 57(7):1937–1961, 2012.
+Haury, A.-C., Mordelet, F., Vera-Licona, P., and Vert, J.P. TIGRESS: Trustful Inference of Gene REgulation using Stability Selection. BMC systems biology, 6(1):145,
+2012.
+Hiriart-Urruty, J.-B. and Lemaréchal, C. Convex analysis
+and minimization algorithms. I, volume 305. SpringerVerlag, Berlin, 1993.
+Kim, S.-J., Koh, K., Lustig, M., Boyd, S., and Gorinevsky,
+D.
+An interior-point method for large-scale l1 regularized least squares. IEEE J. Sel. Topics Signal Process., 1(4):606–617, 2007.
+Liang, J., Fadili, J., and Peyré, G. Local linear convergence of forward–backward under partial smoothness. In
+NIPS, pp. 1970–1978, 2014.
+Lustig, M., Donoho, D. L., and Pauly, J. M. Sparse MRI:
+The application of compressed sensing for rapid MR
+imaging. Magnetic Resonance in Medicine, 58(6):1182–
+1195, 2007.
+Mairal, J. Sparse coding for machine learning, image processing and computer vision. PhD thesis, École normale
+supérieure de Cachan, 2010.
+Mairal, J. and Yu, B. Complexity analysis of the lasso regularization path. In ICML, 2012.
+Meinshausen, N. and Bühlmann, P. Stability selection. J.
+Roy. Statist. Soc. Ser. B, 72(4):417–473, 2010.
+
+Efron, B., Hastie, T., Johnstone, I. M., and Tibshirani, R.
+Least angle regression. Ann. Statist., 32(2):407–499,
+2004. With discussion, and a rejoinder by the authors.
+
+Osborne, M. R., Presnell, B., and Turlach, B. A. A new
+approach to variable selection in least squares problems.
+IMA J. Numer. Anal., 20(3):389–403, 2000.
+
+El Ghaoui, L., Viallon, V., and Rabbani, T. Safe feature
+elimination in sparse supervised learning. J. Pacific Optim., 8(4):667–698, 2012.
+
+Pedregosa, F., Varoquaux, G., Gramfort, A., Michel, V.,
+Thirion, B., Grisel, O., Blondel, M., Prettenhofer, P.,
+Weiss, R., Dubourg, V., Vanderplas, J., Passos, A., Cournapeau, D., Brucher, M., Perrot, M., and Duchesnay,
+E. Scikit-learn: Machine learning in Python. J. Mach.
+Learn. Res., 12:2825–2830, 2011.
+
+Fan, J. and Li, R. Variable selection via nonconcave penalized likelihood and its oracle properties. J. Amer. Statist.
+Assoc., 96(456):1348–1360, 2001.
+Fan, J. and Lv, J. Sure independence screening for ultrahigh
+dimensional feature space. J. Roy. Statist. Soc. Ser. B, 70
+(5):849–911, 2008.
+
+Rockafellar, R. T. and Wets, R. J.-B. Variational analysis,
+volume 317 of Grundlehren der Mathematischen Wissenschaften [Fundamental Principles of Mathematical
+Sciences]. Springer-Verlag, Berlin, 1998.
+
+Friedman, J., Hastie, T., Höfling, H., and Tibshirani, R.
+Pathwise coordinate optimization. Ann. Appl. Stat., 1
+(2):302–332, 2007.
+
+Schmidt, M., Le Roux, N., and Bach, F. Minimizing finite
+sums with the stochastic average gradient. arXiv preprint
+arXiv:1309.2388, 2013.
+
+Mind the duality gap: safer rules for the Lasso
+
+Tibshirani, R. Regression shrinkage and selection via the
+lasso. J. Roy. Statist. Soc. Ser. B, 58(1):267–288, 1996.
+Tibshirani, R., Bien, J., Friedman, J., Hastie, T., Simon,
+N., Taylor, J., and Tibshirani, R. J. Strong rules for discarding predictors in lasso-type problems. J. Roy. Statist.
+Soc. Ser. B, 74(2):245–266, 2012.
+Tibshirani, R. J. The lasso problem and uniqueness. Electron. J. Stat., 7:1456–1490, 2013.
+Tseng, P. Convergence of a block coordinate descent
+method for nondifferentiable minimization. J. Optim.
+Theory Appl., 109(3):475–494, 2001.
+Varoquaux, G., Gramfort, A., and Thirion, B. Smallsample brain mapping: sparse recovery on spatially correlated designs with randomization and clustering. In
+ICML, 2012.
+Wang, J., Zhou, J., Wonka, P., and Ye, J. Lasso screening
+rules via dual polytope projection. In NIPS, pp. 1070–
+1078, 2013.
+Xiang, Z. J. and Ramadge, P. J. Fast lasso screening tests
+based on correlations. In ICASSP, pp. 2137–2140, 2012.
+Xiang, Z. J., Xu, H., and Ramadge, P. J. Learning sparse
+representations of high dimensional data on large scale
+dictionaries. In NIPS, pp. 900–908, 2011.
+Xiang, Z. J., Wang, Y., and Ramadge, P. J. Screening tests
+for lasso problems. arXiv preprint arXiv:1405.4897,
+2014.
+Xu, P. and Ramadge, P. J. Three structural results on the
+lasso problem. In ICASSP, pp. 3392–3396, 2013.
+Zhang, C.-H. Nearly unbiased variable selection under
+minimax concave penalty. Ann. Statist., 38(2):894–942,
+2010.
+Zhang, C.-H. and Zhang, T. A general theory of concave regularization for high-dimensional sparse estimation problems. Statistical Science, 27(4):576–593, 2012.
+Zou, H. The adaptive lasso and its oracle properties. J. Am.
+Statist. Assoc., 101(476):1418–1429, 2006.
+
+

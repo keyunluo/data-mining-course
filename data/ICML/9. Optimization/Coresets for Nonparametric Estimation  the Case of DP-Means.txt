@@ -1,0 +1,1231 @@
+Coresets for Nonparametric Estimation — the Case of DP-Means
+
+Olivier Bachem
+Mario Lucic
+Andreas Krause
+ETH Zurich, Switzerland
+
+Abstract
+Scalable training of Bayesian nonparametric
+models is a notoriously difficult challenge. We
+explore the use of coresets – a data summarization technique originating from computational
+geometry – for this task. Coresets are weighted
+subsets of the data such that models trained on
+these coresets are provably competitive with
+models trained on the full dataset. Coresets
+sublinear in the dataset size allow for fast
+approximate inference with provable guarantees.
+Existing constructions, however, are limited to
+parametric problems. Using novel techniques
+in coreset construction we show the existence
+of coresets for DP-Means – a prototypical
+nonparametric clustering problem – and provide
+a practical construction algorithm. We empirically demonstrate that our algorithm allows us
+to efficiently trade off computation time and
+approximation error and thus scale DP-Means
+to large datasets. For instance, with coresets we
+can obtain a computational speedup of 45× at
+an approximation error of only 2.4% compared
+to solving on the full data set. In contrast, for
+the same subsample size, the “naive” approach
+of uniformly subsampling the data incurs an
+approximation error of 22.5%.
+
+1. Introduction
+Traditional models in machine learning often require an
+explicit choice of the model capacity via hyperparameters.
+For example, in K-Means clustering, the number of
+clusters must be selected a priori even though this quantity
+is not known for many practical applications. The standard
+remedy to this problem is to consider models of varying
+capacities and to perform model selection using criteria
+such as AIC or BIC.
+Proceedings of the 32 nd International Conference on Machine
+Learning, Lille, France, 2015. JMLR: W&CP volume 37. Copyright 2015 by the author(s).
+
+OLIVIER . BACHEM @ INF. ETHZ . CH
+LUCIC @ INF. ETHZ . CH
+KRAUSEA @ ETHZ . CH
+
+Instead of comparing models of different complexity,
+Bayesian nonparametric models infer the complexity from
+the data. The fact that the model complexity can scale
+with the amount of observed data enables one to fit a
+single model to datasets of varying sizes, making nonparametric models especially appealing in the age of Big
+Data. This flexibility is a consequence of Bayesian nonparametric models having an infinite-dimensional parameter space (Orbanz & Teh, 2010). At the same time a finite
+number of observations can be fully explained by only a finite subset of parameters ensuring tractability of the problem. Of course, this flexibility comes at a cost: Training
+nonparametric models on massive data sets is notoriously
+difficult.
+As a concrete example, consider the Dirichlet process (DP)
+mixture model (Antoniak, 1974) which is a widely used
+Bayesian nonparametric model for clustering. It assumes
+that the i-th observation depends on a parameter θi which
+is sampled from a Dirichlet process. Since Dirichlet processes are almost surely discrete, the model can be viewed
+as a mixture model with an unbounded number of cluster centers. If the base distribution of the Dirichlet process and the distribution of an observation i given θi are
+both Gaussian, we obtain the Gaussian Dirichlet process
+mixture which can be viewed as an unbounded extension
+of the Gaussian mixture model. Recently, Kulis & Jordan (2012) apply the technique of small variance asymptotics to the Gibbs sampler of a Gaussian Dirichlet process mixture model. This leads to a hard clustering algorithm that monotonically decreases an object function similar to the K-Means objective. In contrast to K-Means, DPMeans clustering allows solutions with an arbitrary number of clusters, but introduces a penalty term proportional
+to the number of clusters used in the solution. One motivation for DP-Means instead of DP mixtures is that inference
+becomes more efficient. Nevertheless, scaling it to massive
+datasets remains a difficult challenge.
+Related Work. In case of DP mixtures, the traditional
+approaches are based on MCMC sampling (MacEachern,
+1994; Escobar & West, 1995; Neal, 2000). Yet, they can
+
+Coresets for Nonparametric Estimation — the Case of DP-Means
+
+be slow to converge which prevents them from being applied in large-scale settings. As a result there has been
+an increased interest in alternative inference methods for
+Bayesian nonparametrics. In the case of Dirichlet process
+mixtures the most popular approaches include recursive approximations (Newton & Zhang, 1999), sequential importance sampling (MacEachern et al., 1999) and variational
+Bayes (Blei & Jordan, 2006).
+Our Contributions. We investigate a novel approach to
+scaling Bayesian nonparametrics. We apply coresets –
+a technique from computational geometry – that allows
+one to efficiently summarize a large dataset by a small
+weighted subset of representative points. Coresets come
+with strong theoretical guarantees on how well they
+approximate the original point set while usually being
+sublinear, if not independent, in the number of observations. This allows for fast approximate inference for large
+datasets by running potentially slow algorithms on small
+coresets. However, to the authors’ knowledge, all previous
+work on coresets was focused exclusively on parametric
+models such as K-Means (Har-Peled & Mazumdar, 2004;
+Har-Peled & Kushal, 2005; Feldman et al., 2007; Chen,
+2009; Langberg & Schulman, 2010; Feldman & Langberg,
+2011) and Gaussian mixtures (Feldman et al., 2011).
+We extend the existing coreset theory and show that it
+is possible to apply coresets to nonparametric models.
+DP-Means clustering is an ideal target for our approach as
+it is similar to K-Means clustering, yet nonparametric in
+nature. Due to the unbounded parameter space, coresets
+are not trivially applied to nonparametric models. Several
+steps of the standard coreset construction methodology
+require adaptation and development of new techniques.
+The existence and successful construction of coresets for
+DP-Means is thus a first step to building coresets for a
+more general class of Bayesian nonparametric models.
+Similarly, coresets have first been developed for hard clustering problems such as K-Means and then later extended
+to more advanced models such as Gaussian mixtures.
+As our key contributions, we:
+• theoretically prove the existence of coresets even for
+unbounded queries,
+• propose a practical coreset construction algorithm that
+retains strong theoretical guarantees, and
+• empirically validate our theoretical findings and
+demonstrate the effectiveness of our algorithm compared to full inference and uniform subsampling.
+
+2. Background
+DP-Means clustering It is known that LLoyd’s algorithm may be derived as the limit of the expectationmaximization algorithm used to fit Gaussian mixture mod-
+
+els as the variance approaches zero (Kulis & Jordan, 2012).
+Similarly, Kulis & Jordan (2012) consider the limit of the
+Gaussian Dirichlet process mixture model where both cluster centers and the individual data points are sampled from
+a multivariate Gaussian. More specifically, each data point
+xi is sampled from a spherical Gaussian with mean µi
+and variance σ where the means are again sampled from
+a Dirichlet process with a concentration parameter α and
+a spherical Gaussian prior with variance ρ as its base distribution. An equivalent but more intuitive interpretation
+of this generative model assumes that a potentially infinite
+number of cluster centers are generated from a Gaussian
+prior with variance ρ. Cluster assignments of n data points
+are then sampled using a Chinese Restaurant Process with
+concentration parameter α. Each data point is finally generated from a Gaussian with the assigned cluster center as
+its mean and variance σ.
+By analyzing the case where σ approaches zero, Kulis &
+Jordan (2012) show that the Gibbs sampler of Neal (2000)
+converges to a hard clustering algorithm. Essentially, this
+algorithm strongly resembles LLoyd’s algorithm for KMeans, except that the number of cluster centers is not
+fixed. Instead, during the assignment step, a point is assigned to the closest center only if it is within distance λ
+from the closest center, otherwise it is chosen as a new cluster center. The algorithm is deterministic as the initial solution consists of one cluster center at the global mean of the
+data and it monotonically decreases the following objective
+function (also called the DP-Means cost function)
+X
+costDP (P, Q) =
+wp min dist(p, q)2 + |Q|λ
+p∈P
+
+q∈Q
+
+where λ > 0, P is a weighted set of n points in Rd and
+Q ⊂ Rd a non-empty set of cluster centers.
+This cost function gives rise to the DP-Means clustering
+problem where the goal is to find a finite, non-empty set of
+cluster centers Q ⊂ Rd minimizing the DP-Means objective function. The first term of the objective is identical to
+the quantization error in K-Means and measures how well
+the clusters approximate the data. The second term is a penalization term that is proportional to the number of cluster
+centers used in Q.
+The DP-Means clustering problem can be viewed as a
+nonparametric extension of the K-Means objective since
+an arbitrary number of cluster centers may be used. The
+model complexity is inferred from the data via a tradeoff
+between the number of cluster centers used and the quality
+of the clustering. Interestingly, the DP-Means objective
+has other natural motivations such as the Elbow method
+and, as noted in Kulis & Jordan (2012), is related to
+objective functions studied in connection with the Akaike
+Information Criterion.
+
+Coresets for Nonparametric Estimation — the Case of DP-Means
+
+As with K-Means clustering, it is challenging to solve the
+DP-Means clustering problem for datasets where the number of samples is prohibitively large. A “naive” approach is
+to solve the clustering problem on a random subset of the
+data with the hope that the solution on this subset is close to
+the solution on the full dataset. However, uniform subsampling provides no theoretical guarantees and one can easily
+construct examples where this approach is guaranteed to
+fail. For example, consider K-Means clustering with k = 2
+applied to two well separated clusters where the first cluster
+consists of log n data points. A finite uniform subsample
+of the data will, with high probability, include only points
+from the second cluster and the solution on the subsample
+will produce two centers in the second cluster. Hence,
+by increasing the distance between the two clusters, the
+objective value can be made arbitrarily large. Coresets introduced in the next section provide a remedy for this issue.
+Coresets A coreset is a weighted subset of the data such
+that the quality of any clustering evaluated on the coreset
+closely approximates the true quality on the full dataset.
+Consider a cost function depending on a set of points P and
+a query or solution Q ∈ Q that is additively decomposable
+into non-negative functions {fQ (p)}p∈P , i.e.
+X
+cost(P, Q) =
+fQ (p).
+p∈P
+
+The idea of coresets is to find a weighted subset C such
+that the cost of a query Q can be approximated on C by
+X
+cost(C, Q) =
+wfQ (c).
+(w,c)∈C
+
+The notion of approximation is formalized as the coreset
+property: A weighted subset C is an -coreset of P if it
+approximates the cost function of the full dataset up to
+a multiplicative factor of 1 ±  uniformly for all queries
+Q ∈ Q, i.e.,
+|cost(P, Q) − cost(C, Q)| ≤  cost(P, Q).
+We note that since the cost contributions fQ (p) and the
+possible space of solutions Q depend on the considered
+problem, coresets are inherently problem-specific.
+The main motivation for constructing coresets is to approximately solve optimization problems by running any
+solver on the coreset instead of the full dataset. The idea is
+that since the coreset property bounds the approximation
+error for all queries, the difference between the solution on
+the full dataset and the solution on the coreset is bounded.
+Furthermore, coresets are generally small, i.e., sublinear
+in, or even independent of, the number of samples. This
+allows one to apply optimization algorithms with higher
+computational complexity, such as squared or cubic dependence on the number of samples, making coresets an ideal
+
+choice for computationally hard problems. For K-Means,
+coresets even allow for a polynomial time approximation
+scheme (Feldman et al., 2007).
+Additionally, coresets are a practical and flexible tool that
+requires no assumptions on the data. While the theory behind coresets is very technical and requires elaborate tools
+from computational geometry to prove the strong theoretical guarantees, the resulting coreset construction algorithms are simple to implement.
+A key property of coresets is that they can be constructed
+both in a distributed and a streaming setting. The constructions rely on the property that both unions of coresets and
+coresets of coresets are coresets (Har-Peled & Mazumdar,
+2004) – albeit with different . Feldman et al. (2011) use
+these properties to construct coresets in a tree-wise fashion
+which can be parallelized in a Map-Reduce style or used to
+maintain an up-to-date coreset in a streaming setting.
+
+3. Coresets for DP-Means
+Our main contribution is the first construction of coresets
+for a class of nonparametric models: DP-Means.
+Definition 3.1. Let  > 0 and P be a set of n points in Rd .
+The weighted set C is an (, k̄)-coreset for the DP-Means
+clustering of P if for any query, i.e. any non-empty set Q,
+of at most k̄ centers in Rd
+|costDP (P, Q) − costDP (C, Q)| ≤  costDP (P, Q).
+If this property holds with k̄ = ∞, the weighted set C is
+called an -coreset.
+This definition already highlights the challenge of applying
+coresets to the nonparametric setting. The size of queries
+Q is not fixed as in the parametric setting and the coreset
+property has to hold uniformly for all query sizes. For the
+case of k̄ = ∞, queries can even be of unbounded size.
+3.1. Theoretical existence result using exponential grids
+Our first result shows the existence of -coresets for the DPMeans clustering problem that are sublinear in the number
+of data points n if the optimal number of centers k ∗ is sublinear in n. Naturally, if the optimal number of centers is
+linear in n, then no coreset sublinear in n can exist.
+Theorem 3.2. Let 0 <  ≤ 1 and let P be a set of n points
+in Rd . Then there exists an-coreset
+for the DP-Means
+
+d ∗
+clustering of P with size O d k dlog n where k ∗ is the
+optimal number of centers.
+Proof sketch. This result is obtained by applying the exponential grid approach of Har-Peled & Mazumdar (2004)
+to the DP-Means cost function. Assume that the optimal
+solution to the DP-Means clustering problem is known.
+
+Coresets for Nonparametric Estimation — the Case of DP-Means
+
+One can then build an exponential grid around each of the
+cluster centers and project all data points in a grid cell
+to an arbitrary representative.
+ be shown that the
+ d ∗ It can
+number of grid cells is O d k dlog n and that the sum of
+the cost differences induced by the projection is bounded
+by  costDP (P, Q) implying the required result. The full
+proof can be found in the Supplementary Materials.
+Remarkably, this result proves that coresets of sublinear
+size exist for queries of unbounded size. While this is an
+encouraging theoretical result, this coreset construction is
+not practical. Implementing the construction using exponential grids is tedious and the coreset size has an exponential dependence on the ambient dimension. Moreover,
+this construction assumes knowledge of the optimal solution – the very thing we aim to compute. Nevertheless, in
+the following section we show a practical coreset construction using importance sampling.
+
+Algorithm 1 DP-Means++
+Require: Set of data points P, parameter λ
+Uniformly
+P sample a ∈ P and set A = {a}
+while p∈P dist(p, A)2 > 16λ|A|(log2 |A| + 2) do
+Sample point a ∈ P with probability m(a) =
+2
+P dist(a,A) 0
+dist(p ,A)2 and add it to A
+0
+p ∈P
+
+Return approximate solution A of cardinality k 0
+
+Algorithm 2 Importance sampling scheme
+Require: Set of data points P, approximate DP-Means solution A of cardinality k 0
+α ← 16(log2 k 0 + 2) + 2
+c̄ ← costDP (P, A)/|P|
+for a ∈ A do
+Pa ← points p ∈ P whose closest center in A is a
+for a ∈ A and p ∈ Pa do P
+2
+
+3.2. Practical coresets using importance sampling
+Our practical coreset construction scheme builds upon the
+framework by Feldman & Langberg (2011). The idea is to
+first find a rough approximation (bicriteria approximation)
+to the optimal solution and then use this solution to
+calculate a non-uniform sampling distribution for the data
+points. The coreset is obtained by sampling a sufficient
+number of points from this distribution and setting the
+weights of the points inversely proportional to the sampling probabilities. The intuition is that any importance
+sampling scheme produces an unbiased estimator and that
+the variance of this estimator can be bounded. Using the
+theory of -approximators from computational geometry
+it can then be shown that for enough samples this leads to
+the required coreset property.
+Constructing a rough approximation to the optimal solution of a nonparametric model is a non-trivial task. For KMeans it is usually found by relaxing the clustering problem such as allowing the use of more than k cluster centers.
+This relaxation is not possible for DP-Means as the number of cluster centers used has a direct impact on the objective function. It is even harder as the rough approximation needs to be nonparametric and itself infer a reasonable
+number of cluster centers.
+For a DP-Means problem instance defined by a set of points
+P in Rd and a hyperparameter λ > 0, we propose the following coreset construction which is illustrated in Figure 1.
+It consists of three steps:
+Step 1 To find a (rough) approximation of the optimal solution we propose the algorithm DP-Means++
+(Algorithm 1) which is inspired by the seeding step of
+K-Means++ (Arthur & Vassilvitskii, 2007). K-Means++
+selects the initial cluster centers using k rounds of
+
+4α
+
+dist(p0 ,A)2
+
+p ∈Pa
++
++ 4|P|
+s(p) ← 2α dist(p,A)
+c̄
+|Pa |c̄
+|Pa | + 1
+for p ∈ P do
+q(p) ← P 0 s(p)s(p0 ) ;
+ 03p ∈P 0 
+k
+m ← O dk log
+2
+C ← sample m weighted points from P where each point
+1
+p has weight m·q(p)
+and is sampled with probability q(p)
+Return coreset C
+0
+
+D2 -sampling where the first cluster center is sampled
+uniformly and additional points are then sampled with
+probability proportional to the minimum squared distance
+to the already selected cluster centers. DP-Means++ also
+uses D2 -sampling but with a critical twist - the number
+of centers sampled is not fixed but inferred from the
+data using a stopping condition. Intuitively, this stopping
+condition manages the tradeoff between quantization error
+and penalization term which is the essential challenge of
+DP-Means clustering. Algorithm 1 produces solutions of
+size k 0 and is O(log k 0 ) competitive to the optimal solution.
+Furthermore, it can be shown that Algorithm 1 also provides us with an upper bound k̄ = k 0 (16(log2 k 0 + 2) + 1)
+on the optimal number of cluster centers k ∗ .
+Step 2 We sample an (, k̄)-coreset using the importance
+sampling scheme proposed in Algorithm 2. To bound the
+variance of our importance sampling scheme we sample
+each point with probability proportional to its sensitivity
+(Langberg & Schulman, 2010). The sensitivity s(p) of a
+point p ∈ P is an upper bound on the maximum ratio between the cost contribution of the point and the average
+contribution of all points. We derive the necessary bounds
+based on the results for DP-Means++ and bound the required coreset size for the DP-Means clustering problem
+(see Theorem 3.3 and Supplementary Materials).
+
+Coresets for Nonparametric Estimation — the Case of DP-Means
+
+(a) DP-Means++ solution
+
+(b) Sampling probabilities
+
+(c) Coreset with weights
+
+(d) Solution
+
+Figure 1. Coreset construction: (a) original dataset and the DP-Means++ approximate solution (red); (b) sampling probabilities (red
+signifies high probability); (c) resulting coreset and weights (red signifies a large weight); (d) cluster centers of the coreset solution (red).
+
+(Step 3) To approximately solve the full problem, any DPMeans solver can finally be applied to the (, k̄)-coreset if
+the solver can be extended to weighted data and to respect
+the known upper bound k̄, i.e. it can be ensured that it only
+evaluates the DP-Means cost function for clusterings with
+less than k̄ cluster centers. Both a brute-force approach
+based on solving K-Means for different values of k
+(explained in Section 4.2) and the DP-Means algorithm
+(Kulis & Jordan, 2012) satisfy this requirement.
+3.3. Analysis
+Our main contribution is stated in Theorem 3.3. It shows
+that the proposed method constructs valid (, k̄)-coresets.
+This implies that, given an optimal solver for the DP-Means
+problem, an arbitrarily small approximation error can be
+obtained by solving on the coreset (Corollary 3.4).
+Theorem 3.3. Let 0 <  < 1/4, λ > 0 and let P be a set of
+n data points in Rd . Let C be the weighted set returned by
+Algorithm 2 when applied to the result of Algorithm 1.
+Then the weighted set C is with constant probability an
+(, k̂)-coreset with k̂ = k 0 (16(log2 k 0 + 2) + 1) where k 0
+is the number of centers returned by Algorithm 1. The result holds with probability 
+at least 1 − δ if Algorithm
+1 is
+
+dk03 log k0 +k02 log δ1
+1
+repeated log δ times and O
+points are
+2
+sampled in Algorithm 2.
+Proof sketch. The proof builds upon Theorem 4.1 and
+Theorem 4.4 of Feldman & Langberg (2011). Firstly, we
+bound the sensitivities s(p) for the DP-Means cost function using the (rough) approximation of the optimal solution obtained in DP-Means++. This allows us to derive the
+sampling probabilities q(p). Secondly, we show that the
+total sensitivity is upper bounded by O(k 0 ) and that the dimension of the function space induced by the DP-Means
+cost function is upper bounded by d(k̄ + 1) where k̄ is the
+maximal number of cluster centers.
+Corollary 3.4. Let 0 <  < 1/4, λ > 0 and let P be a set
+of n data points in Rd . Let C be the weighted set returned
+
+by Algorithm 2 when applied to the results of Algorithm 1.
+For any optimal solver Q mapping a set of data points
+to a set of cluster centers, we have costDP (P, Q(C)) ≤
+1+
+1− costDP (P, Q(P))
+The number of points m to be sampled in Algorithm 2 depends on the size k 0 of the DP-Means++ solution. Our coresets are thus data-dependent and nonparametric since the
+size of the coreset scales with the complexity of the data.
+This stands in contrast to the fixed coreset sizes of existing
+constructions for parametric models. For theoretical completeness we provide comparable worst-case bounds on the
+required coreset size in Theorem 3.5. While there is an
+exponential dependency on d, the coreset size is sublinear
+in the number of data points n and only exhibits quadratic
+dependence on 1/.
+Theorem 3.5. Let 0 <  < 1/4, λ > 0 and let P be
+a set of n data points in Rd . Let C be the weighted set
+returned by Algorithm 2 when applied to the result of
+Algorithm 1. Then theweighted set C has size at most
+Õ d3d+2 k ∗ 3 (log n)3 /2 where k ∗ is the optimal number
+of centers of the DP-Means clustering problem and the
+Õ(·) notation subsumes any log k ∗ , log d and log log n
+terms.
+Proof. The proof relies on bounding k 0 based on k ∗ . By
+setting  to 1 in Theorem 3.2, we know that there exists
+a 1-coreset of size m = O(dd k ∗ log n). Consider all data
+points in such a coreset as a solution to the DP-Means problem. Its DP-Means cost on the same coreset is equal to mλ
+as the quantization error is zero. The DP-Means error on
+the full data set is upper bounded by 2mλ due to the coreset property. The quantization error on the full data set is
+thus smaller than or equal to mλ which in turn bounds the
+quantization error of the optimal K-Means++ solution for
+k = m. Since D2 -sampling provides us with a O(log m)
+approximation, the stopping condition in Algorithm 1 is
+satisfied for m implying that k 0 is of O(dd k ∗ log n).
+
+Coresets for Nonparametric Estimation — the Case of DP-Means
+
+4. Experimental results
+In this section we validate our theoretical results and
+demonstrate the usefulness of our coreset construction. We
+use the following datasets:
+
+Table 1. Parametrization of λ for different datasets and corresponding estimated number of clusters in optimal solution k̃ (values of λ are not comparable as λ is not invariant of the data)
+λ
+
+k̃
+
+1
+109
+103
+1010
+103
+
+160
+60
+60
+30
+70
+
+DATA SET
+
+• USGS (United States Geological Survey, 2010) — locations of 59’209 earthquakes between 1972 and 2010
+mapped to 3D space using WGS 84.
+
+USGS
+KDD
+CSN
+MSYP
+MNIST
+
+• CSN (Faulkner et al., 2011) — 7GB of cellphone accelerometer data processed into 80’000 observations
+and 17 features.
+• KDD (KDD Cup 2004, 2004) — 145’751 samples with
+74 features measuring the match between a protein and
+a native sequence.
+• MSYP (Bertin-Mahieux et al., 2011) — 90 features
+from 515’345 songs of the Million Song datasets used
+for predicting the year of songs.
+• MNIST (LeCun et al., 1998) — 70’000 images of
+handwritten digits of size 28×28 pixels transformed using randomized PCA with whitening to 10 dimensions.
+Our method works for instances of DP-Means with any
+value of λ; yet, for our experiments, we need to select
+a specific value. Choosing the “correct” value of λ for a
+dataset is a non-trivial task that is beyond the scope of this
+paper. For our purposes it is sufficient to use “reasonable”
+values of λ such that we can verify our theoretical results in
+a robust experimental setup. We want to ensure that our instances are neither degenerate (only one cluster in optimal
+solution) nor computationally infeasible (too many cluster
+centers in optimal solution). To ensure this, we solve KMeans for values of k between 5 and 200 to obtain a lower
+and upper bound on suitable values of λ. For each dataset
+we then select a value λ from this range (see Table 1) and
+roughly estimate the number of clusters k̃ in the optimal
+solution from the K-Means results. A similar approach
+was used by Kulis & Jordan (2012) where they first define the number of clusters k and then calculate λ based on
+a farthest-first heuristic.
+4.1. Random evaluations
+Both uniform subsampling and our coreset construction are
+instances of importance sampling and thus provide unbiased estimators of the cost function. The key difference is
+that coresets provide a bound on the variance leading to the
+coreset property as in Definition 3.1. In the first experiment
+we seek to validate this variance-reducing property.
+We first obtain a random query Q by sampling k̃ points uniformly at random from the original dataset. We then construct a weighted subset C of the data using either uniform
+subsampling or our coreset construction method. We calculate the DP-Means cost on the full dataset costDP (P, Q)
+
+Table 2. Normalized Shannon entropy of coreset sampling probabilities (a value of one signifies uniform sampling) and ratio
+between average variance νcs of coresets and average variance
+νunif of uniform subsampling
+
+DATA SET
+USGS
+KDD
+CSN
+MSYP
+MNIST
+
+N ORM . ENTROPY
+
+νcs /νunif
+
+0.97
+0.94
+0.85
+0.95
+0.99
+
+0.33
+0.01
+0.01
+0.02
+0.75
+
+and the weighted subset costDP (C, Q). By repeating this
+procedure
+500 times we obtain an unbiased estimator ν̂ 2 of
+ 2
+E ν , for both coresets and uniform subsampling where
+ν = (costDP (C, Q) − costDP (P, Q))/ costDP (P, Q).
+Figure 2 shows the estimated variance for different
+subsample sizes on several datasets. As expected, the
+variance decreases for both coresets and the uniform
+subsample as the sample size increases. For all datasets
+except MNIST, we further observe that coresets exhibit a
+significantly lower variance than the uniform subsamples
+which confirms our theoretical results. Interestingly, for
+MNIST coresets and uniform subsample perform similarly. One might think that this is a failure of the coreset
+method. However, a closer look at Table 2 reveals that the
+calculated coreset sampling weights are almost uniform
+(the normalized entropy is close to one). It turns out
+that for this dataset uniform subsampling is comparable
+with coresets due to the balanced nature of the data. In
+contrast, for the other datasets the coreset construction
+leads to less uniform sampling weights. For those cases,
+coresets exhibit the expected variance-reducing property
+and outperform uniform subsampling by up to a factor of
+100. This gap in variance widens, the more non-uniform
+the sampling weights are (see Table 2).
+
+Coresets for Nonparametric Estimation — the Case of DP-Means
+
+USGS
+
+Variance
+
+10−1
+
+Uniform
+
+10−2
+10−3
+10−4
+
+102
+
+103
+
+104
+
+105
+
+Subsample size
+
+Uniform
+
+100
+
+10−2
+
+10−3
+
+10−4
+
+102
+
+103
+
+10−4
+104
+
+105
+
+Subsample size
+
+Uniform
+
+10−1
+10−2
+
+Coreset
+
+CSN
+
+100
+
+10−1
+
+10−3
+
+Coreset
+
+KDD
+
+101
+
+10−5
+
+MSYP
+
+10−1
+
+Uniform
+
+10−2
+
+MNIST
+
+10−3
+
+Uniform
+
+10−4
+
+10−3
+
+102
+
+103
+
+10−5
+
+10−4
+
+Coreset
+104
+
+105
+
+10−5
+
+Coreset
+102
+
+Subsample size
+
+103
+
+104
+
+105
+
+10−6
+
+Subsample size
+
+Coreset
+102
+
+103
+
+104
+
+105
+
+Subsample size
+
+Figure 2. The variance of random query evaluations for coresets is lower or equal to the variance of uniform subsampling (averaged
+across 500 trials)
+
+4.2. Solving DP-Means on the subsample
+From the machine learning perspective, the ultimate interest in coresets is not the coreset property, but rather the
+solution to the original DP-Means clustering problem. In
+the following, we show that coresets indeed allow us to efficiently solve the clustering problem.
+Again, we compute a weighted subsample of the data either through uniform subsampling or our coreset construction. We then solve the DP-Means clustering problem on
+the weighted subset and compute the DP-Means cost Css
+of this solution on the full dataset. We further solve the
+clustering problem on the full dataset and obtain the corresponding DP-Means cost Cf ull . We are finally interested
+in the relative error η = (Css − Cf ull )/Cf ull . We use
+the following K-Means based procedure to solve the DPMeans clustering problem: We solve the K-Means clustering problem for different values of k chosen from a logarithmic grid1 of 20 points between 2−1 k̃ and 22 k̃ (see
+Table 1 for values of k̃). To solve one instance of the KMeans clustering we use a weighted version of K-Means++
+and LLoyd’s algorithm. We then compute the DP-Means
+cost for all solutions and choose the solution with the lowest error. The results in Table 3 demonstrate that this KMeans based solver significantly outperforms the original
+DP-Means algorithm (Kulis & Jordan, 2012) in terms of
+cost. The original DP-Means algorithm can easily get stuck
+in a local optimum with too few cluster centers, making it
+unsuitable for our experiments.
+Figure 3 shows the relative DP-Means error η for both uniform subsampling and coresets compared to the full solution. Again, we observe that the cost for the weighted
+subsamples converges to the cost of the full solution as we
+increase the subsample size. As in the results for random
+evaluations, coresets outperform uniform subsampling except for MNIST where they perform similarly.
+1
+
+The logarithmic grid leads to a very robust solver with results
+comparable across different runs for both coresets and uniform
+subsamples. In practice, if k̂ is unknown, one can solve K-Means
+for exponentially increasing values of k until the DP-Means error
+decreases and then use binary search to find the final solution.
+
+Table 3. DP-Means cost and number of clusters (#) for solutions
+based on K-Means grid solver and original DP-Means algorithm
+(Kulis & Jordan, 2012) as well as corresponding ratio (×) in cost
+
+DATASET
+USGS
+KDD (109 )
+CSN (103 )
+MSYP (1012 )
+MNIST (103 )
+
+G RID KM
+
+O RIG . DP-M EANS
+
+#
+
+C OST
+
+#
+
+C OST
+
+×
+
+156
+55
+58
+32
+65
+
+278.3
+244.6
+167.5
+2.1
+279.5
+
+8
+4
+16
+1
+1
+
+6634.7
+733.1
+379.8
+4.9
+701.0
+
+23.8
+3.0
+2.3
+2.4
+2.5
+
+While coresets offer better performance, they come at a
+price. We need to invest a fixed time to compute the sampling probabilities for the coreset construction while uniform subsampling is essentially free. We thus investigate
+whether it makes sense to invest this time into the coreset
+construction instead of using it to solve the problem on a
+slightly larger uniform subsample of the data.
+Figure 4 shows the DP-Means cost achieved in relation to
+the total time spent computing the subsample and solving
+the DP-Means problem. We observe that coresets offer a
+better time-quality tradeoff for USGS, KDD and CSN. For
+MSYP, the impact of construction time can be clearly seen.
+For a small time budget uniform subsampling is more efficient while coreset perform better for a larger time budget.
+For MNIST, coresets and uniform subsampling perform
+similarly; thus, coresets offer a slightly worse quality-time
+tradeoff due to the construction cost. Lucic et al. (2015) recently investigated tradeoffs in a more general setting and
+both empirically and theoretically demonstrated similar favorable time-quality tradeoffs for (parametric) coresets.
+There are several reasons why coresets are preferable to
+uniform subsampling. While uniform subsampling is competitive on some datasets, it can fail arbitrarily badly on
+other datasets. On the other hand, coresets can be seen as
+offering insurance against such “bad” datasets as their theoretical guarantees hold on all datasets. The cost for this
+“insurance” is the fixed time we require for the construction
+
+Relative error η
+
+Coresets for Nonparametric Estimation — the Case of DP-Means
+USGS
+
+101
+
+Uniform
+
+100
+10−1
+10−2
+
+Coreset
+102
+
+103
+
+104
+
+105
+
+KDD
+
+101
+
+Uniform
+
+100
+
+10−1
+
+10−2
+
+10−2
+
+Subsample size
+
+Coreset
+102
+
+103
+
+104
+
+105
+
+Uniform
+
+100
+
+10−1
+
+10−3
+
+CSN
+
+101
+
+10−3
+
+Subsample size
+
+Coreset
+102
+
+103
+
+104
+
+105
+
+MSYP
+
+100
+
+Uniform
+
+10−1
+
+10−1
+
+10−2
+
+10−2
+
+10−3
+
+Coreset
+102
+
+Subsample size
+
+103
+
+104
+
+105
+
+MNIST
+
+100
+
+10−3
+
+Subsample size
+
+Uniform
+
+Coreset
+102
+
+103
+
+104
+
+105
+
+Subsample size
+
+Relative error η
+
+Figure 3. Relative DP-Means error using coresets is lower than the one using uniform subsamples for fixed subsample size (500 trials)
+USGS
+
+101
+
+Uniform
+
+100
+10−1
+10−2
+
+Coreset
+
+10−2
+
+10−1
+
+100
+
+101
+
+KDD
+
+101
+
+Uniform
+
+100
+
+10−1
+
+10−2
+
+10−2
+
+Coreset
+
+10−1
+
+Time
+
+100
+
+101
+
+102
+
+Uniform
+
+100
+
+10−1
+
+10−3
+
+CSN
+
+101
+
+10−3
+
+Coreset
+
+10−2 10−1 100
+
+Time
+
+101
+
+102
+
+MSYP
+
+100
+
+Uniform
+
+100
+
+10−1
+
+10−1
+
+10−2
+
+10−2
+
+10−3
+
+Coreset
+
+10−1
+
+Time
+
+100
+
+101
+
+Time
+
+102
+
+10−3
+
+MNIST
+Uniform
+
+Coreset
+
+10−2 10−1 100
+
+101
+
+102
+
+Time
+
+Figure 4. Relative DP-Means error for coresets and uniform subsamples compared to total time used (500 trials). In most settings,
+coresets require less time to achieve fixed error than uniform subsampling.
+
+5. Conclusion
+
+Table 4. Results for KDD (5000 subsamples)
+
+S AMPLING TIME ( S )
+S OLVER TIME ( S )
+T OTAL TIME ( S )
+S PEEDUP
+DP-M EANS COST (109 )
+R ELATIVE ERROR η
+
+U NIFORM
+
+C ORESET
+
+F ULL
+
+0.01
+13.33
+13.33
+47.6 X
+299.54
+22.5%
+
+0.49
+13.49
+13.98
+45.4 X
+250.36
+2.4%
+
+635.07
+635.07
+1.0 X
+244.57
+0.0%
+
+of the dataset which is almost linear in the number of data
+points, i.e., O(n log n). Furthermore, in any practical case,
+we want to spend most time on solving the actual clustering
+problem by, e.g. choosing the subsample size reasonably
+large or running the solving algorithms several times with
+different initial seeds. This again reduces the impact of the
+construction time. For the case where the number of samples is prohibitively large to construct a coreset on the full
+dataset, a practical solution is to uniformly subsample the
+data to a size for which we can construct coresets and then
+to run the coreset generation. While having no theoretical
+guarantees with regards to the full clustering problem this
+generally still outperforms uniform subsampling.
+The results in Table 4 for the KDD dataset and subsample
+size 5000 illustrate the practical relevance of coresets in
+speeding up inference for DP-Means. Instead of using the
+full data, coresets with size 3.43% of the full data allow us
+to achieve a speedup of 45.4 times with only 2.4% relative
+error. At the same time naive uniform subsampling leads
+to an relative error of 22.5% with a runtime comparable to
+that of coresets. The runtime of the sampling step for coresets, i.e., DP-Means++, is negligible requiring only 0.49
+seconds or 3.5% of the total runtime of 13.98 seconds2 .
+
+In this paper, we have demonstrated how coresets can be
+used to address large-scale nonparametric DP-Means clustering problems. We have shown the theoretical existence
+of coresets for queries of arbitrary size – a key theoretical
+challenge in applying coresets to Bayesian nonparametrics.
+We also showed that it is sufficient to bound the maximal
+size of queries dependent on the data and have provided a
+simple, practical algorithm providing such data dependent
+coresets. We also empirically demonstrated that this practical method allows us to scale inference in DP-Means by
+several orders of magnitude while retaining guarantees on
+the approximation error.
+We believe that our results provide an important first step
+towards applying the technique of coresets to a more general class of Bayesian nonparametric models. We expect
+that – similar to recent developments in parametric models
+– it is possible to extend our techniques to more complex
+objective functions such as the log-likelihood of the Gaussian Dirichlet process mixture model or the HDP-Means
+problem (Kulis & Jordan, 2012). Coresets are a flexible
+tool as they only replace the full data set by a smaller representative set and thus can be combined with any method
+used to solve the original problem. As a result, we expect
+additional benefits by combining coresets with techniques
+for speeding up inference in Bayesian nonparametrics such
+as variational inference.
+
+2
+All experiments were run on an Intel Xeon machine with 24
+2.9GHz processors and 256GB RAM.
+
+Coresets for Nonparametric Estimation — the Case of DP-Means
+
+Acknowledgments
+We would like to thank Sebastian Tschiatschek and the
+anonymous reviewers for their comments. This research
+was partially supported by ERC StG 307036 and the Zurich
+Information Security Center.
+
+References
+Antoniak, Charles E. Mixtures of Dirichlet processes with
+applications to Bayesian nonparametric problems. The
+Annals of Statistics, pp. 1152–1174, 1974.
+Arthur, David and Vassilvitskii, Sergei. k-means++: The
+advantages of careful seeding. In SODA, pp. 1027–1035.
+SIAM, 2007.
+Bertin-Mahieux, Thierry, Ellis, Daniel P.W., Whitman,
+Brian, and Lamere, Paul. The million song dataset.
+In Proceedings of the 12th International Conference on
+Music Information Retrieval, 2011.
+Blei, David M and Jordan, Michael I. Variational inference
+for Dirichlet process mixtures. Bayesian Analysis, 1(1):
+121–143, 2006.
+Chen, Ke. On coresets for k-median and k-means clustering in metric and euclidean spaces and their applications.
+SIAM Journal on Computing, 39(3):923–947, 2009.
+Escobar, Michael D and West, Mike. Bayesian density
+estimation and inference using mixtures. Journal of
+the American Statistical Association, 90(430):577–588,
+1995.
+Faulkner, Matthew, Olson, Michael, Chandy, Rishi,
+Krause, Jonathan, Chandy, K Mani, and Krause, Andreas. The next big one: Detecting earthquakes and
+other rare events from community-based sensors. In 10th
+International Conference on Information Processing in
+Sensor Networks, pp. 13–24. IEEE, 2011.
+Feldman, Dan and Langberg, Michael. A unified framework for approximating and clustering data. In STOC,
+pp. 569–578. ACM, 2011.
+Feldman, Dan, Monemizadeh, Morteza, and Sohler, Christian. A PTAS for k-means clustering based on weak
+coresets. In SOCG, pp. 11–18. ACM, 2007.
+Feldman, Dan, Faulkner, Matthew, and Krause, Andreas.
+Scalable training of mixture models via coresets. In
+NIPS, pp. 2142–2150, 2011.
+Har-Peled, Sariel and Kushal, Akash. Smaller coresets for
+k-median and k-means clustering. In SOCG, pp. 126–
+134. ACM, 2005.
+
+Har-Peled, Sariel and Mazumdar, Soham. On coresets for
+k-means and k-median clustering. In STOC, pp. 291–
+300. ACM, 2004.
+KDD Cup 2004. Protein Homology Dataset. Available
+at http://osmot.cs.cornell.edu/kddcup/
+datasets.html, 2004.
+Kulis, Brian and Jordan, Michael I. Revisiting k-means:
+New algorithms via Bayesian nonparametrics. In ICML,
+pp. 513–520, 2012.
+Langberg, Michael and Schulman, Leonard J. Universal
+ε-approximators for integrals. In SODA, pp. 598–607.
+SIAM, 2010.
+LeCun, Yann, Bottou, Léon, Bengio, Yoshua, and Haffner,
+Patrick. Gradient-based learning applied to document
+recognition. Proceedings of the IEEE, 86(11):2278–
+2324, 1998.
+Lucic, Mario, Ohannessian, Mesrob I., Karbasi, Amin, and
+Krause, Andreas. Tradeoffs for space, time, data and risk
+in unsupervised learning. In AISTATS, 2015.
+MacEachern, Steven N. Estimating normal means with
+a conjugate style Dirichlet process prior. Communications in Statistics-Simulation and Computation, 23(3):
+727–741, 1994.
+MacEachern, Steven N, Clyde, Merlise, and Liu, Jun S. Sequential importance sampling for nonparametric bayes
+models: The next generation. Canadian Journal of
+Statistics, 27(2):251–267, 1999.
+Neal, Radford M. Markov chain sampling methods for
+Dirichlet process mixture models. Journal of Computational and Graphical Statistics, 9(2):249–265, 2000.
+Newton, Michael A and Zhang, Yunlei. A recursive algorithm for nonparametric analysis with missing data.
+Biometrika, 86(1):15–26, 1999.
+Orbanz, Peter and Teh, Yee Whye. Bayesian nonparametric
+models. In Encyclopedia of Machine Learning, pp. 81–
+89. Springer, 2010.
+United States Geological Survey. Global earthquakes
+(1.1.1972-19.3.2010). Retrieved from the mldata.org
+repository https://mldata.org/repository/
+data/viewslug/global-earthquakes/,
+2010.
+
+

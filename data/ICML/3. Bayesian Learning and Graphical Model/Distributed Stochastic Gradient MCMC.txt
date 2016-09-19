@@ -1,0 +1,1390 @@
+Distributed Stochastic Gradient MCMC
+Sungjin Ahn
+Department of Computer Science, University of California, Irvine
+Babak Shahbaba
+Department of Statistics, University of California, Irvine
+Max Welling
+Machine Learning Group, University of Amsterdam
+
+Abstract
+Probabilistic inference on a big data scale is becoming increasingly relevant to both the machine
+learning and statistics communities. Here we introduce the first fully distributed MCMC algorithm based on stochastic gradients. We argue
+that stochastic gradient MCMC algorithms are
+particularly suited for distributed inference because individual chains can draw mini-batches
+from their local pool of data for a flexible amount
+of time before jumping to or syncing with other
+chains. This greatly reduces communication
+overhead and allows adaptive load balancing.
+Our experiments for LDA on Wikipedia and
+Pubmed show that relative to the state of the art
+in distributed MCMC we reduce compute time
+from 27 hours to half an hour in order to reach
+the same perplexity level.
+
+1. Introduction
+Probabilistic inference methods that can operate on a very
+large data scale are becoming increasingly relevant in an
+era that data volume grows exponentially. Two promising directions in this respect are stochastic gradient variational inference (Hoffman et al., 2010) and stochastic gradient MCMC algorithms (Welling & Teh, 2011; Ahn et al.,
+2012; Patterson & Teh, 2013). The main innovation for
+both classes of algorithms is that only a small mini-batch of
+data is necessary for every update, allowing many more updates per time interval. In the context of MCMC this leads
+to much shorter burn-in times and faster mixing speeds.
+In this paper we are concerned with parallelizing stochasProceedings of the 31 st International Conference on Machine
+Learning, Beijing, China, 2014. JMLR: W&CP volume 32. Copyright 2014 by the author(s).
+
+SUNGJIA @ ICS . UCI . EDU
+
+BABAKS @ UCI . EDU
+
+M . WELLING @ UVA . NL
+
+tic gradient MCMC algorithms. The most straightforward, embarrassingly parallel implementation would be to
+copy the full dataset to each worker, run separate Markov
+chains and use their results as independent samples (see
+e.g. (Wilkinson, 2006; Laskey & Myers, 2003; Ahn et al.,
+2013)). However, the size of modern day datasets can be
+so large that a single machine cannot store the full dataset.
+In this case, one can still parallelize most MCMC algorithms by performing data-specific computations (e.g. the
+gradient of the log-probability for one data-case) locally on
+each relevant worker and combining these computations in
+a master server. The disadvantage of these methods is however that they lead to very high communication costs.
+We argue that MCMC algorithms based on stochastic minibatches have a key property that make them ideally suited
+for parallelization, namely that each Markov chain can independently generate samples for a variable amount of
+time, which can later be combined. The reason is that each
+chain can draw mini-batches from its local pool of data in
+order to generate samples. Chains must jump to other machines (synchronously or asynchronously) in order to generate unbiased estimates of the posterior in the limit, but
+the time spend on each worker is flexible provided that the
+chain’s hyper-parameters are properly adjusted to remove
+potential bias. This flexibility leads to less communication
+(because chains can run longer on individual workers) and
+entirely removes the problem that fast workers are blocked
+by slower workers because they depend on their results in
+order to proceed.
+We present distributed stochastic gradient Langevin dynamics (D-SGLD) and apply it to topic modeling. In this
+setting, we show that relative to the current fastest sequential MCMC sampler (Patterson & Teh, 2013), and the
+fastest approximate distributed MCMC samplers (Newman
+et al., 2007; Ahmed et al., 2012; Smola & Narayanamurthy,
+2010), D-SGLD achieves equivalent perplexities at least an
+order of magnitude faster.
+
+Distributed Stochastic Gradient MCMC
+
+2. Preliminaries
+Let X = {x1 , . . . , xN } be a dataset of N i.i.d. data points
+assumed to be sampled from a parameterized distribution
+p(x|θ) where θ ∈ Rd has a prior distribution p(θ). We
+are interested in collecting samples from the posterior distribution p(θ|X) ∝ p(X|θ)p(θ). As discussed above, we
+assume that the dataset X is too large to reside in a single machine. Therefore, it is partitioned into S subsets,
+called P
+shards: X1 , . . . , XS such that X = ∪s Xs and
+s
+s
+N =
+s Ns . We assign shard Xs = {x1 , . . . , xNs } to
+worker s, where s = 1, . . . , S. We refer to the posterior
+distribution based on a specific shard as local posterior:
+p(θ|Xs ) ∝ p(Xs |θ)p(θ).
+The score function or the gradient of the log likelihood
+given a data point x is denoted by g(θ; x) = ∇θ log p(θ; x).
+We also denote a mini-batch of n data points by X n when
+sampled from X and by Xsn when sampled from shard Xs .
+Additional time index t is used sometimes to distinguish
+n
+. The sum and
+mini-batches sampled over iterations: Xs,t
+mean of scores P
+over all elements of a set, X, are denoted
+1
+G(θ; X)
+by G(θ; X) = x∈X g(θ; x) and ḡ(θ; X) = |X|
+respectively. We now review two approaches to scale up
+MCMC algorithms; one by using mini-batches and the
+other by using distributed computational resources.
+2.1. Mini-batch-based MCMC
+The stochastic gradient Langevin dynamics (SGLD) proposed by Welling and Teh (2011) is the first sequential
+mini-batch-based MCMC algorithm. In SGLD, the parameters are updated as follows:
+θt+1 ← θt +
+
+t
+{∇ log p(θt ) + N ḡ(θt ; Xtn )} + νt .
+2
+
+(1)
+
+Here t is the step size and νt ∼ N (0, t ) is the injected Gaussian noise. The gradient of the log-likelihood,
+G(θt ; X), over the whole dataset is P
+approximated by scaling the mean score, ḡ(θt ; Xtn ) = n1 x∈X n g(θt ; x), comt
+puted based on a mini-batch Xtn of size n  N . SGLD
+does not use accept-reject tests because as the step size goes
+to zero the acceptance rate tends to one. Therefore, SGLD
+requires only O(n) computations to generate each sample,
+unlike traditional MCMC algorithms that require O(N )
+computations per iteration. Because computing ḡ(θt , Xtn )
+in parallel within a multi-core worker is straightforward,
+throughout the paper we assume that each worker is singlecore.
+We can generalize the SGLD update rule in Eqn. (1) by
+replacing the mean score ḡ(θt ; Xtn ) to a general form of
+score estimator f (θt , Z; X), where Z is a set of auxiliary
+random variables associated with the estimator. According
+to Welling & Teh (2011), an estimator f (θt , Z; X) is guaranteed to converge to the correct posterior if (i) f (θt , Z; X)
+
+P
+is an unbiased estimator of ḡ(θt ; X) = N1 x∈X g(θt ; x)
+(assuming the variance of f is finite) and (ii)Pthe step size
+∞
+is annealed
+P∞ 2to zero by a schedule satisfying t=1 t = ∞
+and t=1 t < ∞.
+Definition 1. We define an estimator f (θ, Z; X) as a valid
+SGLD estimator if it is an unbiased estimator of ḡ(θ; X),
+i.e., EZ [f (θ, Z; X)] = ḡ(θ; X), where EZ denotes expectation w.r.t. the distribution p(Z; X), and it has finite variance VZ [f (θ, Z; X)] < ∞.
+For an alternative way to speed-up MCMC by using a minibatch-based Metropolis-Hastings (MH) test, refer to Korattikara et al. (2014); Bardenet et al. (2014).
+2.2. Distributed Inference in LDA
+Distributing the workload using a cluster of workers is another way of speeding up MCMC. In this paper we are
+interested in topic models for which a number of distributed MCMC algorithms have already been developed
+(our method is more generally applicable however). In approximate distributed LDA (AD-LDA) by Newman et al.
+(2007) the computation cost per sample is reduced to O( N
+S)
+by allowing each worker to perform collapsed Gibbs sampling only on its local shard. AD-LDA also corrects (approximately) the biases in the local copies of the global
+states by allowing for regular global synchronization.
+However, AD-LDA suffers from some shortcomings. First,
+it becomes slower as the dataset size increases, unless additional workers are provided. Second, due to the global
+synchronization, it suffers from the “block-by-the-slowest”
+problem, meaning that some workers are blocked until the
+slowest worker finishes its task. Lastly, running parallel
+chains usually adds large overhead. Yahoo-LDA (Y-LDA)
+(Ahmed et al., 2012) performs asynchronous updates to
+resolve the block-by-the-slowest problem. However, the
+unbounded asynchronous updates could deteriorate performance (Ho et al., 2013).
+
+3. Distributed Stochastic Gradient Langevin
+Dynamics (D-SGLD)
+3.1. SGLD on Partitioned Datasets
+We begin the exposition of our algorithm with the following question: “Is an SGLD algorithm that samples minibatches from randomly chosen local shards valid?” The
+number of possible combinations of mini-batches that can
+be generated by this procedure is significantly smaller set
+than that of the standard SGLD. The answer will clearly
+depend on quantities like the shard sizes and shard selection probabilities. We now introduce an estimator ḡd in the
+proposition below as an answer to the above question (the
+proof is provided in the supplementary material).
+
+Distributed Stochastic Gradient MCMC
+
+Proposition 3.1. For each shard s = 1, . . . , S, given the
+shard size, Ns , and the normalized
+shard selection frePS
+quency, qs , such that Ns > 0, s=1 Ns = N , qs ∈ (0, 1),
+PS
+and s=1 qs = 1, the following estimator is a valid SGLD
+estimator,
+def
+
+ḡd (θ; Xsn ) =
+
+Ns
+ḡ(θ; Xsn )
+N qs
+
+(2)
+
+where shard s is sampled by a scheduler h(Q) with frequencies Q = {q1 , . . . , qS }.
+For example, we can (1) choose a shard by sampling
+s ∼ h(Q) = Category (q1 , . . . , qS ), (2) sample a minibatch Xsn from the selected shard, (3) compute mean score
+ḡ(θ; Xsn ) using that mini-batch, and then (4) multiply the
+mean score by NNqss to correct the bias. Then, the resulting
+SGLD update rule becomes
+
+
+Nst
+t
+n
+∇ log p(θt ) +
+ḡ(θt ; Xst ) + νt . (3)
+θt+1 ← θt +
+2
+qst
+We can interpret this as a correction to the step sizes for the
+ḡ(θt ; Xsnt ) term. That is, the algorithm takes larger steps
+for shards that are relatively larger in size and/or used less
+frequently than others. This implies that every data-case
+contributes equally to the mixing of the chain. Note that Q
+represent free parameters that we can choose depending on
+the system properties.
+3.2. Traveling Worker Parallel Chains
+Now assume that the shards are distributed between the
+workers, so from now on selecting shard s is equivalent
+to choosing worker s. We note that running the above algorithm occupies only a single worker at a time. Therefore,
+assuming single-core workers, it is possible to run C (≤ S)
+independent and valid SGLD chains in parallel, i.e., one
+chain per worker.
+This approach, however, has some shortcomings. First, the
+communication cycle is still short O(n) because each chain
+is required to jump to a new worker at every iteration. Second, it can suffer from the block-by-the-slowest problem if
+its next scheduled worker is still occupied by another chain
+due to workers’ imbalanced response delays. The response
+delay, denoted by ds , is defined as the elapsed time that
+worker s spends to process a O(n) workload. In the following sections, we present our method to address these
+issues.
+3.2.1. D ISTRIBUTED T RAJECTORY S AMPLING
+To deal with the “short-communication-cycle” problem, we
+propose to use trajectory sampling: instead of jumping
+to another worker at every iteration, each chain c takes τ
+consecutive updates in each visit to a worker. Then, after τ updates, only the last (τ th) state is passed to the next
+
+worker of the chain. Trajectory sampling reduces communication overhead by increasing the communication cycle
+from O(n) to O(τ n). Furthermore, instead of transferring
+all samples collected over a trajectory to the master, we can
+store them in a distributed way by caching each trajectory
+at its corresponding worker. This keeps the packet size at
+O(1) regardless of the trajectory length, and mitigates the
+memory problem caused by storing many high-dimension
+samples at a single machine.
+In trajectory sampling for parallel chains, we employ a
+scheduler hc (Q) for each chain c to choose the next worker
+from which the next trajectory is sampled. Note here that
+the scheduler is now called with an interval τ . Because
+there are a total of C such schedulers (one per chain), the
+schedulers should avoid two situations in order to be efficient: (1) collision (i.e., multiple chains visit a worker
+at the same time), and (2) jump-in-place (i.e., jumping to
+the current worker) can negatively affect mixing across
+shards. One way to avoid these issues is to set Q uniform, and simply use a random permutation (or, cyclic rotation) to assign chains to workers. That is, we can sample the chain-to-worker assignments by (s1 , . . . , sC ) ∼
+(h1 (Q), . . . , hC (Q)) = RANDPERM(S). Here, sc denotes
+a worker that chain c is scheduled to visit; we assume
+C = S for simplicity.
+Similar to the effect of step sizes in standard SGLD, trajectory lengths can also be used to control the level of approximation by trading off computation time with asymptotic
+accuracy. As both the trajectory length and the annealed
+step sizes {t } can affect the equilibrium distribution of the
+chain, we consider first that  is fixed. Then, with a long
+trajectory, we can reduce the communication overhead at
+the cost of some loss in asymptotic accuracy. In fact, it
+is not difficult to see that in this casePour method samples
+S
+from a mixture of local posteriors, S1 s=1 p (θ|Xs ) at one
+end of the spectrum where long trajectory lengths are used,
+and it approaches the true posterior at the other end of the
+spectrum with short trajectory lengths ( is small enough).
+Note that this is indeed the desired behavior when dealing with massive datasets. That is, as N → ∞, the local posteriors become close to the true posterior and thus
+the error decreases by the central limit theorem (provided
+Xs is a uniform random partition of X): ḡ(θ; Xs ) ∼
+N (E[g(θ; x)], Cov[g(θ; x)]/Ns ). Therefore, as the dataset
+increases, we can increase the trajectory length accordingly
+without a significant loss in asymptotic accuracy. The following Corollary 3.2 states that for any finite τ , trajectory
+sampling is a valid SGLD (assuming the step sizes decrease
+to zero over time).
+Corollary 3.2. A trajectory sampler with a finite τ ≥ 1,
+obtained by redefining the worker (shard) selection process
+h(Q) in Proposition 3.1 by the process h(Q, τ ) below, is a
+
+Distributed Stochastic Gradient MCMC
+m1!
+
+m1!
+
+m1!
+
+m2!
+
+m2!
+
+m2!
+
+m3!
+
+m3!
+
+m3!
+
+m4!
+
+m4!
+
+m4!
+
+(a) Without load balancing, τ = 3
+(b) With load balancing, τ̄ = 25/4
+(c) With load balancing, τ̄ = 75/16
+Figure 1. Illustration of adaptive load balancing. Each row represents a worker and the chains are represented by different colors. The
+box filled by diagonal lines are block-time, and at the vertical dotted lines represent chains jumping to other workers. A sample is
+collected at each arrow whose length represents the time required to collect the sample. In the present example, four workers have
+different response delays, 3, 1, 2, and 4, respectively. In (a) τ is set to a constant τ = 3 for all workers, and in (b) with τ̄ = 25
+, the
+4
+75
+trajectory plan becomes T = (4, 12, 6, 3), and in (c), T = (3, 9, 4.5, 2.25) with τ̄ = 16
+.
+
+valid SGLD sampler. h(Q, τ ) : for chain c at iteration t,
+choose the next worker sct+1 by
+(
+h̃(Q), if t = kτ for k = 0, 1, 2, . . .
+c
+(4)
+st+1 =
+sct ,
+otherwise,
+where h̃(Q) is an arbitrary scheduler with selection probabilities Q.
+3.2.2. A DAPTIVE L OAD BALANCING
+Using trajectory sampling, we can mitigate the shortcommunication-cycle problem. Moreover, if response delays are balanced, we can set Q to be uniform and use a
+random permutation scheduler to keep the block-by-theslowest delay small. However, for imbalanced response
+delays, using uniform Q would lead to long block-by-theslowest delays (See, Fig. 1 (a)). In this section, we propose
+a solution to balance the workloads by adapting Q to the
+worker response delays.
+The basic idea is to make the faster workers work longer
+until the slower workers finish their tasks so that the overall
+response times of the workers become as balanced as possible. For instance, twice longer trajectories can be used
+for a worker that is twice as fast. More specifically, we
+achieve this by (1) having uniform worker selection and (2)
+setting the trajectory length
+of worker s to τs = qs τ̄ S;
+PS τs−1
+d
+(i.e., the relative speed of
+here, qs is set to d−1
+s /
+z
+z=1
+worker s),P
+and τ̄ is a user-defined mean trajectory length:
+1
+E[τs ] =
+s S qs τ̄ S = τ̄ (the expectation is w.r.t. the
+worker selection probability 1/S).
+
+by redefining the worker (shard) selection process h(Q)
+in Proposition 3.1 by the process h(Q, {τs }) below, is a
+valid SGLD sampler. h(Q, {τs }) : for chain c at iteration
+t, choose the next worker sct+1 by
+(
+h̃(1/S), if t = kτsct for k = 0, 1, 2, . . .
+c
+(5)
+st+1 =
+otherwise,
+sct ,
+where h̃(1/S) is a scheduler with uniform selection probabilities.
+Our method can deal with temporal imbalances as well.
+To this end, the master needs to monitor the changes in
+response delays; when a substantial change is detected, a
+new trajectory plan can replace the old one. Note that although this online adaptation affects the Markov property,
+it can still converge to correct target distribution assuming
+that the adaptation satisfies the Corollary 3.3 and the response delays converge fast enough. Refer to Andrieu &
+Thoms (2008) for the details of the “fast enough” condition. Pseudo code for the proposed D-SGLD method is
+presented in Algorithm 1.
+3.2.3. VARIANCE R EDUCTION BY C HAIN C OUPLING
+
+In other words, we select a worker uniformly and perform
+trajectory sampling of length τs , which is proportional to
+the relative speed of the worker, qs . (If τs is not an integer,
+we can either adjust τ̄ to make it integer or take simply the
+closest integer.) Note that using unequal trajectory lengths
+across the workers remains a valid SGLD because the step
+sizes are properly corrected by Eqn. (2) where qs ∝ τs .
+
+Here, we introduce one approach that could reduce the
+variance of the gradient estimator in Eqn (2) by having
+some interactions among the chains. The basic idea is
+to “tie” a group of chains by averaging their corresponding samples. More specifically, consider R ≤ S chains
+forming a group and staying at a state θt at time t, i.e.,
+θtr = θt for r = 1, . . . , R. After an update using the standard SGLD update rule in Eqn. (1), we have R different
+1
+, . . . , θR . By averaging the new states, we have
+states θt+1
+PR t+1
+1
+r
+, which is
+θt+1 = R r=1 θt+1
+
+
+
+X
+t 
+N
+∇ log p(θt ) +
+θt +
+g(θt ; x) + ν̄t (6)
+
+2 
+nR
+n
+
+This is illustrated in Figure 1 and stated in Corollary 3.3.
+Corollary 3.3. Given τs , where 1 ≤ τs < ∞ for
+s = 1, . . . , S, the adaptive trajectory sampler, obtained
+
+PR
+Here we used R1 r=1 ∇ log p(θtr ) = ∇ log p(θt ) and
+P
+R
+1
+r
+r
+r=1 θt = θt noting that θt = θt for all r. Note that
+R
+
+x∈∪r Xt,r
+
+Distributed Stochastic Gradient MCMC
+0.2
+
+0.2
+
+0.15
+
+0.15
+
+0.1
+
+0.1
+
+0.05
+
+0.05
+
+0
+
+0
+
+−0.05
+
+−0.05
+
+−0.1
+
+−0.1
+
+−0.15
+
+−0.15
+−0.1
+
+0
+
+0.1
+
+0.2
+
+(a) Without correction
+
+−0.1
+
+0
+
+0.1
+
+0.2
+
+(b) With correction
+
+(c) τ = 10,000
+
+(d) τ = 200
+
+Figure 2. Bias correction and trajectory length effects.
+
+Algorithm 1 D-SGLD Pseudo Code
+1: function M ASTER (S, C, τ̄ )
+2:
+while sampling do
+3:
+Monitor response delays {ds }
+4:
+if {ds } are changed enough then
+PS
+−1
+5:
+Adapt τs ← τ̄ Sd−1
+s /
+z=1 dz , ∀s
+6:
+end if
+7:
+Assign workers (s1 , . . . , sC ) ∼ RANDPERM(S)
+8:
+for each chain c parallel do
+9:
+θc ← SAMPLE TRAJ (sc , c, θc , τs ) (line 13)
+10:
+end for
+11:
+end while
+12: end function
+13: function SAMPLE TRAJ(c, θ, τs )
+14:
+Initialize θ1 ← θ
+15:
+for t = 1 : τs do
+16:
+Sample a mini-batch Xsn and noise ν ∼ N (0, )
+17:
+Obtain θt+1 by Eqn. (3) (set qs = τ̄τSs )
+18:
+end for
+19:
+Set trajectory, Tc ← (θ1 , . . . , θτs −1 )
+20:
+Store (append) trajectory, Θcs ← [Θcs , Tc ]
+21:
+Send the last state θτs to the master
+22: end function
+
+PR
+although the averaged noise ν̄t = R1 r=1 νtr has smaller
+variance N (0, Rt ) than the standard SGLD, we can recover
+a valid SGLD with additional noise1 ηt ∼ N (0, R−1
+R t )
+so that ν̄t + ηt ∼ N (0, t ). By the central limit theorem, the variance of the estimator of ḡ(θt ; X) reduces from
+Cov[g(θ;x)]
+to Cov[g(θ;x)]
+.
+n
+Rn
+Although this approach leads to a valid SGLD with reduced
+variance in the gradient estimation, unfortunately it is difficult to perform the trajectory sampling in this case since it
+requires communication among chains at each update. One
+way to bypass this issue is to employ the averaging strategy
+only at the end of each trajectory during the burn-in period.
+Alternatively, we can also gradually reduce the number of
+chains being coupled. Note that although coupling chains
+1
+
+The correction cannot be used for the LDA experiments because for SGRLD the noise term depends on current state θtr .
+
+imposes algorithmic dependency, it is weaker than other
+algorithms (e.g., AD-LDA) that require synchronizations
+for all workers since (i) the number of dependent chains,
+R, in our method is relatively small (R < S), and (ii) the
+response delays are already balanced by the adaptive trajectory sampling.
+
+4. Experiments
+4.1. Simple Demonstration
+We first illustrate our proposed method based on sampling from a multivariate normal posterior distribution obtained by assuming a normal prior N (µx ; µ0 , Σ0 ) on the ddimension mean µx of a normal distribution N (x; µx , Σx )
+from which we have observed N samples. Because this is
+a conjugate prior, the posterior distribution is also a normal
+distribution.
+To examine the bias correction effect, we allocated a total
+of 20,000 data points to a cluster of 20 workers. Furthermore, we made the shard sizes {Ns } highly imbalanced by
+setting Ns = 500 for 10 workers and setting Ns = 1500 for
+the remaining 10 workers. Then, to impose a higher level
+of imbalance, we also used the small shards 7 times more
+often than the large shards by setting the trajectory lengths
+for the small shards to 70 and those for the large shards to
+10. We set the step size  to 10−7 and the mini-batch size
+to n = 300.
+In Fig. 2 (a) and (b), the black dotted circles represent
+the 2-d marginal covariance centered at the mean of the
+20 local posteriors. Note that these are rescaled such that
+small circles represent the local posteriors based on small
+shards, whereas the large circles represent the local posteriors based on large shards. Also, the red circle represents
+the true posterior, and the dotted blue circle represents the
+empirical distribution based on our samples. As we can
+see, our algorithm corrects the bias. We have evaluated our
+method for various dimensions (up to d = 100) and found
+similar results.
+The effect of trajectory lengths is also tested in Fig. 2 (c)
+and (d) using two different trajectory lengths, τ = 10, 000
+
+Distributed Stochastic Gradient MCMC
+
+and τ = 200, for a cluster of 4 workers. Here, the shard
+size was set to 2,000 for each worker, the trajectory lengths
+were kept the same for all workers, and the step size, ,
+was set to 2 × 10−6 . As described in section 3.2.1, we
+can see that D-SGLD samples from a mixture of the local
+posteriors with long trajectory lengths and becomes close
+to the standard SGLD posterior as the length decreases.
+4.2. Distributed Latent Dirichlet Allocation
+Next, we evaluate our method based on an important distributed inference problem, namely, large-scale LDA, by
+comparing the following algorithms:
+(a) AD-LDA: In AD-LDA, to obtain a single sample, each
+worker s performs collapsed Gibbs iterations only on the
+full local shard (and is thus approximate), and then synchronizes its local topic assignments nskw (for topic k and
+word w) at the master to obtain
+PSthe global state nkw based
+on the update nkw ← nkw + s=1 (nkw − nskw ). Then, the
+local state is updated by the new global state, nskw ← nkw .
+It is shown that in practice AD-LDA shows comparable
+perplexities to the standard collapsed Gibbs sampling.
+(b) Async-LDA (Y-LDA): Unlike AD-LDA, Y-LDA
+(Ahmed et al., 2012; Smola & Narayanamurthy, 2010) performs asynchronous updates
+PS for the global state by the update, nk,w ← nk,w + s=1 (ñsk,w − nsk,w ). Here, ñsk,w is
+a copy of the old local state at the time of previous synchronization. Because Y-LDA is a specific implementation optimized along with many other dimensions, we implemented an algorithm called Async-LDA which replaces
+the update of AD-LDA with the asynchronous update of
+Y-LDA. Async-LDA was used to compare with the load
+balancing ability of D-SGLD.
+(c) SGRLD: Stochastic gradient Riemannian Langevin dynamics (SGRLD) (Patterson & Teh, 2013) is a specific
+SGLD sampler designed to sample from the probability
+simplex using Riemannian manifold. For LDA, SGRLD
+achieved fast mixing rate and resulted in the state-of-the-art
+performance. Note that SGRLD runs on a single machine
+without communication overhead. Specifically, SGRLD
+samples from a W -dimension topic probability simplex θk ,
+and the mean score ḡ(θkw ; Xtn ) in the update rule is obtained by
+
+
+ndkw
+ndk·
+1 X
+Ezd |wd ,θ,α
+−
+(7)
+ḡ(θkw ; Xtn ) =
+n
+θkw
+θk·
+n
+d∈Xt
+
+where the expectation is computed by running a collapsed
+Gibbs sampler on the topic assignments zd in each document d separately. Refer to Patterson & Teh (2013) for the
+full update equation.
+Following Patterson & Teh (2013), we set the mini-batch
+size to 50 documents, and for each update of Eqn. (7) we
+
+ran 100 Gibbs iterations for each document in the minibatch. The step-sizes were annealed by a schedule t =
+a(1 + t/b)−c . As we fixed b = 1000 and c = 0.6, the entire
+schedule was set by a which we choose by running parallel
+chains with different a’s and then choosing the best.
+(d) D-SGLD: Our algorithm, D-SGLD for LDA, is built
+upon SGRLD. To use SGRLD as our base sampler, we only
+need to multiply the bias correction factor NNqss to Eqn. (7).
+We used cyclic rotation as the chain-to-worker scheduler
+and set the trajectory length τ = 10 for all workers while
+we kept other parameters the same as for SGRLD by default.
+In particular, to see the effect of the variance reduction
+(i.e., sample averaging), we implemented three different versions of D-SGLD, (i) Complete Coupling (D-CC),
+(ii) Complete Independent (D-CI), and (iii) Hybrid (DHybrid). D-CC couples all chains; whereas, D-CI runs independent chains without any interaction among them. DHybrid partitions the chains into groups and the averaging
+is performed only for the chains in the same group. When
+the variance reduction is used, it was performed at the end
+of each trajectory; we did not inject any additional noise
+for correction.
+Additionally, we used the following settings for all algorithms. The predictive perplexities were computed on
+1000 separate holdout set, with a 90/10 (training/test) split,
+and LDA’s hyper-parameters were set to α = 0.01 and
+β = 0.0001 following Patterson & Teh (2013). The number of topics K was set to 100. Parallelism within a worker
+is not considered, although D-SGLD can be easily parallelized within a worker.
+We evaluate these methods based on the following datasets:
+(i) Wikipedia corpus, which contains 4.6M articles of approximately 811M tokens in total. We used the same vocabulary of 7702 words as used by Hoffman et al. (2010).
+(ii) PubMed Abstract corpus contains 8.2M articles of approximately 730M tokens in total. After removing stopwords and low occurrence (less than 300) words, we obtained a vocabulary of 39,987 words. For our Python implementation, each of the datasets has 47GB memory footprint.
+Perplexity. We first compare the above algorithms in terms
+of the convergence in perplexity over wall-clock time on 20
+homogeneous workers dedicated to the given task only. For
+D-Hybrid, we set the number of groups, G, to 5 and 3 for
+Wikipedia and Pubmed respectively. For Wikipedia, we set
+the group size to R = 4. For Pubmed, we set the sizes of
+the three groups to 7,7, and 6. To examine the effect of the
+variance reduction strategy, it was continued until the end
+of the experiment, as opposed to stopping at some point.
+The step size parameter a was set to 0.0001 for Wikipedia
+
+Distributed Stochastic Gradient MCMC
+
+1000
+800 1
+10
+
+2
+
+10
+
+3
+
+4
+
+10
+10
+Seconds (Log)
+
+5
+
+10
+
+3000
+2500
+2000
+1500
+1
+10
+
+2
+
+10
+
+3
+
+4
+
+10
+10
+Seconds (Log)
+
+1650
+1450
+1250
+1050
+850 1
+10
+
+5
+
+10
+
+2
+
+3
+
+1550
+
+Figure 3. Perplexity. Left: Wikipedia, Right: Pubmed.
+
+SGRLD
+2.6 hr.
+16.7 hr.
+
+AD-LDA
+27.7 hr.
+27.7 hr.
+
+Perplexity (Log)
+
+Wikipedia
+Pubmed
+
+D-SGLD
+10 min.
+33 min.
+
+Dataset size. In D-SGLD the computation cost per sample
+O(n) is independent of N . AD-LDA, on the other hand,
+becomes slower as N increases. To see the effect of N ,
+we examined the algorithms on random subsets of the full
+dataset with different sizes, 100K, 1000K, and full, using
+20 homogeneous workers. For N =[100K, 1000K, full],
+the initial step sizes a were set to respectively a=[0.005,
+0.0005, 0.0001] for Wikipedia and a=[0.01, 0.005, 0.0005]
+for Pubmed.
+As shown in Fig. 5, for Wikipedia, D-SGLD showed similar convergence in perplexity (they increase slightly as
+the size of datasets decreases) while providing better re-
+
+1250
+1150
+1050
+
+3000
+2500
+2000
+
+2
+
+3
+
+4
+
+10
+10
+Iteration (Log)
+
+3900
+3600
+3300
+3000
+
+10
+
+G=1 (R=4)
+G=3 (R=4)
+G=5 (R=4)
+G=10 (R=4)
+
+2700
+2400
+2100
+1800
+
+850 1
+10
+
+2
+
+3
+
+1500
+1
+10
+
+4
+
+10
+10
+Iteration (Log)
+
+10
+
+2
+
+3
+
+4
+
+10
+10
+Iteration (Log)
+
+10
+
+Figure 4. Group size and number of groups. Top: group size, Bottom: number of groups, Left: Wikipedia, Right: Pubmed.
+
+and to 0.0005 for Pubmed.
+
+For the three different versions of D-SGLD, we see that DCC and D-Hybrid (which use the sample averaging) converge faster than D-CI (which uses independent chains).
+However, when we couple too many chains as shown in DCC, it could lead to some lose of accuracy (possibly, due
+to the bias by the coupling). Hence, in the following experiments, we only use hybrid D-SGLD; a proper group
+configuration is chosen by cross-validation. Fig. 4 shows
+other effects of the group configuration by increasing group
+size (R) and number of groups (G).
+
+1350
+
+950
+
+Table 1. Required time to reach the perplexity that AD-LDA obtains after running 105 seconds (27.7 hours).
+
+1800
+
+D−SGLD(100K)
+D−SGLD(1M)
+D−SGLD(4.6M)
+AD−LDA(100K)
+AD−LDA(1M)
+AD−LDA(4.6M)
+
+1600
+Perplexity (Log)
+
+In Fig. 3 (a) and (b), we first see that all the variants
+of D-SGLD significantly outperform both AD-LDA and
+SGRLD. Note that AD-LDA ran in an ideal setting where
+each worker has equal workloads (in terms of shard size)
+resulting in negligible block-by-the-slowest delays. As
+shown in Table 1, D-SGLD required substantially shorter
+times than AD-LDA and SGRLD to reach the same perplexity level that AD-LDA achieves after running 105 seconds (27.7 hours) indicated by the black horizontal dotted
+line. Throughout the experiments, Async-LDA always performed worse than AD-LDA given balanced workloads.
+
+10
+
+G=1 (R=4)
+G=3 (R=4)
+G=5 (R=4)
+G=10 (R=4)
+
+1450
+
+3500
+
+1500 1
+10
+
+4
+
+10
+10
+Iteration (Log)
+
+R=1 (G=1)
+R=2 (G=1)
+R=4 (G=1)
+R=10 (G=1)
+R=20 (G=1)
+
+4000
+Perplexity (Log)
+
+1200
+
+3500
+
+4500
+
+R=1 (G=1)
+R=2 (G=1)
+R=4 (G=1)
+R=10 (G=1)
+R=20 (G=1)
+
+1850
+
+Perplexity (Log)
+
+1400
+
+2050
+
+D−Hybrid
+D−CC
+D−CI
+SGRLD
+AD−LDA
+
+1400
+
+Perplexity (Log)
+
+1600
+
+Perplexity (Log)
+
+Perplexity (Log)
+
+5000
+4500
+4000
+
+D−Hybrid
+D−CC
+D−CI
+SGRLD
+AD−LDA
+
+1800
+
+Perplexity (Log)
+
+2000
+
+1200
+1000
+
+800 1
+10
+
+2
+
+10
+
+3
+
+4
+
+10
+10
+Seconds (Log)
+
+5
+
+10
+
+5600
+5000
+4400
+3800
+
+D−SGLD(100K)
+D−SGLD(1M)
+D−SGLD(8.2M)
+AD−LDA(100K)
+AD−LDA(1M)
+AD−LDA(8.2M)
+
+3200
+2600
+2000
+
+1400 1
+10
+
+2
+
+10
+
+3
+
+4
+
+10
+10
+Seconds (Log)
+
+5
+
+10
+
+Figure 5. Dataset size. Left: Wikipedia, Right: Pubmed
+
+sults than AD-LDA in all settings. However, for Pubmed,
+which has a larger vocabulary and is expected to have a
+larger number of topics, D-SGLD was not better than ADLDA for the small (100K) dataset while still had better
+performance for larger datasets. In fact, SGRLD seemed
+to work less efficiently (and so does D-SGLD) for rather
+small datasets as shown by Patterson & Teh (2013) based
+on the NIPS corpus. Nevertheless, we found that (results
+not shown here) D-SGLD outperforms a single SGRLD
+based on a 100K dataset.
+Number of workers. We also varied the number of workers while fixing the dataset size to the full. In Fig. 6, we
+show the results for three cluster sizes, S = [20, 40, 60].
+As expected, AD-LDA improves linearly by increasing the
+number of workers (i.e., by reducing local shard sizes). For
+D-SGLD, we fixed G to 5 and increased only the group size
+R to 4, 8, 12. Although more workers imposed more communication overhead during sample averaging, D-SGLD
+showed its scalability by keeping the performance at a similar level (for Pubmed, it is improved). From this result,
+we calculated the number of workers required by AD-LDA
+to show a similar speed as D-SGLD with 20 workers. As
+shown in the Fig. 6, AD-LDA needs 2000 workers for
+Wikipedia and 800 workers for Pubmed to obtain a sim-
+
+Distributed Stochastic Gradient MCMC
+
+1200
+1000
+800 1
+10
+
+1650
+
+3000
+D−SGLD(S=20)
+D−SGLD(S=40)
+D−SGLD(S=60)
+AD−LDA(S=20)
+AD−LDA(S=40)
+AD−LDA(S=60)
+(AD−LDA(S=800))
+
+2500
+2000
+1500
+
+2
+
+10
+
+3
+
+4
+
+10
+10
+Seconds (Log)
+
+5
+
+1
+
+10
+
+10
+
+2
+
+10
+
+4
+
+1600
+
+10
+10
+Seconds (Log)
+
+10
+
+1350
+1100
+850 1
+10
+
+5500
+5000
+4500
+4000
+3500
+3000
+2500
+2000
+
+2
+
+10
+
+3
+
+4
+
+10
+10
+Seconds (Log)
+
+5
+
+10
+
+1500 1
+10
+
+(1:1)
+LB(1:5)
+LB(1:10)
+No−LB(1:5)
+No−LB(1:10)
+Async−LDA(1:1)
+Async−LDA(1:5)
+Async−LDA(1:10)
+2
+
+10
+
+1050
+850
+
+650 1
+10
+
+5
+
+Perplexity (Log)
+
+1850
+
+Perplexity (Log)
+
+Perplexity (Log)
+
+(1:1)
+LB(1:5)
+LB(1:10)
+No−LB(1:5)
+No−LB(1:10)
+Async−LDA(1:1)
+Async−LDA(1:5)
+Async−LDA(1:10)
+
+1250
+
+900
+
+SGRLD
+D−SGLD
+
+850
+800
+750
+700
+
+3
+
+Figure 6. Number of workers. Left: Wikipedia, Right: Pubmed
+2600
+2350
+2100
+
+950
+
+SGRLD(K=100)
+SGRLD(K=300)
+SGRLD(K=500)
+D−SGLD(K=100)
+D−SGLD(K=300)
+D−SGLD(K=500)
+
+1450
+
+Perplexity
+
+1400
+
+5000
+4500
+4000
+3500
+
+3
+
+4
+
+5
+
+10
+
+Figure 7. Load balancing. Left: Wikipedia, Right: Pubmed.
+
+ilar speed as D-SGLD. (This simple calculation does not
+include the communication overhead.)
+Load balancing. We also examined D-SGLD’s ability to
+balance the workloads and thus mitigate the block-by-theslowest problem on 20 workers. To do this, we added
+dummy delays to half of the workers to make them D times
+slower. We denote this setting by (1:D) and used three settings: D = [1, 5, 10]. The actual response delays then became equal, for example, by setting the trajectory length to
+10 for slow workers and to D × 10 for fast ones. The initial
+step size a was set to 0.005 for all settings of Wikipedia
+and to 0.001 for all settings of Pubmed. Here, we used
+100K Wikipedia and 1000K Pubmed corpus because the
+Async-LDAs (as well as AD-LDA) were too slow for the
+full datasets. As shown in Fig. 7, D-SGLD with loadbalancing through adaptive trajectory sampling converges
+much faster than those without load-balancing; it also converges faster than Async-LDA.
+Number of topics. We tested the effect of the number of
+topics K by examining K=[100,200,300,400,500] on 20
+homogeneous workers. As shown in Fig.8, although the
+packet size increases for large K, D-SGLD consistently
+outperforms SGRLD for all K.
+
+5. Conclusion
+We have introduced a novel algorithm, “distributed
+stochastic gradient Langevin dynamics (D-SGLD)”. Using D-SGLD, the advantages of the sequential mini-batchbased MCMC are extended to distributed computing environments. We showed that (i) by adding a proper correction
+term, our algorithm prevents the local-subset-bias while
+(ii) reducing communication overhead through trajectory
+
+10
+
+3
+
+4
+
+10
+10
+Seconds (Log)
+
+5800
+5100
+4400
+3700
+
+650
+100
+
+5
+
+10
+
+SGRLD(K=100)
+SGRLD(K=300)
+SGRLD(K=500)
+D−SGLD(K=100)
+D−SGLD(K=300)
+D−SGLD(K=500)
+
+3000
+2300
+1600
+
+900 1
+10
+
+10
+10
+Seconds (Log)
+
+2
+
+1800
+
+200
+300
+400
+Number of Topics
+
+500
+
+SGRLD
+D−SGLD
+
+1600
+Perplexity
+
+Perplexity (Log)
+
+1600
+
+Perplexity (Log)
+
+D−SGLD(S=20)
+D−SGLD(S=40)
+D−SGLD(S=60)
+AD−LDA(S=20)
+AD−LDA(S=40)
+AD−LDA(S=60)
+(AD−LDA(S=2000))
+
+1800
+
+Perplexity (Log)
+
+2000
+
+1400
+1200
+1000
+
+2
+
+10
+
+3
+
+4
+
+10
+10
+Seconds (Log)
+
+5
+
+10
+
+100
+
+200
+300
+400
+Number of Topics
+
+500
+
+Figure 8. Number of topics. Top: Wikipedia, Bottom: Pubmed.
+Right: Perplexity after 104 updates (that is, the end points of each
+line in the left plots).
+
+sampling and adaptive load balancing. Furthermore, (iii)
+it improved convergence speed using a variance reduction
+strategy. Finally, in several experiments for LDA, we have
+shown at least an order of magnitude faster convergence
+speed of D-SGLD over the state of the art both in sequential mini-batch-based MCMC and distributed MCMC. We
+believe that D-SGLD is just one example of a much larger
+class of powerful MCMC algorithms that combine sampling updates based on mini-batches with distributed computation.
+
+Acknowledgments
+We thank A. Korattikara, S. Patterson, Y. W. Teh, J. Foulds
+and the reviewers for their valuable comments and suggestions. This work is supported by NSF grant IIS-1216045
+and Amazon AWS in Education Grant award.
+
+References
+Ahmed, A., Aly, A., Gonzalez, J., Narayanamurthy, S., and
+Smola, A. Scalable inference in latent variable models. In International conference on Web search and data mining, 2012.
+Ahn, S., Korattikara, A., and Welling, M. Bayesian posterior sampling via stochastic gradient fisher scoring. In International
+Conference on Machine Learning, 2012.
+Ahn, S., Chen, Y., and Welling, M. Distributed and adaptive darting monte carlo through regenerations. International Conference on Artificial Intelligence and Statistics, 2013.
+Andrieu, C. and Thoms, J. A tutorial on adaptive mcmc. Statistics
+and Computing, 18:343–373, 2008.
+Bardenet, R., Doucet, A., and Holmes, C. Towards scaling up
+markov chain monte carlo: an adaptive subsampling approach.
+In International Conference on Machine Learning, 2014.
+
+Distributed Stochastic Gradient MCMC
+Ho, Q., Cipar, J., Cui, H., Kim, J. K., Lee, S., Gibbons, P. B.,
+Gibson, G., Ganger, G. R., and Xing, E. P. More effective distributed ml via a stale synchronous parallel parameter server.
+In Advances in Neural Information Processing Systems, 2013.
+Hoffman, M., Bach, F., and Blei, D. Online learning for latent
+dirichlet allocation. In Advances in Neural Information Processing Systems, pp. 856–864, 2010.
+Korattikara, A., Chen, Y., and Welling, M. Austerity in mcmc
+land: Cutting the metropolis-hastings budget. In International
+Conference on Machine Learning, 2014.
+Laskey, K. B. and Myers, J. W. Population markov chain monte
+carlo. Machine Learning, 50:175–196, 2003.
+Newman, D., Smyth, P., Welling, M., and Asuncion, A. Distributed inference for latent dirichlet allocation. In Advances in
+Neural Information Processing Systems, pp. 1081–1088, 2007.
+Patterson, S and Teh, Y. W. Stochastic gradient riemannian
+langevin dynamics on the probability simplex. In Advances
+in Neural Information Processing Systems, 2013.
+Smola, A. and Narayanamurthy, S. An architecture for parallel
+topic models. VLDB, 2010.
+Welling, M. and Teh, Y. W. Bayesian learning via stochastic gradient langevin dynamics. In International Conference on Machine Learning (ICML), 2011.
+Wilkinson, D. J. Parallel bayesian computation. Statistics Textbooks and Monographs, 184:477, 2006.
+
+

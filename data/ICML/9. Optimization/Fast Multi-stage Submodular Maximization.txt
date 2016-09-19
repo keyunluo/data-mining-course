@@ -1,0 +1,1211 @@
+Fast Multi-Stage Submodular Maximization
+
+Kai Wei
+Rishabh Iyer
+Jeff Bilmes
+University of Washington, Seattle, WA 98195, USA
+
+Abstract
+Motivated by extremely large-scale machine
+learning problems, we introduce a new multistage algorithmic framework for submodular
+maximization (called M ULT G REED), where at
+each stage we apply an approximate greedy procedure to maximize surrogate submodular functions.
+The surrogates serve as proxies for a target submodular function but require less memory and are
+easy to evaluate. We theoretically analyze the performance guarantee of the multi-stage framework
+and give examples on how to design instances of
+M ULT G REED for a broad range of natural submodular functions. We show that M ULT G REED
+performs very closely to the standard greedy
+algorithm given appropriate surrogate functions
+and argue how our framework can easily be
+integrated with distributive algorithms for further
+optimization. We complement our theory by
+empirically evaluating on several real-world problems, including data subset selection on millions
+of speech samples where M ULT G REED yields
+at least a thousand times speedup and superior
+results over the state-of-the-art selection methods.
+
+1 Introduction
+Data sets are large and are getting larger. This, on the one
+hand, is useful as “there is no data like more data.” On
+the other hand, it presents challenges since the information
+in vast quantities of data may be difficult to ascertain
+simply due to the computational difficulties created by
+vastness itself. An important goal in machine learning and
+information retrieval, therefore, is to develop methods that
+can efficiently extract and summarize relevant and useful
+information in large data sets.
+One recent class of methods gaining some prominence in
+machine learning is based on submodular functions for combinatorial selection. Traditionally studied in mathematics,
+Proceedings of the 31 st International Conference on Machine
+Learning, Beijing, China, 2014. JMLR: W&CP volume 32. Copyright 2014 by the author(s).
+
+KAIWEI @ U . WASHINGTON . EDU
+RKIYER @ U . WASHINGTON . EDU
+BILMES @ U . WASHINGTON . EDU
+
+economics, and operations research, submodular functions
+naturally occur in many real world machine learning
+applications. A submodular function (Fujishige, 2005) is
+a discrete set function f : 2V → R that returns a real value
+for any subset S ⊆ V , and satisfies f (A) + f (B) ≥ f (A ∩
+B) + f (A ∪ B), ∀A, B ⊆ V . Equivalently, f satisfies the
+diminishing returns property, f (j|S) ≥ f (j|T ), ∀S ⊆ T ,
+where f (j|S) , f (j ∪ S) − f (S) is the gain of adding
+element j a set S. A submodular function f is monotone
+non-decreasing if f (j|S) ≥ 0, ∀j ∈ V \ S, S ⊆ V , and f
+is normalized if f (∅) = 0.
+Submodular functions naturally measure the amount of
+information that lies within a given set A ⊆ V , what is
+actually meant by “information” depends very much on
+the particular function. For example, given a collection
+of random variables X1 , X2 , . . . , Xn , where n = |V |, the
+entropy function f (A) = H(∪a∈A Xa ) is submodular.
+The rank of a subset A of columns of a matrix is also
+submodular and can be seen as representing information
+as the dimensionality of the vector space spanned by the
+vectors indexed by A. There are other submodular functions
+that could represent “information” in some form (Fujishige,
+2005; Kempe et al., 2003; Krause et al., 2008; Lin and
+Bilmes, 2011). Given a large collection of items V whose
+information content is f (V ) where f is submodular, a
+natural and common optimization problem is:
+max
+S⊆V,|S|≤`
+
+f (S).
+
+(1)
+
+Problem (1) asks for the most informative subset of items of
+size ` or less. This problem has already found great utility
+in a number of areas in machine learning, including document summarization (Lin and Bilmes, 2011), speech data
+subset selection (Wei et al., 2013), feature subset selection
+(Krause and Guestrin, 2005; Liu et al., 2013), social influence (Kempe et al., 2003), and sensor placement (Krause
+et al., 2008). Though the problems are NP-hard, a wellknown result by Nemhauser et al. (Nemhauser et al., 1978)
+shows that Problem 1 can be solved near-optimally by a simple greedy algorithm with a worst case approximation factor
+of 1 − 1/e. Moreover, (Feige, 1998) shows that this is tight
+unless P=NP. The greedy algorithm starts with the empty
+set S0 = ∅. In each iteration i, it identifies the element si
+that maximizes the marginal gain f (si |Si−1 ) (i.e., si ∈
+
+Fast Multi-Stage Submodular Maximization
+
+argmaxe∈V \Si−1 f (e|Si−1 )) with ties broken arbitrarily
+and updates as Si ← Si−1 ∪{si }. Submodularity can be further exploited to accelerate (Minoux, 1978) this greedy algorithm – a procedure often called the “accelerated” or “lazy”
+greedy algorithm (L AZY G REED) (Leskovec et al., 2007).
+In many cases, the very advanced machine learning algorithms that we need to use to process large data sources are
+too computationally costly for the amount of data that exists.
+For example, when the data source is very large (e.g., n in
+the billions or trillions), even L AZY G REED becomes untenable. Moreover, even smaller sized n can be prohibitive,
+particularly when evaluating the function f itself is expensive. For example, in document summarization (Lin and
+Bilmes, 2011) and speech data subset selection (Wei et al.,
+2013) certain submodular functions (which we call graphbased), are often defined via a pair-wise similarity graph,
+having a time and memory complexity of O(n2 ). This
+is infeasible even for medium-scale values of n. Another
+application is the feature selection (Krause and Guestrin,
+2005; Iyer and Bilmes, 2012; Liu et al., 2013), where a
+common objective is to maximize the mutual information
+between a given set of random variables XA and a class C
+(i.e I(XA ; C)). The mutual information depends on computing the entropy H(XA ) which can be expensive (or even
+exponential cost) to evaluate. Similarly, the recent promising work on determinantal point processes (DPPs) (Kulesza
+and Taskar, 2012), where one wants to maximize the submodular function f (A) = log det(SA ) for a given matrix S,
+becomes problematic since computing log-determinant can
+require an O(n3 ) computation which is impractical already
+on medium-sized data sets.
+Related Work: Parallel computing approaches are of
+course a natural pursuit for solving large-scale algorithmic
+challenges, and some instances of distributed algorithms
+for submodular optimization have already been investigated.
+For example, (Chierichetti et al., 2010) propose a distributed
+algorithm to solve Problem 1 with the set cover function as
+the objective, and with an approximation factor of 1−1/e−.
+Similarly, (Kumar et al., 2013) propose a distributed algorithm to solve Problem 1 with any submodular objective
+and with an approximation factor of 1/2 − . Motivated by
+the difficulty of rendering the entire data set centrally for
+function evaluation, (Mirzasoleiman et al., 2013) propose a
+two-stage algorithmic framework to solve Problem 1 with
+1
+an approximation factor of O( min (`,m)
+), where ` and m
+are the cardinality constraint and the number of distributed
+partitions, respectively. The performance guarantee can
+be improved to be close to optimum if the data set is massive and satisfies certain geometric assumptions. All these
+algorithms can be implemented in a Map-Reduce style.
+Our Contributions: In this work, we propose a multistage framework (M ULT G REED) that directly addresses
+the time and memory complexity issues of running L AZYG REED in three ways: (a) reducing the number of function
+evaluations required for the algorithm, (b) decreasing
+
+the complexity of function evaluations by using simpler
+surrogate (proxy) functions, (c) reducing the ground set
+size. Though quite different in spirit from the distributive
+framework, our approach could easily be performed in
+concert with existing distributed algorithms. For instance,
+we can apply M ULT G REED instead of L AZY G REED for
+solving each sub-problem in (Mirzasoleiman et al., 2013).
+Conversely, their distributed procedure could also be used
+to solve the sub-problem in each stage of M ULT G REED.
+The theoretical analysis for both frameworks could easily
+be combined with each other, and they could be integrated
+to provide still more efficient large-scale algorithmic
+frameworks for these problems. Hence, our approach is
+complementary to the existing distributive architectures,
+although in the present paper we will concentrate on our
+novel multi-stage uni-processor approach.
+Outline Section 2 gives an overview of our framework.
+In Section 3, we theoretically analyze its performance while
+Section 4 offers several choices of surrogate functions for
+certain practical and useful classes of submodular functions.
+In Section 5, we focus on the design of M ULT G REED on
+a broad range of submodular functions, and instantiate
+our general framework for several submodular functions,
+thereby providing recipes for many real-world problems.
+In Section 6, we empirically demonstrate the performance
+of M ULT G REED, where we apply M ULT G REED to a
+large-scale speech data subset selection problem and show
+that it yields superior results over the state-of-the-art
+selection methods.
+
+2 Multi-Stage Algorithmic Framework
+Often in applications, there is a desirable in quality but prohibitive in computational complexity submodular function
+that we shall refer to as the target function f . We assume
+a ground set size of n = |V |, a cardinality constraint of `,
+and that the optimal solution to Problem (1) is S OPT .
+For completeness, we first describe how L AZY G REED accelerates the naive greedy implementation. The key insight
+is that the marginal gain of any element v ∈ V is nonincreasing during the greedy algorithm (a consequence of
+the submodularity of f ). Instead of recomputing f (v|Si−1 )
+for each v, the accelerated greedy algorithm maintains a list
+of upper bounds ρ(v) on each item’s current marginal gain.
+They are initialized as ρ(v) ← f (v) for each v ∈ V , and
+sorted in decreasing order (implemented as a priority queue).
+In iteration i, the algorithm pops the element v off the top of
+the priority queue and updates the bound ρ(v) ← f (v|Si ).
+v is selected if ρ(v) ≥ ρ(u), where u is at the current top of
+the priority queue, since submodularity in such case guarantees that v provides the maximal marginal gain. Otherwise,
+we appropriately place the updated ρ(v) back in the priority
+queue and repeat.
+To this end, we consider three schemes to further accelerate
+L AZY G REED: (a) reduce the number of function evaluations
+(Approximate greedy), (b) reduce the complexity of function
+
+Fast Multi-Stage Submodular Maximization
+
+evaluations (using simpler proxy functions), (c) reduce the
+ground set size (Pruning). This ultimately leads to our multistage greedy framework M ULT G REED.
+Approximate greedy: In this part, we introduce a mechanism called A PPROX G REED, to reduce the number of function evaluations in L AZY G REED. We give a theoretical
+analysis for A PPROX G REED in Section 3 — the current
+section defines and then offers intuition for the method. The
+key idea of A PPROX G REED is that it does not insist on
+finding the item that attains exactly the maximum marginal
+gain in each iteration, but instead, looks for an item whose
+marginal gain is close to this maximum. A PPROX G REED
+only modifies L AZY G REED by weakening the selection
+criteria in each iteration. More formally, if an item v is selected by L AZY G REED, the optimality of its marginal gain
+is guaranteed if the exact condition ρ(v) ≥ ρ(u) (u is the
+current top of the priority queue) is met. A PPROX G REED
+relaxes this to an approximate condition ρ(v) ≥ βρ(u),
+where 0 < β < 1. Since a potentially large number of
+items’ marginal gains need to be reevaluated until the exact
+condition is met, using the approximate condition could effectively reduce the number of function evaluations at a loss
+of the original guarantee. The parameter β controls the level
+of sub-optimality: the smaller β is, the number of function
+evaluations reduces as does the performance guarantee. In
+other words, A PPROX G REED, as an approximate scheme to
+L AZY G REED, has its performance guarantee carried over
+from that of L AZY G REED, with an additional level of approximation governed by the value β (the formal guarantee
+of (1 − e−β ) is given in Lemma 2). We would like to point
+out the resemblance of A PPROX G REED to the recently proposed fast greedy algorithm for Problem 1 (Badanidiyuru
+and Vondrák, 2014). Similar to A PPROX G REED, they seek
+to identify an item whose marginal gain is within a fraction
+β of the maximum marginal gain in each iteration and yield
+the an approximation factor of (1 − e−β ). Unlike their algorithm, A PPROX G REED builds on top of the L AZY G REED,
+hence, further exploits the submodularity. Though quite
+similar in spirit, A PPROX G REED might run significantly
+faster, in practice, than their algorithm, while yielding the
+same performance guarantee.
+A PPROX G REED can be further generalized by setting
+the value of β individually for each iteration, i.e., a se`
+quence {βi }i=1
+= {β1 , . . . , β` }. Intuitively, we would
+design {βi }`i=1 to be non-decreasing, i.e., the allowed suboptimality decreases as the algorithm proceeds. One possible schedule would be βi = c + 1−c
+` (i − 1), where c < 1
+determines the initial sub-optimality degree of the algorithm.
+Then, βi grows linearly in i from c to 1, and the choice of c
+determines the trade-off between the running time reduction
+and performance guarantee loss. Given f , `, and {βi }`i=1 ,
+we shall instantiate the approximate greedy procedure as
+S ∈ A PPROX G REED(f, `, {βi }`i=1 ).
+Multi-stage
+framework: A PPROX G REED
+yields
+effective reduction on the number of function evaluations in L AZY G REED, however, the complexity of
+
+each function evaluation could still be so high that the
+greedy procedure is rendered impractical. To address
+this issue, we propose an approach, M ULT G REED, that
+utilizes classes of simple surrogate functions which
+could be applied to a broad range of submodular
+functions. The idea is to optimize a series of surrogate
+(proxy) functions instead of optimizing the target function f .
+Algorithm 1 M ULT G REED
+Input f , `, J, {fj }Jj=1 , {`j }Jj=1 , {βi }`i=1
+C ← ∅, L ← 0 ;
+for j = 1 . . . J do
+Define Fj (S) , fj (S|C) for all S ⊆ V
+L+`j
+S ∈ A PPROX G REED(Fj , `j , {βi }i=L+1
+)
+L = L + `j , C ← C ∪ S
+Output C
+Given a sequence {βi }`i=1 , a set of cardinality constraints
+PJ
+{`1 , . . . , `J } such that j=1 `j = ` and `j > 0, ∀j, and a
+corresponding set of J surrogate (proxy) submodular functions {fj }Jj=1 , we define our framework M ULT G REED as
+shown in Algorithm 1. The series of the surrogate functions
+should be designed in increasing order of complexity, and
+at the last stage of M ULT G REED, fJ can even be the target
+function f . The algorithm should typically start with a
+computationally simple surrogate submodular function f1
+(which could even be modular). Since the surrogate functions fj ’s are designed to be computationally cheaper than
+the target function f , and since A PPROX G REED is applied
+instead of L AZY G REED in each stage, we are guaranteed
+to achieve an overall reduction in computation. In practice (see Section 5 and 6), we often observe an instance of
+M ULT G REED with J = 2 suffices to yield good enough
+performance and complexity reduction as well, though our
+results are much more general.
+Pruning: In addition to the above two schemes, it is also
+desirable to prune out items of the ground set that will never
+be chosen anyway, especially for large-scale data set. This
+is commonly done for submodular minimization (Fujishige,
+2005; Iyer et al., 2013b). Arbitrary pruning procedures,
+however, can significantly weaken the theoretical guarantee
+for Problem 1. We introduce here a simple new method that
+can prune away items without a corresponding performance
+loss. Consider the sequence of items {u1 , . . . , un } ordered
+non-increasingly in terms of their gain conditioned on all
+other items, i.e., f (u1 |V \ u1 ) ≥ · · · ≥ f (un |V \ un ). For
+an instance of Problem 1 with cardinality constraint `, we
+have the following Lemma:
+Lemma 1. L AZY G REED applied on the reduced ground
+set V̂ = {j ∈ V |f (j) ≥ f (u` |V \ u` )} is equivalent to that
+applied on the ground set V .
+The proofs for all the results in this paper are given in (Wei
+et al., 2014a). This procedure can easily be implemented
+in parallel, since f (j) and f (j|V \ j) can be computed
+independently for all j ∈ V . The pruning procedure is
+
+Fast Multi-Stage Submodular Maximization
+
+optional and is applicable only when the complexity of evaluating f (u|V \ u) is no greater than that of f (u). This is
+the case, for example, in our graph-based submodular functions. M ULT G REED may optionally start with this ground
+set pruning step, but it does not influence our analysis.
+Our analysis of Algorithm 1 is given in Section 3, while
+in Section 4, we illustrate examples on how to design
+surrogate functions. In Section 5, we shall instantiate our
+framework and provide recipes for choosing the parameters
+of M ULT G REED for several submodular functions which
+occur as models in real world applications.
+
+3 Analysis
+In this section, we formally analyze the methods presented
+in Section 2. We first define several crucial constructs that
+will facilitate this analysis.
+Greedy ratio: We define a new construct we call the
+greedy ratio that will quantify the performance of a given
+instance of M ULT G REED, which is characterized by the
+parameters: {fj }Jj=1 , {`j }Jj=1 , {βi }`i=1 . Guidelines on
+how to design the parameters of the multi-stage framework
+for several natural instances of useful submodular functions
+are given in Sections 4 and 5, but for now assume they are
+given. Let s1 , . . . , s` be the sequence of items selected by
+the instance of M ULT G REED. Let Si = {s1 , . . . , si }, be a
+set element of the chain S1 ⊂ S2 ⊂ · · · ⊂ S` , with S0 = ∅.
+Define the individual greedy ratio αi for i = 1, . . . , ` as:
+αi =
+
+maxu∈V f (u|Si−1 )
+f (si |Si−1 )
+
+(2)
+
+Each αi captures the ratio of the marginal gain of the
+greedily selected element to the marginal gain of the element si selected by M ULT G REED. Therefore, αi is
+a function of both the target function f but also, indirectly via ordered list (s1 , s2 , . . . , si ), all of the remainK
+`
+ing parameters {fi }K
+i=1 , {`i }i=1 , {βi }i=1 . Also, since
+maxu∈V f (u|Si−1 ) ≥ f (si |Si−1 ), we have that αi ≥
+1, ∀i. Moreover, since under A PPROX G REED we have
+f (si |Si−1 ) ≥ βi f (u|Si−1 ) for all u ∈ V \ Si−1 , it follows that αi ≤ 1/βi for each i.
+The list {αi }`i=1 collectively measures the quality of the
+multi-stage framework. We therefore define the greedy ratio
+α to be an aggregation of the individual greedy ratios. While
+there are many ways of aggregating, the harmonic mean,
+as we will show, provides the tightest characterization. We
+thus define the greedy ratio α as:
+α = P`
+
+`
+
+i=1
+
+1/αi
+
+(3)
+
+The greedy ratio, as we shall see, will provide a tight approximation guarantee. Ideally, we would like to have each
+individual greedy ratio αi = 1 for all i, and thus a greedy
+
+ratio of α = 1. In particular, our strategy for choosing surrogate functions and other parameters is to induce a greedy
+ratio that is as small as possible.
+Curvature: Another important construct we shall need
+is the curvature. Given a submodular function f , we define κf (S) as the curvature of f with respect to a set S as
+follows:
+κf (S) = 1 − min
+v∈V
+
+f (v|S \ v)
+f (v)
+
+(4)
+
+κf (S) lies in the range of [0, 1], and is monotonically
+non-decreasing in S. It measures the distance of f from
+modularity and κfP= 0 if and only if f is modular (or additive, i.e., f (S) = i∈S f (i)). The total curvature (Conforti
+and Cornuejols, 1984) κf is then κf (V ). A number of
+approximation guarantees for submodular optimization are
+improved when using curvature (Conforti and Cornuejols,
+1984; Iyer et al., 2013a; Iyer and Bilmes, 2013).
+We now provide our main result:
+Theorem 1. Given a target submodular function f with
+total curvature κf , an instance of M ULT G REED with
+greedy ratio α is guaranteed to obtain a set S` s.t.
+κf
+f (S` )
+1
+1 `κf 
+1
+≥
+1 − (1 −
+)
+≥
+(1 − e− α )
+OPT
+f (S )
+κf
+α`
+κf
+1
+
+≥ (1 − e− α )
+Conversely, for any value of α ≥ 1 and κf ∈ [0, 1], there
+exists a submodular f with the total curvature κf , on
+which an instance of M ULT G REED with the greedy ratio
+
+1 `κf
+α achieves an approximation factor κ1f 1 − (1 − α`
+)
+.
+Theorem 1 states that M ULT G REED’s guarantee is quantified tightly by the greedy ratio α. Moreover, the bound is,
+indirectly via α, dependent on all the parameters {fi }K
+i=1 ,
+`
+{`i }K
+,
+{β
+}
+of
+M
+ULT
+G
+REED
+.
+Theorem
+1
+generalizes
+i
+i=1
+i=1
+bound κ1f (1 − e−κf ) (Conforti and Cornuejols, 1984) when
+α = 1. By accounting for curvature, the bound κ1f (1−e−κf )
+itself generalizes the well-known result of 1−1/e for L AZYG REED on Problem 1. Also, as an immediate corollary of
+Theorem 1, we obtain the theoretical guarantee for A PPROX G REED in terms {βi }`i=1 .
+Lemma 2. Given a submodular function f with total curvature κf , A PPROX G REED(f, `, {β}`i=1 ) is guaranteed to
+P`
+obtain a set S` : (here β̄ = 1/` i=1 βi )
+f (S` )
+1
+≥
+(1 − e−κf β̄ )
+OPT
+f (S )
+κf
+≥ (1 − e−β̄ ),
+If the {βi }`i=1 are set as βi = c + 1−c
+` i with 0 ≤ c ≤ 1
+1+c
+1
+(c.f. Section 2), we have β̄ ≥ 2 ≥ 2 . Hence, this choice
+endows A PPROX G REED with a solution having a factor no
+worse than 1 − e−1/2 ≈ 0.39.
+
+Fast Multi-Stage Submodular Maximization
+
+The performance loss in M ULT G REED comes from two
+sources, namely the approximate greedy procedure and the
+surrogate functions. To simplify our analysis, we henceforth
+utilize only the exact greedy algorithm, (∀i, βi = 1). It
+should be clear, however, that our results will immediately
+generalize to the approximate greedy case as well.
+
+for the different stages.
+Uniform Submodular Mixtures: We first consider a
+class of submodular functions that can be represented as
+1 X
+f (S) =
+ft (S),
+(7)
+|T |
+t∈T
+
+The greedy ratio α is the harmonic mean of the values
+{αi }`i=1 that themselves can be partitioned into J blocks
+based on the J stages of M ULT G REED. For j = 1 . . . J,
+Pj
+define Lj = j 0 =1 `j 0 , and let Ij = {Lj−1 + 1, Lj−1 +
+2, . . . , Lj } be the set of `j indices for the j th block. Each
+stage
+P j provides a bound on the greedy ratio since α ≤
+`/ i∈Ij 1/αi . As a particularly simple example, if the target function f itself were to be utilized as the surrogate in the
+j th stage for `j items, then each corresponding greedy ratio
+has value αi = 1 leading to the bound α ≤ `/`j . Therefore,
+from the perspective of this upper bound, one is afforded the
+opportunity to design each stage semi-independently. On
+the other hand, to achieve a given desired α, it is not possible to design the stages entirely independently since the
+individual greedy ratios interact within the harmonic mean.
+The greedy ratio can work in additional scenarios above
+and beyond M ULT G REED. Consider, for example, the
+following two problems more general than Problem 1:
+max
+c(S)≤B,S⊆V
+
+f (S)
+P
+
+(5)
+
+min
+f (S)≥C,S⊆V
+
+c(S)
+
+(6)
+
+where c(S) =
+j∈S c(j) is a modular function with
+c(j) ≥ 0 being the cost of j ∈ V , B is a budget constraint,
+and C is coverage constraint. Problem 1 is a special case
+of Problem 5, while Problem 6 is a dual form. Problem 5
+asks for a set with maximum coverage (information)
+under a budget constraint on the cost, while Problem 6
+asks for a minimum cost solution having a given amount
+of information (coverage). Many machine learning
+applications,
+including sensor placement (Leskovec
+et al., 2007), document summarization (Lin and Bilmes,
+2011), social networks (Singer, 2012) and training data
+subset selection (Wei et al., 2013), can be formulated in
+these forms. While it is known that L AZY G REED can be
+modified slightly to solve Problems 5 and 6, by adapting
+M ULT G REED and the definition of the greedy ratio, we can
+obtain guarantees similar to those in Theorem 1 for both
+Problem 5 and 6. Due to space limitations, details are given
+in the extended version of this paper (Wei et al., 2014a).
+
+4 Surrogate Functions
+In this section, we investigate the interplay between the
+greedy ratio and several choices of surrogate functions for
+classes of submodular functions which appear often in practice. Since providing bounds on the performance of each
+stage individually implies an upper bound on the greedy
+ratio, we shall restrict ourselves to the analysis of the surrogate function at a given stage j, and the final performance
+guarantee is easily obtained by combining the guarantees
+
+where |T | > 1, and ft is monotone submodular ∀t ∈ T .
+We name this class uniform submodular mixtures as they
+are similar to the submodular mixtures previously defined
+in the context of learning (Lin and Bilmes, 2012). They
+are also similar to the decomposable submodular functions
+of (Stobbe and Krause, 2010) but without the requirement
+that ft (S) be a non-decreasing concave function composed
+with a non-negative modular function. A number of natural
+submodular functions belong to this class.
+The complexity of evaluating f is determined both by |T |
+and the complexity of evaluating individual ft ’s. Given such
+an f , a natural class of random surrogates takes the form
+1 X
+ft (S),
+(8)
+fˆsub (S) = 0
+|T |
+0
+i∈T
+
+0
+
+0
+
+where T ⊆ T , and T is generated by sampling individual
+elements from T with probability p. As p decreases, so
+does the complexity of evaluating fˆsub but at the cost of
+a worse approximation to f . Applying a random function
+fˆsub derived in this way to M ULT G REED, and assuming
+|ft (S)| ≤ B, ∀t ∈ T , S ⊆ V , we obtain:
+Lemma 3. Using the surrogate uniform mixture fˆsub for
+stage j in M ULT G REED gives individual greedy ratios of
+1
+1 ≤ αi ≤ 1−
+, ∀i ∈ Ij with probability 1 − δ, where δ =
+(1 − 5n` e−
+0.
+
+np(g ` )2 2
+64B2
+
+) and g ` = maxu∈V \S`−1 f (u|S`−1 ) >
+
+Fixing δ, a smaller value of probability p yields a higher
+value of , weakening the bound on each αi . Fixing both
+δ and , increases in the ground set size n = |V | could
+yield a choice of surrogate function fˆsub having a smaller
+sampling probability p and thus that is easier to evaluate.
+More importantly, fixing δ and p,  can be made arbitrarily
+close to 0 for n sufficiently large, a result that is of great
+interest for very large-scale problems. We shall use this
+result to provide bounds for several instances of submodular
+functions in Section 5
+Modular Upper bounds: We next focus on a class of surrogate functions applicable to general submodular functions.
+Given a submodular function f , its simple modular upper
+bound is given as
+X
+fˆmod (S) =
+f (s).
+(9)
+s∈S
+
+For some submodular functions such as entropy (including
+Gaussian entropy and the log det functions used for DPPs)
+
+Fast Multi-Stage Submodular Maximization
+
+or mutual information, evaluating fˆmod (S) is very easy,
+while evaluating f (S) might sometimes even require computation exponential in |S|. Though extremely simple, this
+class nevertheless can act as an efficient class of surrogate
+functions especially useful when the target function is not
+very curved. fˆmod is not only easy to optimize exactly, but
+it has previously been considered as a surrogate for various
+other forms of submodular optimization (Iyer et al., 2013a;b;
+Iyer and Bilmes, 2013). The curvature κf , by definition,
+measures how close f is to being modular. If a modular
+surrogate function fˆmod , for general submodular function
+f , is applied within M ULT G REED, we can thus bound the
+individual greedy ratio via the curvature:
+Lemma 4. Using the modular upper bound as a surrogate,
+it holds that 1 ≤ αi ≤ 1−κf 1(Si−1 ) , ∀i ∈ Ij .
+Unsurprisingly, we see that the less curved the target function f is, the tighter bound on αi ’s, and the better fˆmod
+performs as a surrogate. In particular, if f is modular, i.e.,
+κf = 0, then, all individual greedy ratio αi ’s are tightly
+bounded as 1. Lemma 4 also implies that the bound of
+the individual greedy ratio weakens as i increases, since
+1
+1−κ(Si−1 ) increases with i. Therefore, this modular proxy,
+if applied, is best done in the first (or at most early) stages
+of M ULT G REED.
+Graph based Submodular functions: We focus next on
+a class of submodular functions based on an underlying
+weighted graph and hence called graph-based. Many submodular functions used in machine learning applications
+belong to this class (Kolmogorov and Zabih, 2004; Wei
+et al., 2013; Liu et al., 2013; Lin and Bilmes, 2011). These
+functions require O(n2 ) time to compute and store, which
+is not feasible for large n.
+To form surrogates for the class of graph-based submodular
+functions, a natural choice is to utilize spanning subgraphs
+of the original graph. One choice is the k-nearest neighbor
+graph (k-NNG), defined as the spanning subgraph formed
+with each vertex v ∈ V connected only to its k most similar neighbors (under the similarity score given by the edge
+weights). We write fˆk-NNG as the surrogate function defined on a k-NNG for a graph-based submodular function
+f . The sparsity of the k-NNG depends on the value of k.
+The denser the graph (higher k), the costlier both the function evaluations and the memory complexity becomes. In
+Section 5, surprisingly we will show that fˆk-NNG , even
+for k as sparse as O(log n), can be good enough for certain
+graph-based functions.
+
+functions as well as how to choose the size constraints.
+We investigate the following special cases: 1) the facility
+location function, 2) saturated coverage function, 3) feature
+based function, 4) the set cover function.
+Facility location function: Given a weighted graph G =
+(V, E), with wu,v the edge weight (i.e., similarity score)
+between vertices u and v for u, v ∈ V , the (uncapacitated)
+facility location function is defined as
+ffac =
+
+v∈V
+
+Given the previously defined machinery to analyze M ULTG REED, we now focus on a broad range of submodular
+functions that appear as models in real world applications,
+and provide guidelines on how to design the surrogate
+
+max wu,v .
+u∈S
+
+(10)
+
+Under reasonable assumptions on the weight matrix w,
+we obtain the following bound (due to space constraints,
+additional details are given in the extended version of this
+paper (Wei et al., 2014a)).
+Lemma 5. For the facility location function, we have:
+k-NNG (S) = f (S), ∀S ⊆ V s.t. |S| ≥ m,
+fˆfac
+fac
+
+(11)
+
+with probability at least (1 − θ), and the sparsity of the
+1
+k-NNG being at least k = n[1 − ( nθ ) m ].
+With mild assumptions on m, n and θ, we have
+1
+limn→∞ n[1 − ( nθ ) m ] = O(log n). The Lemma implies
+k-NNG and f share the same
+that with high probability, fˆfac
+fac
+function value for any sets of size greater than some threshold m, where the k-NNG can be as sparse as k = O(log n).
+k-NNG alone provides a good approxiBy Lemma 5, fˆfac
+mation for ffac . It thus suffices, in this case, to apply a
+single-stage greedy algorithm (M ULT G REED with J = 1)
+k-NNG as the surrogate. As a concrete example,
+using fˆfac
+consider an instance of the procedure with θ = 0.05,
+n = 106 , k = 0.009n, and ` = 0.1n. Then, Lemma 5
+k-NNG (S) = f (S)
+implies that with probability 95%, fˆfac
+fac
+holds for any |S| ≥ 0.00186n, giving an individual greedy
+ratio of αi = 1 for 0.00186n ≤ i ≤ 0.1n. The greedy ratio
+α is then bounded as α ≤ 1.02, which guarantees a solution
+in this instance close to optimum, thanks to Theorem 1.
+Saturated coverage function: Successfully applied in document summarization (Lin and Bilmes, 2011), the saturated
+coverage function is another subclass of graph-based submodular functions, defined as
+X
+X
+X
+fsat (S) =
+min{
+wv,u , ξ
+wv,u },
+(12)
+v∈V
+
+5 Instantiations with Real World
+Submodular functions
+
+X
+
+u∈S
+
+u∈V
+
+where 0 < ξ ≤ 1 is a hyperparameter that determines the
+saturation ratio. The class of uniform submodular mixtures
+includes fsat . In this case, we can construct a two-stage
+greedy algorithm, where the modular upper bound fˆmod
+and a sampling based function fˆsub (with sampling probability p) are used as the two surrogates.
+
+Fast Multi-Stage Submodular Maximization
+
+Lemma 6. Given the saturated coverage function, an instance of M ULT G REED with the size constraints `1 =
+nξ
+b (1−ξ)γ+ξ
+c and `2 = max{0, ` − `1 } (where γ =
+maxu,v wu,v
+min(u,v)∈E(G) wu,v , assuming all extent graph edges are positively weighted) yields a solution with the individual greedy
+ratios αi = 1, for i = 1, . . . , `1 and with probability 1 − δ,
+1
+, for i = `1 + 1 . . . , `, where δ = (1 −
+1 ≤ αi ≤ 1−
+5n` e−
+
+np(g ` )2 2
+64B2
+
+) and g ` = maxu∈V \S`−1 f (u|S`−1 ) > 0.
+
+A main intuition of this result, is that fsat is modular up to
+set of size `1 . Hence it makes sense to use fˆmod for these
+cases. Similarly for the second stage, it is reasonable to use
+fˆsub with an appropriate p.
+Feature based submodular function: Successfully applied in the speech data subset selection problem (Wei et al.,
+2014b;c), the feature based submodular function has the
+following form:
+ffea =
+
+X
+
+g(cu (S)),
+
+(13)
+
+u∈F
+
+where g is concave in the form g(x) P
+= xa for 0 < a ≤ 1,
+F is a set of “features”, and cu (S) = v∈S cu (s) is a nonnegative modular score for feature u ∈ F in set S, with
+cu (v) measuring the degree to which item u possesses feature u. Again, ffea is a member of the class of uniform
+submodular mixtures. The curvature of ffea is governed by
+the curvature of the concave function g and thus is determined by a. We can construct a two-stage procedure similar
+to that for fsat , where we optimize over fˆmod and fˆsub
+with a suitable choice of the sampling probability p.
+Lemma 7. Given the feature based submodular function,
+an instance of M ULT G REED with the size constraints being
+`1 and `2 , yields a solution with the individual greedy ratio bounded as: 1 ≤ αi ≤ O(i1−a ), for i = 1, . . . , `1 ;
+1
+and 1 ≤ αi ≤ 1−
+for i = `1 + 1 . . . , ` with probability 1 − δ, where δ = (1 − 5n` e−
+maxu∈V \S`−1 f (u|S`−1 ) > 0.
+
+np(g ` )2 2
+64B2
+
+) and g ` =
+
+The lemma implies that with an appropriate choice of the
+sampling probability p for fˆsub , the performance loss in the
+second stage could be negligible. However, there is some
+performance loss introduced by the first stage, depending on
+a and `1 . The choices for `1 and `2 determine the tradeoff
+between loss of the performance guarantee and the computational reduction: larger `1 is chosen when computation is
+critical or when g is less curved (larger values of a), while
+larger `2 is chosen when algorithmic performance is the
+priority or g is more curved (smaller values of a).
+Set cover: We briefly discuss how our framework applies
+to set cover. Due to space limitations, details are given
+in (Wei et al., 2014a). Given a set of sets {A1 , . . . , A|V | },
+a “universe” defined as U = ∪v∈V Av , and a set of weights
+
+w : U → R+ , the set cover function is defined as
+fsc (S) = w(∪v∈S Av ),
+(14)
+P
+where w(A) =
+u∈A w(u) for A ⊆ U and w(u) gives
+the weight of item u ∈ U . fsc is again a uniform submodular mixture
+P since it can be equivalently written as
+fsc (S) =
+u∈U min{cu (S), 1}w(u), where cu (S) denotes the number of times that item u ∈ U is covered
+by the set of sets {Av : v ∈ S}. Thanks to Lemma 3, a
+single-stage procedure where we optimize over the sampling
+based surrogate fˆsub with appropriate sampling probability
+p, suffices to provide a good performance guarantee along
+with a computational reduction.
+
+6 Experiments
+We empirically test the performance of M ULT G REED for
+three of the submodular functions considered above. We
+address the following questions: 1) how well does M ULTG REED perform compared to L AZY G REED, 2) how much
+relative time reduction can be achieved, 3) how well does
+the greedy ratio perform as a quality measure, 4) how well
+does the framework scale to massive data sets. We run experiments on two scenarios: 1) simulations with medium
+sized data, 2) real world speech data selection on millions
+of ground elements.
+Simulations: All simulations are performed on the same
+data with size |V | = 20, 000, formed by randomly sampling
+from a large speech recognition training corpus (the “Fisher”
+corpus). Each sample pair has a similarity score, and the
+graph-based submodular functions ffac and fsat are instantiated using the corresponding similarity matrix. A set of features F sized |F| ≈ 75000 is derived from the same data to
+instantiate ffea . In all runs of M ULT G REED, we set {βi }`i=1
+using the schedule βi = c + (i−1)(1−c)
+with c = 0.5. Per`
+formance of M ULT G REED and L AZY G REED is measured
+by the function valuations and the wall-clock running time.
+For ffac , use one stage with surrogates fˆk-NNG with
+k ∈ {50, 100, 200, 300}. M ULT G REED gives about a 2080 times speedup over L AZY G REED with at least 99.8%
+of the standard greedy solution (first column of Fig. 1).
+For fsat , the saturation ratio ξ is set as 0.25. Two stages
+using surrogate functions fˆmod and fˆsub are applied,
+nξ
+under size constraints `1 = b 5(1−ξ)+ξ
+c = 0.05n, and
+sub
+`2 = ` − `1 . We test fˆ
+with various sampling probabilities: p ∈ {0.25%, 0.5%, 1%, 1.5%}. The results (2nd
+column of Fig. 1) show a speedup of up to 250 with at least
+99.25% the quality of L AZY G REED. Next, for ffea , we
+set g to be the square root function. Two stages of surrogates fˆmod and fˆsub are applied. fˆsub is defined on a
+randomly selected feature subset of size 37,500. We test
+with different combinations of size constraints `1 and `2
+by setting `1 ∈ {0, 0.25`, 0.5`, 0.75`} with `2 = ` − `1 .
+This gives about a 2-8 times speedup with at least 99.3% of
+
+Fast Multi-Stage Submodular Maximization
+
+Valuation ratio:
+Multi-stage / LazyGreed
+
+Facility location
+1.001
+
+0.996
+
+0.999
+
+0.994
+
+0.995
+
+0.992
+
+0.998
+
+0.990
+
+0.990
+
+0.997
+
+10
+
+5
+
+20
+
+100
+
+10
+
+20
+
+5
+
+10
+
+20
+
+5
+
+10
+
+20
+
+5
+
+10
+
+20
+
+10
+
+300
+
+8
+
+80
+200
+
+60
+40
+
+6
+4
+
+100
+
+2
+
+20
+
+0
+
+0
+
+0
+
+5
+
+10
+
+5
+
+20
+
+1.6
+
+1.20
+
+1.5
+
+1.18
+
+1.4
+
+Greedy ratio
+
+Feature-based
+Function
+
+0.998
+
+1.000
+
+5
+
+Speedup:
+LazyGreed / Multi-stage
+
+Saturate Coverage
+1.000
+
+10
+
+20
+
+4
+3
+
+1.16
+
+1.3
+
+1.14
+
+1.2
+
+2
+
+1.12
+
+1.1
+
+1.10
+
+1
+
+1
+
+1.08
+
+0.9
+0.8
+
+1.06
+5
+
+10
+
+20
+
+Cardinality Constraint (percentage
+of ground set size)
+
+k=300
+
+k=200
+
+k=100
+
+k=50
+
+0
+5
+10
+20
+Cardinality Constraint (percentage of
+ground set size)
+
+p=1.5%
+
+p=1%
+
+p=0.5%
+
+p=0.25%
+
+Cardinality Constraint (percentage of
+ground set size)
+
+0%
+
+25%
+
+50%
+
+75%
+
+Figure 1. A comparison of the function values (top row), the running time (middle row), the greedy ratio (bottom row) between lazy
+greedy and our multi-stage approach, under different choices of the
+surrogate function for ffac (left column), fsat (middle column),
+and ffea (right column).
+
+Averaged Random
+Histogram-Entropy
+Multi-stage Submodular
+
+5%
+38.2
+37.6
+37.3
+
+10%
+35.1
+34.2
+34.1
+
+20%
+34.4
+fail
+32.7
+
+all
+31.0
+
+Table 1. Word error rates under averaged random, histogramentropy, and the multi-stage submodular chosen subsets at various
+sized percentages (lower the better). Histogram-entropy result for
+the 20% condition is not available due to its objective’s saturation
+after 10%.
+
+L AZY G REED quality (right column of Fig 1). Empirically,
+the greedy ratio is very tight since it is always close to 1.
+For most cases, it is a good indicator of the performance for
+function valuations, since lower values of α always lead to
+higher performance of M ULT G REED. For ffac and fsat , the
+speedup reported does not include the potentially significant
+additional complexity reduction on graph-construction. Especially for ffac , efficient algorithms exist for fast (approximate) construction of the k-NNG (Beygelzimer et al., 2006).
+Speech Data Subset Selection: We next test the performance of M ULT G REED on a very large-scale problem,
+where running even L AZY G REED is infeasible. We address the problem of speech data subset selection (King
+et al., 2005; Lin and Bilmes, 2009; Wei et al., 2013): given
+a massive (speech) data set for training automatic speech
+recognition (ASR) systems, we wish to select a representative subset that fits a given budget (measured in total time)
+and train a system only on the subset. Problem 5 addresses
+this where the objective is the facility location function
+ffac , and the pair-wise similarity between speech samples
+is computed by kernels (Wei et al., 2013). We subselect
+1300 hours of conversational English telephone data from
+
+the “Switchboard”, “Switchboard Cellular”, and “Fisher”
+corpora, which, in total, comprises 1,322,108 segments of
+speech (i.e., |V | = n = 1, 322, 018). The estimated running
+time of L AZY G REED with ffac on such large data is at least
+a week. Rendering the full O(n2 ) similarity matrix is even
+more impractical due to memory requirements. We here test
+k-NNG with the sparsity of k-NNG
+M ULT G REED using fˆfac
+set as k = 1, 000. M ULT G REED, then, runs in only a few
+minutes, yielding a speedup of more than a thousand over
+L AZY G REED! We measure the performance of the selection
+by the word error rate (WER) of the ASR system trained
+on the corresponding selected subset of the data. We test
+on different budget constraints (5%, 10% and 20% of the
+whole speech data). We compare our selection against two
+baseline selection methods: (1) averaged random method,
+where we randomly sample the data set at appropriate sizes,
+train different ASR systems for each set, and average their
+WER; (2) a non-submodular “histogram-entropy” based
+method, described in (Wu et al., 2007). Table 1 illustrates
+that our framework yields consistently superior results to
+these baselines.
+
+7 Discussion
+Certain other domains may be applicable to the analysis introduced in this paper. In the case of feature selection, for example, one may wish to optimize the mutual information function fmi = I(XS ; C) which either
+is not submodular, or can become submodular by assuming that the random variables XV are independent given
+C (Krause and Guestrin, 2005). In either case, however, the complexity of evaluating fmi can be daunting,
+leading to previous work suggesting a tractable surrogate
+P
+P
+fˆmi (S) = v∈S I(Xv ; C) − λ v,u∈S I(Xv ; Xu ), where
+λ is a hyperparameter (Peng et al., 2005). Under certain
+assumptions, this surrogate is in fact equivalent to the original (Balagani and Phoha, 2010). Unnoticed by these authors,
+however, this function is submodular and non-monotone.
+We plan in the future to extend our framework to additionally handle such functions.
+Acknowledgments: We thank Shengjie Wang and Wenruo
+Bai for discussions. This work is partially supported by the
+Intelligence Advanced Research Projects Activity (IARPA)
+under agreement number FA8650-12-2-7263, the National
+Science Foundation under Grant No. IIS-1162606, and by a
+Google, a Microsoft, and an Intel research award.
+
+References
+A. Badanidiyuru and J. Vondrák. Fast algorithms for maximizing
+submodular functions. In SODA, 2014.
+K. S. Balagani and V. V. Phoha. On the feature selection criterion based on an approximation of multidimensional mutual
+information. PAMI, IEEE Transactions, 2010.
+A. Beygelzimer, S. Kakade, and J. Langford. Cover trees for
+nearest neighbor. In ICML, 2006.
+
+Fast Multi-Stage Submodular Maximization
+F. Chierichetti, R. Kumar, and A. Tomkins. Max-cover in MapReduce. In WWW, 2010.
+M. Conforti and G. Cornuejols. Submodular set functions, matroids and the greedy algorithm: tight worst-case bounds and
+some generalizations of the Rado-Edmonds theorem. Discrete
+Applied Mathematics, 1984.
+U. Feige. A threshold of ln n for approximating set cover. JACM,
+1998.
+S. Fujishige. Submodular functions and optimization, volume 58.
+Elsevier Science, 2005.
+R. Iyer and J. Bilmes. Algorithms for approximate minimization of
+the difference between submodular functions, with applications.
+In UAI, 2012.
+R. Iyer and J. Bilmes. Submodular optimization with submodular
+cover and submodular knapsack constraints. In NIPS, 2013.
+R. Iyer, S. Jegelka, and J. Bilmes. Curvature and Optimal Algorithms for Learning and Minimizing Submodular Functions.
+NIPS, 2013a.
+R. Iyer, S. Jegelka, and J. Bilmes. Fast semidifferential based
+submodular function optimization. In ICML, 2013b.
+D. Kempe, J. Kleinberg, and E. Tardos. Maximizing the spread of
+influence through a social network. In KDD, 2003.
+S. King, C. Bartels, and J. Bilmes. SVitchboard 1: Small vocabulary tasks from switchboard 1. In European Conf. on Speech
+Communication and Technology (Eurospeech), Lisbon, Portugal, September 2005.
+V. Kolmogorov and R. Zabih. What energy functions can be
+minimized via graph cuts? IEEE TPAMI, 26(2):147–159, 2004.
+A. Krause and C. Guestrin. Near-optimal nonmyopic value of
+information in graphical models. In UAI, 2005.
+A. Krause, A. Singh, and C. Guestrin. Near-optimal sensor placements in Gaussian processes: Theory, efficient algorithms and
+empirical studies. JMLR, 9:235–284, 2008.
+A. Kulesza and B. Taskar. Determinantal point processes for machine learning. Foundations and Trends in Machine Learning,
+5(2-3):123–286, 2012.
+R. Kumar, B. Moseley, S. Vassilvitskii, and A. Vattani. Fast greedy
+algorithms in mapreduce and streaming. In SPAA, 2013.
+J. Leskovec, A. Krause, C. Guestrin, C. Faloutsos, J. VanBriesen,
+and N. Glance. Cost-effective outbreak detection in networks.
+In SIGKDD, 2007.
+H. Lin and J. Bilmes. How to select a good training-data subset
+for transcription: Submodular active selection for sequences. In
+Interspeech, 2009.
+H. Lin and J. Bilmes. A class of submodular functions for document summarization. In ACL, 2011.
+H. Lin and J. Bilmes. Learning mixtures of submodular shells with
+application to document summarization. In UAI, 2012.
+Y. Liu, K. Wei, K. Kirchhoff, Y. Song, and J. Bilmes. Submodular
+feature selection for high-dimensional acoustic score spaces. In
+ICASSP, 2013.
+M. Minoux. Accelerated greedy algorithms for maximizing submodular set functions. Optimization Techniques, 1978.
+
+B. Mirzasoleiman, A. Karbasi, R. Sarkar, and A. Krause. Distributed submodular maximization: Identifying representative
+elements in massive data. In NIPS, 2013.
+G. Nemhauser, L. Wolsey, and M. Fisher. An analysis of approximations for maximizing submodular set functions—i. Mathematical Programming, (1), 1978.
+H. Peng, F. Long, and C. Ding. Feature selection based on mutual
+information criteria of max-dependency, max-relevance, and
+min-redundancy. PAMI, IEEE Transactions, 2005.
+Y. Singer. How to win friends and influence people, truthfully:
+influence maximization mechanisms for social networks. In
+WSDM. ACM, 2012.
+P. Stobbe and A. Krause. Efficient minimization of decomposable
+submodular functions. In NIPS, 2010.
+K. Wei, Y. Liu, K. Kirchhoff, and J. Bilmes. Using document
+summarization techniques for speech data subset selection. In
+NAACL/HLT, 2013.
+K. Wei, R. Iyer, and J. Bilmes. Fast multi-stage submodular
+maximization: Extended version. 2014a.
+K. Wei, Y. Liu, K. Kirchhoff, C. Bartels, and J. Bilmes. Submodular subset selection for large-scale speech training data. In
+ICASSP, 2014b.
+K. Wei, Y. Liu, K. Kirchhoff, and J. Bilmes. Unsupervised submodular subset selection for speech data. In ICASSP, 2014c.
+Y. Wu, R. Zhang, and A. Rudnicky. Data selection for speech
+recognition. In ASRU, 2007.
+
+

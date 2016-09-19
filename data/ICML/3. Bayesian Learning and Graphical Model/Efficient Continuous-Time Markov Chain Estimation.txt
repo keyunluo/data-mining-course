@@ -1,0 +1,3163 @@
+Efficient Continuous-Time Markov Chain Estimation
+Monir Hajiaghayi
+Department of Computer Science, University of British Columbia, Vancouver, BC V6T 1Z4, Canada
+Bonnie Kirkpatrick
+Department of Computer Science, University of Miami, Coral Gables, FL 33124, United States
+
+MONIRH @ CS . UBC . CA
+
+BBKIRK @ CS . MIAMI . EDU
+
+Liangliang Wang
+LIANGLIANG
+Department of Statistical and Actuarial Sciences, Simon Fraser University, Burnaby, BC V5A 1S6, Canada
+Alexandre Bouchard-Côté
+Statistics Department, University of British Columbia, Vancouver, BC V6T 1Z4, Canada
+
+Abstract
+Many problems of practical interest rely on
+Continuous-time Markov chains (CTMCs) defined over combinatorial state spaces, rendering
+the computation of transition probabilities, and
+hence probabilistic inference, difficult or impossible with existing methods. For problems with
+countably infinite states, where classical methods
+such as matrix exponentiation are not applicable,
+the main alternative has been particle Markov
+chain Monte Carlo methods imputing both the
+holding times and sequences of visited states.
+We propose a particle-based Monte Carlo approach where the holding times are marginalized
+analytically. We demonstrate that in a range of
+realistic inferential setups, our scheme dramatically reduces the variance of the Monte Carlo approximation and yields more accurate parameter
+posterior approximations given a fixed computational budget. These experiments are performed
+on both synthetic and real datasets, drawing from
+two important examples of CTMCs having combinatorial state spaces: string-valued mutation
+models in phylogenetics and nucleic acid folding
+pathways.
+
+1. Introduction
+Continuous-time Markov chains (CTMCs) play a central role in applications as diverse as queueing theory,
+phylogenetics, genetics, and models of chemical interacProceedings of the 31 st International Conference on Machine
+Learning, Beijing, China, 2014. JMLR: W&CP volume 32. Copyright 2014 by the author(s).
+
+WANG @ SFU . CA
+
+BOUCHARD @ STAT. UBC . CA
+
+tions (Huelsenbeck & Ronquist, 2001; Munsky & Khammash, 2006). The process can be thought of as a timed
+random walk on a directed graph where the countable, but
+potentially infinite, set of graph nodes are the values that
+the process can take on. There are probabilities of transition associated with the edges of the graph, and the holding
+time, or length of time between two transitions, is exponentially distributed with a rate depending on the current
+node. A path simulated from this random process is an ordered list of the nodes visited and the times at which they
+are reached.
+In leveraging the modelling capabilities of CTMCs, the
+bottleneck is typically the computation of the transition
+probabilities: the conditional probability that a trajectory
+ends in a given end state, given a start state and a time interval. This computation involves the marginalization over the
+uncountable set of end-point conditioned paths. Although
+we focus on the Bayesian framework in this work, where
+the transition probabilities appear in Metropolis-Hastings
+ratios, the same bottleneck is present in the frequentist
+framework, where transition probabilities are required for
+likelihood evaluation. When the state space is small, exact
+marginalization can be done analytically via the matrix exponential. Unfortunately, this approach is not directly applicable to infinite state spaces, and is not computationally
+feasible in large state spaces because of the cubic running
+time of matrix exponentiation.
+We propose an efficient Monte Carlo method to approach
+inference in CTMCs with weak assumptions on the state
+space. Our method can approximate transition probabilities
+as well as estimate CTMC parameters for this general class
+of processes. More precisely, we are interested in countably infinite state space CTMCs that satisfy the following
+two criteria. First, we require the construction of a certain type of potential on the state space. We describe this
+potential in more detail in Section 2, and show in Section 3
+
+Efficient Continuous-Time Markov Chain Estimation
+
+that such potentials can be easily constructed even for complex models. Second, the CTMC should be explosion-free
+to avoid pathologies (i.e., we require that there is a finite
+number of transitions with probability one in any bounded
+time interval).
+In contrast, classical uniformization methods assume that
+there is a fixed bound on all the rates (Grassmann, 1977), a
+much stronger condition than our explosion-free assumption. For example, in the first of the two application
+domains that we investigated, inference in string-valued
+CTMCs for phylogenetics, the models are explosion-free
+but do not have a fixed bound on the rates. Other
+approaches, based on performing Markov chain Monte
+Carlo (MCMC) with auxiliary variables, relax the bounded
+rate assumption (Rao & Teh, 2011; 2012), but they have a
+running time that depends linearly on the size of the state
+space in the sparse case and quadratically in the dense case.
+Particle-based methods offer an interesting complementary
+approach, as they have a time complexity per particle that
+depends on the imputed number of transitions between the
+two end points instead of on the size of the state space.
+In the simplest case, one can implement this idea using a
+proposal distribution equal to the generative process over
+paths initialized at the start point. The weight of a particle is then equal to one if the end point of the generated
+path coincides with observed end point, and zero otherwise. We call this proposal the forward sampling proposal.
+This idea can be turned into a consistent estimator of posterior distributions over parameters using pseudo-marginal
+methods (Beaumont, 2003; Andrieu & Roberts, 2009) (or
+in more complicated setups, particle MCMC methods (Andrieu et al., 2010)).
+Unfortunately, the forward sampling method has two serious limitations. First, the requirement of imputing waiting times between each transition means that the proposal
+distribution is defined over a potentially high-dimensional
+continuous space. This implies that large numbers of particles are required in practice. Second, in problems where
+each state has a large number of successors, the probability of reaching the end state can become extremely small,
+which for example further inflates the number of particles
+required to obtain non degenerate Metropolis-Hastings ratios in particle MCMC (Andrieu et al., 2010) algorithms.
+End point informed proposals over transitions and waiting
+times have been developed in previous work (Fan & Shelton, 2008), but this previous work is tailored to dynamic
+Bayesian models rather than to the combinatorial problems
+studied here. Our method greatly simplifies the development of end point informed proposals by marginalizing all
+continuous variables. There has also been work on related
+end-point conditioning problems in the rare event simula-
+
+tion literature (Juneja & Shahabuddin, 2006), but this previous work has focused on the discrete-time setting.
+
+2. Methodology
+For expositional purposes, we start by describing the simplest setup in which our method can be applied: computing
+the probability that a CTMC with known rate parameters
+occupies state y ∈ X at time T given that it occupies state
+x ∈ X at time 0, where X is a countable set of states. The
+main contributions of this paper can be understood in this
+simple setup. We then show that our method can be extended to certain types of partial or noisy observations, to
+more than two observations organized as a time series or a
+tree (branching process), and to situations where some or
+all the parameters of the CTMC are unknown.
+Notation. Let ν(x, y) denote the transition probability
+from stateP
+x ∈ X to state y ∈ X given that a state jump occurs (i.e. y:y6=x ν(x, y) = 1, ν(x, x) = 0). Let λ(x) denote the rate of the exponentially-distributed holding time
+at state x (λ : X → [0, ∞)).1 We only require efficient
+point-wise evaluation of λ(·), ν(·, ·) and efficient simulation from ν(x, ·) for all x ∈ X . We start by assuming that
+ν and λ are fixed, and discuss their estimation afterward.
+We define some notation for paths sampled from this process. Let X1 , X2 , . . . denote the list of visited states with
+Xi 6= Xi+1 , called the jump chain, and H1 , H2 , . . . , the list
+of corresponding holding times. The model is characterized by the following distributions: Xi+1 |Xi ∼ ν(Xi , ·),
+Hi |Xi ∼ F (λ(Xi )), where F (λ) is the exponential distribution CDF with rate λ. Given a start state X1 = x,
+we denote by Px the probability distribution induced by
+this model. Finally, we denote by N the number of states
+visited, counting multiplicities, in the interval [0, T ], i.e.
+Pn−1
+Pn
+(N = n) = ( i=1 Hi ≤ T < i=1 Hi ).
+Overview of the inference method. Using the simple
+setup introduced above, the problem we try to solve is to
+approximate Px (XN = y), which we approach using an
+importance sampling method. Each proposed particle consists of a sequence (a list of variable finite length) of states,
+x∗ = (x1 , . . . , xn ) ∈ X ∗ , starting at x and ending at y.
+In other words, we marginalize the holding times, hence
+avoiding the difficulties involved with sequentially proposing times constrained to sum to the time T between the end
+points.
+Concretely, our method is based on the following elementary property, proved in the Supplement:
+
+Proposition 1. If we let π(x∗ ) = γ(x∗ )/Px (XN = y),
+1
+Note that this is a reparameterization of the standard rate matrix qx,y , with qx,x = −λ(x), and qx,y = λ(x)ν(x, y) for x 6= y.
+
+Efficient Continuous-Time Markov Chain Estimation
+
+where,
+γ(x∗ ) =1(xn = y)
+
+n−1
+Y
+
+!
+ν(xi , xi+1 ) ×
+
+(1)
+
+How do we bias the proposal sampling of the next state?
+Let D(x) ⊂ X be the set of states that decrease the potential from x. The proposed jump-chain transitions are
+chosen with probability
+
+i=1
+
+P
+
+n−1
+X
+i=1
+
+Hi ≤ T <
+
+n
+X
+i=1
+
+P̃(Xi+1 = xi+1 |Xi = xi ) =
+
+!
+
+ ∗
+∗
+
+H i X = x ,
+
+(αxy i )
+
+i+1
+
+where the Hi ’s are sampled according to F (λ(Xi )) independently given X ∗ = (X1 , · · · , XN ) and where n = |x∗ |,
+then π is a normalized probability mass function.
+As our notation for γ, π suggests, we use this result as follows (see Algorithm 1 in the Supplement for details). First,
+we define an importance sampling algorithm that targets
+the unnormalized density γ(x∗ ) via a proposal P̃(X ∗ =
+x∗ ). Let us denote the k-th particle produced by this algorithm by x∗ (k) ∈ X ∗ , k ∈ {1, . . . , K}, where the number of particles K is an approximation accuracy parameter.
+Each of the K particles is sampled independently according to the proposal P̃. Second, we exploit the fact that the
+sample average of the unnormalized importance weights
+w(x∗ (k)) = γ(x∗ (k))/P̃(X ∗ = x∗ (k)) generated by this
+algorithm provide a consistent estimator for the normalizer
+of γ. Finally, by Proposition 1, this normalizer coincides
+with the quantity of interest here, Px (XN = y). The only
+formal requirement on the proposal is that Px (X ∗ = x∗ ) >
+0 should imply P̃(X ∗ = x∗ ) > 0. However, to render this
+algorithm practical, we need to show that it is possible to
+define efficient proposals, in particular proposals such that
+Px (X ∗ = x) > 0 if and only if P̃(X ∗ = x∗ ) > 0 (in
+order to avoid particles of zero weight). We also need to
+show that γ can be evaluated point-wise efficiently, which
+we establish in Proposition 2.
+Proposal distributions. Our proposal distribution is based
+on the idea of simulating from the jump chain, i.e. of sequentially sampling from ν until y is reached. However this
+idea needs to be modified for two reasons. First, (1) since
+the state is countably infinite in the general case, there is
+a potentially positive probability that the jump chain sampling procedure will never hit y. Even when the state is
+finite, it may take an unreasonably large number of steps to
+reach y. Second, (2) forward jump chain sampling, assigns
+zero probability to paths visiting y more than once.
+We address (1) by using a user-specified potential ρy :
+X → N centred at the target state y (see Supplement for
+the conditions we impose on ρy ). For example we used the
+Levenshtein (i.e., minimum number of insertion, deletion,
+and substitution required to change one string into another)
+and Hamming distances for the string evolution and RNA
+kinetics applications respectively. Informally, the fact that
+this distance favors states which are closer to y is all that we
+need to bias the sampling of our new jump process towards
+visiting y.
+
+ν(xi , xi+1 )1{xi+1 ∈ D(xi )}
+P
+0
+x0
+∈D(xi ) ν(xi , xi+1 )
+
+(2)
+!
+
+ν(xi , xi+1 )(1 − 1{xi+1 ∈ D(xi )})
+P
+ν(xi , x0i+1 )
+x0
+∈D(x
+/
+i)
+
++ (1 − αxy i )
+
+!
+.
+
+i+1
+
+We show in the Supplement that under weak conditions,
+we will hit target y inPfinite time with probability one if we
+pick αxy = max{α, x0 ∈D(xi ) ν(xi , x0i+1 )}. Here α >
+i+1
+1/2 is a tuning parameter. We discuss the sensitivity of this
+parameter, as well as strategies for setting it in Section 3.2.
+Point (2) can be easily addressed by simulating a
+geometrically-distributed number of excursions where the
+first excursion starts at x, and the others at y, and each excursion ends at y. We let β denote the parameter of this
+geometric distribution, a tuning parameter, which we also
+discuss at the end of Section 3.2.
+Analytic jump integration. In this section, we describe
+how the unnormalized density γ(x∗ ) defined in Equation (1) can be evaluated efficiently for any given path
+x∗ ∈ X ∗ .
+It is enough to show that we can compute the following integral for Hi |X ∗ ∼ F (λ(Xi )) independently conditionally
+on X ∗ :
+P
+
+n−1
+X
+
+Hi ≤ T <
+
+i=1
+
+i=1
+
+Z
+
+n
+X
+
+!
+
+ ∗
+∗
+
+H i X = x
+=
+
+(3)
+
+Z
+···
+
+g(h1 , h2 , . . . , hn ) dh1 dh2 . . . dhn ,
+hi >0:
+
+Pn
+
+i=1
+
+hi =T
+
+where g(h1 , h2 , . . . , hn ) =
+(n−1
+)
+Y
+f (hi ; λ(xi )) (1 − F (hn ; λ(xn ))),
+i=1
+
+and where f is the exponential density function. Unfortunately, there is no efficient closed form for this highdimensional integral, except for special cases (for example,
+if all rates are equal) (Akkouchi, 2008). This integral is
+related to those needed for computing convolutions of nonidentical independent exponential random variables. While
+there exists a rich literature on numerical approximations to
+these convolutions, these methods either add assumptions
+on the rate multiplicities (e.g. |{λ(x1 ), . . . , λ(xN )}| =
+|(λ(x1 ), . . . , λ(xN ))|), or are computationally intractable
+(Amari & Misra, 1997).
+We propose to do this integration using the construction of
+an auxiliary, finite state CTMC with a n + 1 by n + 1 rate
+matrix Q̌ (to be defined shortly). The states of Q̌ correspond to the states visited in the path (x1 , x2 , . . . , xn ) with
+
+Efficient Continuous-Time Markov Chain Estimation
+
+multiplicities plus an extra state sn+1 . All off-diagonal entries of Q̌ are set to zero with the exception of transitions
+going from xi to xi+1 , for i ∈ {1, . . . , n}. More specifically, Q̌ is
+
+Parameter estimation. So far, we have assumed that the
+parameters ν and λ governing the dynamics of the process
+are known. We now consider the case where we have a
+parametric family with unknown parameter θ ∈ Θ for the
+jump transition probabilities νθ and for the holding time
+
+
+−λ(x1 ) λ(x1 )
+0
+··· 0
+0
+mean function λθ . We denote by Px,θ the induced distribu
+ 0
+−λ(x2 ) λ(x2 ) · · · 0
+0
+
+
+tion on paths and by p a prior density on θ. To approximate
+·
+·
+·
+·
+·
+·
+·
+·
+·
+·
+·
+·
+·
+·
+·
+·
+·
+·
+.
+(4)
+
+
+ 0
+the posterior distribution on θ, we use pseudo-marginal
+0
+0
+· · · −λ(xn ) λ(xn ) 
+0
+0
+0
+··· 0
+0
+methods (Beaumont, 2003; Andrieu & Roberts, 2009) in
+the fixed end-point setup and particle MCMC methods
+(Andrieu et al., 2010) in the sequences and trees setup.
+This construction is motivated by the following property
+While our algorithm can be combined with many variants
+which is proven in the Supplement:
+of these pseudo-marginal and particle MCMC methods, in
+Proposition 2. For any finite proposed path
+this section, for simplicity we describe the grouped inde(x1 , x2 , . . . , xn ), if Q̌ is defined as in Equation (4),
+pendence Metropolis-Hastings (GIMH) approach.
+then
+At each MCMC iteration t, the algorithm keeps in memory
+!
+
+n−1
+n
+X
+X
+(t)
+ ∗
+
+∗
+a pair x(t) = (θ(t) , Ẑθ(t) ) containing a current parameter
+exp(T Q̌)
+=P
+Hi ≤ T <
+(5)
+Hi X = x
+1,n
+
+i=1
+
+i=1
+
+
+
+where exp(A) denotes the matrix exponential of A.2
+Trees and sequences of observation. We have assumed
+so far that the observations take the form of a single branch
+with the state fully observed at each end point. To approach
+more general types of observations, for example a series of
+partially observed states, or a phylogenetic tree with observed leaves, our method can be generalized by replacing
+the importance sampling algorithm by a sequential Monte
+Carlo (SMC) algorithm. We focus on the tree case in this
+work which we describe in detail in Section 3, but we outline here how certain partially observed sequences can also
+be approached to start with something simpler.
+Consider a setup where the observation at time Ti is
+a set Ai ⊂ X (i.e. we condition on (X(Ti ) ∈
+Ai ; i ∈ {1, . . . , m}) which arises for example in (Saeedi &
+Bouchard-Côté, 2011)). In this case, the importance sampling algorithm described in the previous section can be
+used at each iteration, with the main difference being that
+the potential ρ is modified to compute a distance to a set Ai
+rather than a distance to a single point y. See Algorithm 5
+in the Supplement for details.
+For other setups, the construction of the potential is more
+problem-specific. One limitation of our method arises
+when the observations are only weakly informative of the
+hidden state. We leave these difficult instances for future
+work and reiterate that many interesting and challenging
+problems fall within the reach of our method (for example,
+the computational biology problems presented in the next
+section).
+2
+Multiplicities of the rates in Q̌ greater than one will break
+diagonalization-based methods of solving exp(T Q̌), but other efficient matrix exponentiation methods such as the squaring and
+scaling method are still applicable in these cases.
+
+(t)
+
+θ(t) and an approximation Ẑθ(t) of the marginal probability
+(t)
+
+of the observations3 Y given θ(t) , Ẑθ(t) ≈ Pθ(t) (Y). This
+approximation is obtained from the algorithm described in
+the previous subsections. Even though this approximation
+is inexact for a finite number of particles, the GIMH sampler is still guaranteed to converge to the correct stationary
+distribution (Andrieu et al., 2010).
+The algorithm requires the specification of a proposal density on parameter q(θ0 |θ). At the beginning of each MCMC
+iteration, we start by proposing a parameter θ∗ from this
+proposal q. We then use the estimate Ẑθ∗ of Pθ∗ (Y) given
+by the average of the weights w(x∗(t) (k)) to form the ratio r(θ(t) , θ∗ ), below, where k is the index for particles.
+We accept (θ∗ , Ẑθ∗ ), or remain as before, according to a
+Bernoulli distribution with probability min{1, r(θ(t) , θ∗ )}
+where
+r(θ(t) , θ∗ ) =
+
+p(θ∗ ) Ẑθ∗ q(θ(t) |θ∗ )
+.
+p(θ(t) ) Ẑ (t)
+q(θ∗ |θ(t) )
+θ (t)
+
+See Algorithm 4 in the Supplement for details.
+
+3. Numerical examples
+3.1. String-valued evolutionary models
+Molecular evolutionary models, central ingredients of
+modern phylogenetics, describe how biomolecular sequences (RNA, DNA, or proteins) evolve over time via
+a CTMC where jumps are character substitutions, insertions and deletions (indel), and states are biomolecular
+sequences. Previous work focused on the relatively restricted range of evolutionary phenomena for which computing marginal probabilities of the form Px (XN = y) can
+3
+For example, in the single branch setting, Y = (X1 =
+x, XN = y).
+
+Efficient Continuous-Time Markov Chain Estimation
+
+be done exactly.
+In particular, we are not aware of existing methods for doing Bayesian inference over context-dependent indel models, i.e. models where insertions and deletions can depend
+on flanking characters. Modelling the context of indels is
+important because of a phenomenon called slipped strand
+mispairing (SSM), a well known explanation for the evolution of repeated sequences (Morrison, 2009; Hickey &
+Blanchette, 2011; Arribas-Gil & Matias, 2012). For example, if a DNA string contains a substring of “TATATA”, the
+non-uniform error distribution in DNA replication is likely
+to lead to a long insertion of extra “TA” repeats.
+Model. In order to describe our SSM-aware model, it is
+enough to describe its behavior on a single branch of a tree,
+say of length T . Each marginal variable Xt is assumed to
+have the countably infinite domain of all possible molecular
+sequences. We define λ(x), as a function of the mutation
+rate per base θsub , the global point insertion (i.e. insertion of
+a single nucleotide) rate λpt , the point deletion rate per base
+µpt , the global SSM insertion rate λSSM (which copies a
+substring of length up to three to the right of that substring),
+and the SSM deletion rate per valid SSM deletion location
+µSSM (deletion of a substring of length up to three at the
+right of an identical substring):
+λ(x) = m(x)θsub + λpt + m(x)µpt + λSSM + k(x)µSSM
+where m(x) is the length of the string x and k(x)
+is the number of valid SSM deletion locations in
+x. We denote these evolutionary parameters by θ =
+(θsub , λpt , µpt , λSSM , µSSM ). The jump transition probabilities from x to x0 are obtained by normalizing each of the
+above rates. For example the probability of deleting the
+first character given that there is a change from sequence x
+is µpt /λ(x). Note that since the total insertion rate does not
+depend on the length of the string, the process is explosionfree for all θ. At the same time, there is no fixed bound on
+the deletion rate, ruling out classical methods such as uniformization or matrix exponentiation.
+Validation on a special case. Before moving on to more
+complex experiments, we started with a special case of
+our model where the true posterior can be computed numerically. This is possible by picking a single branch,
+and setting λSSM = µSSM = 0, in which case the process reduces to a process for which analytic calculation
+of Px,θ (XN = y) is tractable (Bouchard-Côté & Jordan,
+2012). We fixed the substitution parameter θsub , and computed as a reference the posterior by numerical integration
+on λpt , µpt truncated to [0, 3]2 and using 1002 bins.
+We generated 200 pairs of sequences along with their sequence alignments4 , with T = 3/10, λ = λpt = 2, µ =
+4
+
+A sequence alignment is a graph over the observed nu-
+
+µpt = 1/2 and held out the mutations and the true value of
+parameters λ and µ. We put an exponential prior with rate
+1.0 on each parameter. We approximate the posterior using
+our method, initializing the parameters to λ = µ = 1, using
+α = 2/3, β = 19/20, 64 particles, and a proposal q over
+parameters given by the multiplicative proposal of Lakner
+et al. (Lakner et al., 2008). We show the results of λ in
+Figure 1a and in the Supplement Figure: results of parameter µ. In both cases the posterior approximation is shown
+to closely mirror the numerical approximation. The evolution of the Monte Carlo quartiles computed on the prefixes
+of Monte Carlo samples also shows that the convergence is
+rapid (Figure 1b).
+Next, we compared the performance of a GIMH algorithm
+computing Ẑθ(t) using our method, with a GIMH algorithm
+(t)
+computing Ẑθ(t) using forward sampling. We performed
+this comparison by computing the Effective Sample Size
+(ESS) after a fixed computational budget (3 days). For the
+parameter λ, our method achieves an ESS of 1782.7 versus
+44.6 for the forward sampling GIMH method; for the parameter µ, our method achieves an ESS of 6761.2 versus
+90.2 for the forward sampling GIMH method. In those experiments, we used 100 particles per MCMC step, but we
+also tried different values and observed the same large gap
+favoring our method (see Supplement Figure: Varying the
+number of particles per MCMC step).
+We also generated three datasets based on branch lengths
+from {0.15, 0.3, 0.6}, each containing 10 pairs of sequences (x, y) along with their sequence alignments and
+estimated the transition probability Px (YN = y) using our
+method (denoted Time-Integrated Path Sampling, TIPS),
+and using forward simulation (denoted forward sampling,
+FS). We compared the two methods in Figure 1c by looking at the absolute log error of the estimate p̂, error(p̂) =
+| log p̂ − log Px (XN = y)|. We performed this experiment
+with a range of numbers of particles, {21 , 22 , . . . , 220 } and
+plotted the relative errors as a function of the wall clock
+time needed for each approximation method. We also computed the variances of the importance weights for specific
+alignments and compared these variances for FS and TIPS
+(see Figure 1d). We observed that the variances were consistently two orders of magnitudes lower with our method
+compared to FS.
+Tree inference via SMC. We now consider the general
+case, where inference is on a phylogenetic tree, and the
+SSM parameters are non-zero. To do this, we use existing
+SMC algorithms for phylogenetic trees (Teh et al., 2008;
+Bouchard-Côté et al., 2012; Wang, 2012), calling our algorithm at each proposal step. We review phylogenetic inference in the Supplement where we also give in Algorithm 6
+the details of how we combined our method with phylogecleotides linking the nucleotides that have a common ancestor.
+
+Efficient Continuous-Time
+Chain Estimation
+Efficient Markov
+Continuous-Time
+Markov Chain Estimation
+
+10000
+
+15
+
+15
+
+10
+
+15
+
+10
+
+5
+
+10
+
+10
+
+15
+10
+
+5
+
+5
+
+15
+
+5
+
+●
+
+●
+
+●
+
+●
+
+0
+
+0
+
+5
+
+●
+
+●
+
+0
+
+1.0
+
+●
+
+●
+
+●
+
+●
+
+0
+
+●
+
+Reconstruction error
+
+1.8
+1.4
+
+5e−04
+
+5e−04
+
+5
+0
+
+●
+
+●
+
+●
+
+0
+
+5e−03
+
+2.2
+
+●
+
+Partition Metric
+
+15
+10
+
+5e−03
+
+Variance (log scale)
+
+2.2
+1.8
+
+100
+
+●
+
+●
+
+●
+
+10000
+
+●
+
+●
+
+●
+
+5e−03
+5e−04
+
+●
+
+5e−04
+
+5e−03
+
+●
+
+5e−04
+
+5e−05
+
+Variance
+
+5e−03
+5e−04
+5e−05
+
+Variance
+
+Error
+
+●
+
+5e−05
+
+●
+
+5e−03
+
+●
+
+●
+
+●
+
+●
+
+●
+
+5e−05
+
+100
+
+1.4
+
+1.5
+
+1.4
+
+●
+
+10000
+
+●
+●
+
+●
+
+● ● ● ● ● ● ● ● ●
+● ● ● ● ● ● ● ● ● ● ● ● ●
+● ● ● ● ● ● ● ● ● ● ●
+
+5e−05
+
+●
+
+●
+
+Partition Metric
+
+2.2
+
+2.5
+
+1.8
+
+2.0
+
+2.5
+
+2.2
+1.8
+
+100
+
+●
+
+●
+
+●
+
+5e−05
+
+0
+
+●
+
+1.0
+
+●
+
+●
+
+●
+
+●
+●
+●
+●
+●
+●
+●
+●
+●
+●
+●
+●
+●
+●
+●
+●
+●
+●
+●
+● ●
+●
+●
+●
+●
+●
+●
+●
+●
+●
+●●
+●
+●
+● ● ●
+● ● ● ●●● ● ●
+●
+● ● ●
+●● ● ● ● ● ●
+● ●
+●
+●
+●
+● ● ●
+● ● ● ● ● ● ● ● ●● ● ● ●●●
+●
+●
+● ●●
+●
+● ●●
+●●
+●●
+●
+●● ●
+● ●
+●
+●
+●
+● ●● ●
+●●
+●
+●●
+●
+●
+●
+●
+● ●●
+●
+● ●
+●
+● ●
+●
+●
+●
+● ●
+●
+●●●● ●
+●
+● ●
+●
+●
+●● ● ●
+●
+●
+●
+●
+●
+●
+● ●● ● ●
+●
+●
+●
+●
+●
+●
+●
+●
+●
+●
+●●
+●
+● ●
+●
+●
+● ● ●
+●
+●
+● ●
+●
+●
+●
+● ●
+● ●
+●
+● ●●●
+●
+●
+●
+●
+● ●
+●●
+● ●
+●
+●
+● ●
+●●
+●●●
+●
+●
+●●●
+●
+● ●
+●
+●
+●
+●
+●
+●
+●
+●
+●●
+●
+● ●
+● ●
+●
+●
+● ● ●●
+●
+●●●
+●●
+● ●
+●
+●
+●
+●
+●
+●●
+● ●● ●
+●
+●
+●
+●
+●
+●
+●
+● ●
+●
+● ●
+●● ●
+●●
+●
+●
+●
+●●
+●
+●● ●●
+●
+●
+●
+●
+● ●●
+●
+●● ● ● ●
+● ● ●●
+●● ● ●
+● ● ●
+●●
+●
+● ●
+●●
+●
+●
+●
+●
+●●
+●
+● ●
+●
+●
+●
+●
+●
+●
+●●
+●
+●
+●
+●
+●
+●
+●
+●
+● ●
+●
+●
+●
+●
+●
+●●
+●
+● ●
+●
+●
+● ●
+●
+●
+●
+●
+●●
+●
+●
+●
+●
+●
+●
+
+1.0
+
+●
+
+●
+
+TIPS
+
+2.0
+
+Error
+Error
+
+4
+
+●
+
+●
+
+8
+
+FS
+
+1.4
+
+2.2
+
+2.5
+
+2.0
+
+12
+
+1.5
+
+2.0
+
+2.0
+
+●
+
+0.6
+
+1.0
+
+●
+●
+●
+●
+●
+●
+●
+●●
+●●
+●●●●
+●●●●●●●●●
+
+●
+
+●
+
+●
+
+0.3
+
+1.5
+
+●
+
+●
+
+●
+
+1.0
+
+●
+
+● ●
+
+1.8
+
+●
+
+●
+
+●
+
+●
+
+●
+
+2.0
+
+●
+
+●
+
+●
+
+●
+
+●
+
+●●
+
+1.0
+
+●
+
+●
+●
+●
+●
+●
+●●
+●●
+●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
+
+●
+
+●●
+
+1.4
+
+●
+
+●
+
+●
+
+●
+
+●
+
+●
+
+●●
+
+1.5
+
+●
+
+●
+
+●
+
+●
+
+●
+
+●
+
+●
+●
+●
+●
+●●
+● ● ●
+● ●
+● ●
+●
+●
+●
+● ●●●
+●●
+● ● ●
+●
+● ●
+●
+● ●●
+●●●
+● ●●
+● ● ●● ●
+●
+●
+●
+●
+●
+●●
+●
+●
+● ● ●●●
+● ●
+●
+● ● ●● ●
+●●
+● ●
+●
+●● ●●
+● ●● ●
+●
+●
+●● ● ●● ●●
+●
+● ●
+●
+● ● ● ●●
+●● ●
+●●
+●
+●
+●●
+●
+●●
+●
+●
+●
+●
+● ●●
+●
+●● ● ● ●
+● ● ●●
+● ● ●
+● ● ●● ● ●
+●
+● ●
+●●
+●
+●
+●
+●
+●●
+●●
+● ●
+●
+●
+●
+●
+●
+●●●
+● ●
+●
+●
+●
+●
+●
+● ●
+●
+●
+●
+●
+●
+●●
+●
+● ●
+●
+●
+● ●
+●
+●
+●
+●
+●●
+●
+●
+●
+●
+●
+●
+
+1.0
+
+●
+
+●
+●
+●
+● ●
+●
+
+●
+●●
+
+1.0
+
+●
+
+●
+
+●
+
+1.0
+
+●
+●
+●
+●
+●
+●
+●
+●●
+●●
+●●●●
+●●●●●●●●●
+
+●
+
+●
+
+●
+
+●
+●
+●
+
+0.15
+
+●
+
+●
+●●
+● ●
+●
+● ●
+●
+●
+● ●●
+●
+● ●●
+●●
+●●
+●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
+●
+●●
+●●●●●●●●●
+●●●
+●
+●●
+●●●●●●●●●●●●●●●●●●●●
+●
+●●●●●
+●●●●●●●●●●●● ●
+●●●
+●●●●●
+●
+●
+●
+●
+●●● ●
+●●●●●●●●
+●● ●●●●
+●
+●
+●
+●
+●●●●●●●●●●●●●●●●●●●●●●●●
+●
+● ●●
+●
+●●
+●●●●●
+●●●●●● ●●
+●
+● ●● ●●● ●●●●●●●
+● ●●
+●
+●
+● ●
+●
+● ●● ● ●●
+●● ●
+●● ● ●
+●
+●
+●
+●● ● ●
+●
+●
+●
+●
+● ●● ● ●●
+● ●●●
+●
+● ●● ●
+●
+● ●●
+●
+● ●
+●
+●
+● ●
+● ●●
+
+0.5
+
+●
+
+●
+
+0.0
+
+●
+
+●
+
+Estimate (λ)
+
+●
+
+●
+
+●
+
+0.5
+1.5
+2.0
+1.4 1.0
+1.8 1.52.5
+2.22.0
+
+●
+
+Error
+
+●
+
+●
+●
+●
+●
+●
+●●
+●●
+●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
+
+●
+
+●
+
+●
+
+0.0
+1.0
+1.0
+
+●
+
+●
+
+●
+
+●
+
+●
+
+●
+
+●
+
+●
+
+1.0
+
+●
+
+1.0
+
+Density
+
+●
+
+●
+
+●
+
+1.5
+
+●
+
+0.5
+
+1.0
+
+●
+
+●
+
+0.5
+
+0.0
+
+●
+
+●
+
+0.5
+
+1.5
+
+●
+
+●
+
+●
+
+●●●●
+●
+●
+●
+●
+
+●
+
+●
+
+0.0
+0.0
+
+●
+
+●
+
+●
+
+1.5
+
+●●●●
+●
+●
+●
+●
+●
+●
+
+0.0
+
+2.0
+
+PMMH
+Samples
+Monte Carlo
+Quartiles Monte
+605
+1 Carlo
+10
+100
+1000
+Exact
+PMMH
+Samples
+Quartiles
+550Exact
+1
+10
+100 1000
+Efficient Continuous-Time Markov Chain Estimation
+606
+551
+1.0 552
+1.5
+2.0
+2.5
+3.0 a) 1.0
+10000 20000 30000
+0 0 10000
+20000
+30000
+607
+b) 00 5000
+d) 0.2 20000 0.430000
+e) 1 10 100 1000
+1.5
+2.0
+2.5
+3.0
+10000
+20000
+30000
+0
+10000
+10000 15000 c)
+0.6 0.8
+25.0
+25.0
+Exact
+608
+553
+50.0
+50.0
+TIPS
+75.0
+75.0
+609
+554
+610
+555
+25.0
+Estimated
+556
+611
+50.0
+FS
+Percentiles
+75.0
+TIPS
+1
+10
+100 1000
+1 0.2 20000
+10 0.4100
+1000
+0
+5000
+10000
+1.0
+1.5
+2.0
+2.5
+3.0
+2.0
+10000
+20000
+30000
+0
+10000
+30000
+1
+10
+100 1000
+0.6 0.8
+1.0 557
+1.5
+2.0
+2.5
+3.0
+1.0
+1.5
+2.0
+2.5
+0 1.0
+10000 1.5
+2000015000
+30000 2.5
+0 0 10000
+20000
+30000
+612
+CPUtime
+time(ms,
+(ms,
+scale)
+λ
+GIMH Iteration
+CPU
+loglog
+scale)
+Branch length (log scale)
+Number of particles (log scale)
+Number
+of
+particles
+Number
+of
+particles
+558
+613
+(a)
+(b)
+(a)
+(b)
+559
+614
+Figure 1.1.a) (a)
+Validation
+of the
+estimate in
+on the
+the Poisson
+Indel Process
+dataset.
+The histogramusing
+and thethe
+density
+estimateIndel
+in redProcess
+Figure
+Results
+ofposterior
+parameter
+validation
+of thethe
+implementation
+Poisson
+(PIP).
+e 1. 560
+(a) Results
+of parameter
+in the
+validation
+of the implementation
+using
+Poisson Indel Process
+(PIP).
+From
+615
+is obtained
+from posterior
+35,000 GIMH
+iterations; the
+curve is obtained
+by numerical
+integration.
+The generating
+value
+λpt = 2. b)
+left
+toobtained
+right:
+obtained
+viablack
+numerical
+methods;
+approximate
+posterior
+using
+ourisand
+method
+with 64 particle
+right:
+posterior
+via
+numerical
+methods;
+approximate
+posterior
+using
+our
+method
+with
+64
+particles
+561
+Convergence of percentiles computed from prefixes of the GIMH output. c) Relative errors on the transition probabilities for branch 616
+35,000 PMMH
+iterations; values;
+sampled parameter
+values;
+convergence
+of the the
+quantile
+computed
+from the PMMH outpu
+0 PMMH
+iterations;
+sampled
+the quantile
+computed
+PMMH
+output. (b)
+lengths from
+{0.15, parameter
+0.3, 0.6}. d) Estimatedconvergence
+variance of theof
+weights.
+e) Reconstruction
+errorfrom
+on tree distances.
+562
+617
+Experiments
+iments on trees
+via SMC. on trees via SMC.
+563
+618
+564
+619
+Branch length trix exponential
+Branch
+length
+a large matrix. Here,
+we will
+use our
+netic SMC.
+Branch length
+Branchoflength
+565
+620
+0.2
+0.4 transition
+0.6 0.8
+method
+(denoted
+as TIPS)
+to approximate
+these
+0.15
+0.3
+0.2 0.6
+0.4
+0.6 0.8
+566
+To evaluate
+trees
+0.15 our method, we
+0.3 sampled 10 random
+0.6
+621
+12
+probabilities.
+12
+567
+from
+the coalescent on 10 leaves,
+FS along each of which we
+622
+FS
+IS
+568
+Model. An RNA fold can be characterized by a set of base 623
+simulatedIS 5 sets of molecular
+sequences
+according to our
+8
+8
+pairs, either C-G, A-U, or G-U, each of which specifies the
+evolutionary
+model. We used the following parameters:
+569
+624
+sequence positions of the two bases involved in the pairing.
+SSM length=3, θsub =4 0.03, λpt = 0.05, µpt = 0.2,
+570
+We will default the discussion to RNA sequences where we 625
+λ4SSM = 2.0, and µSSM = 2.0. One subset of simulated
+571
+data is shown in the Supplement
+Figure: Sequence Simare interested in pseudo-knot-free RNA structures. These 626
+FS
+572
+0
+FS
+IS
+627
+0
+secondary
+structures
+can
+be
+represented
+as
+a
+planar
+circle
+ulation.
+The
+unaligned
+sequences
+on
+leaves
+are
+used
+for
+IS
+573
+100
+10000
+100
+10000
+100
+10000
+0.2
+0.4
+0.6 0.8
+CPU10000
+time (ms,the
+log scale)graph 0.2
+100
+10000
+10000
+with the 0.4
+sequence
+arrayed along a circle and non- 628
+tree reconstruction
+using100
+our method.
+We 100
+summarized
+0.6 0.8
+574
+CPU time (ms, log scale)
+crossing arcs between positions of the sequence which are 629
+posterior over trees using a consensus tree optimizing the
+575
+base paired.
+webranch
+will use length,
+structure domain,
+to mean secondary
+posterior
+(Felsenstein,
+1981).
+630 variance
+Figure
+2.expected
+XXXX pairwise
+TODO:distances
+definition/ref
+in text
+for absolute
+log Here,
+error,
+parameters,
+e 2. 576
+XXXX TODO:
+definition/ref
+in
+text
+for
+absolute
+log
+error,
+branch
+length,
+domain,
+parameters,
+variance
+of
+the
+structure.
+The
+folding
+of
+a
+molecule
+into
+secondary
+strucFigure
+1e
+shows
+tree
+distances
+using
+the
+partition
+metric
+631
+weights, FS, IS, etc
+577IS, etc
+ts, FS,
+(Felsenstein, 2003) between generated trees and consentures happens in a dynamic fashion.
+632
+578
+sus trees reconstructed using our evolutionary model. The
+In
+the
+pathway
+model
+we
+consider,
+successive
+structures
+X
+i 633
+579
+tree distance decreases as the number of particles increases,
+and
+X
+must
+differ
+by
+exactly
+one
+base
+pair.
+Let
+X
+=
+x
+this
+experiment with isa obtained
+range with
+of numbers
+of particles,i+1 rameters: SSM length=3, ✓sub
+0.03, pt =
+1 = 634
+580
+and
+a reasonable20accuracy
+only 100
+parti1 a2 range of
+xperiment {2
+with
+numbers
+of the
+particles,
+rameters:
+SSM
+✓sub
+0.03,
+= 0.05,
+and Xlength=3,
+where
+x0.2,
+is =
+the SSM
+given start
+structure
+and
+y is 635
+pt2.0,
+N = y
+,
+2
+,
+.
+.
+.
+,
+2
+},
+and
+plot
+relative
+errors
+a
+function
+µ
+=
+=
+and
+µ
+= 2.0. One
+pt
+SSM
+581
+cles, suggesting that it is possible to reconstruct phyloge2
+, . . . , 220 },of
+and
+plot
+theclock
+relative
+errors
+a function
+µpt
+= 0.2, the
+= final
+2.0,
+and
+µSSM
+One
+sub-5 of
+given
+structure.
+See =
+for 2.0.
+example
+Figure
+the
+SSM
+the
+wall
+time
+needed
+for
+each
+approximation
+set
+of
+simulated
+data
+is
+shown
+in
+the
+Supplemen
+636
+nies from noisy data generated by complex evolutionary
+582
+Supplement,
+where
+a folding
+path
+is given for Figa short
+RNA
+e wall clockmethod.
+time
+needed
+for
+each
+approximation
+set
+of
+simulated
+data
+is
+shown
+in
+the
+Supplement
+(5)
+[[need
+to
+explain
+CPU
+time]]
+We
+ure:
+Sequence
+Simulation.
+The
+unaligned
+sequ
+637
+mechanisms.
+583
+(holding
+times
+not
+shown)
+with used
+x beingfor
+the tree
+unfolded
+state
+od. (5) [[need
+to explain
+CPU
+time]]
+We importance
+ure: Sequence
+Simulation.
+The are
+unaligned
+sequences
+also
+computed
+the
+variances
+of
+the
+weights
+on
+leaves
+reconstruction
+usin
+638
+584
+andused
+y being
+thetree
+Minimum
+Free Energy using
+(MFE) structure.
+omputed
+the
+variances
+of
+the
+importance
+weights
+on
+leaves
+are
+for
+reconstruction
+our
+for
+alignments
+method. We summarized the posterior
+3.2.specific
+RNA folding
+pathways and compared these variances
+639 over tree
+585
+ecific
+alignments
+and
+compared
+these
+variances
+method.
+We
+summarized
+the
+posterior
+over
+trees
+usTo
+formalize
+the
+folding
+pathway,
+we
+need
+to
+introduce
+for
+FS
+and
+IS
+for
+a
+range
+of
+branch
+lengths
+(see
+(6)
+ing
+a
+consensus
+tree
+optimizing
+the
+posterior exp
+640
+586
+Nucleic
+acid
+folding
+pathways
+predict
+how
+RNA ing
+and DNA
+the
+generator
+matrix,
+Q.
+This
+matrix
+contains
+an
+enS and
+IS
+for
+a
+range
+of
+branch
+lengths
+(see
+(6)
+a
+consensus
+tree
+optimizing
+the
+posterior
+expected
+[[figure,
+more
+in
+SI]]).
+We
+observed
+that
+the
+varipairwise
+distances.
+Figure
+(8)
+[[fixme]]
+show
+641
+587
+molecules fold in on themselves via intra-molecular intertry
+for every
+possible
+of secondary
+structures.
+Theand consensus
+re,588
+more ances
+in SI]]).
+observed that
+vari-of magnitudes
+pairwise distances.
+Figure
+(8)pair
+[[fixme]]
+shows
+treetrees
+wereWe
+consistently
+twothe
+orders
+lower
+distances
+between
+generated
+642
+actions. The state space of our stochastic process that deKawasaki
+rule
+givestrees
+the rate
+of
+the probabilistic
+process model. Th
+were
+consistently
+two
+orders
+of
+magnitudes
+lower
+distances
+between
+generated
+and
+consensus
+trees
+with
+our
+method
+compared
+to
+FS.
+reconstructed
+using
+our
+evolutionary
+643
+589
+scribes folding is the set of all folds, or secondary strucmoving
+from
+structure
+xdecreases
+to structure
+x0 as
+λ(x)ν(x,
+x0 ) of
+= particles incr
+distance
+as
+the
+number
+our 590
+method tures,
+compared
+to
+FS.
+reconstructed
+using
+our
+evolutionary
+model.
+The
+tree
+the nucleic acid
+is a combinatoTree of
+inference
+via molecule
+SMC. which
+We now
+consider theexp
+gen(E(x) − E(x0 ))/(kT ) if x0 ∈ R(x), and zero other- 644
+and
+a reasonable
+accuracy
+is obtained with onl
+distance
+decreases as the
+number
+of particles
+increases,
+rial
+object.
+For
+RNA
+molecules,
+the
+secondary
+structure
+591
+case, where
+is on
+tree,
+where E(x) is the energy of structure x, R(x) is the 645
+inferenceeral
+via SMC.
+We nowinference
+consider the
+gen-a phylogenetic wise
+particles,
+suggesting
+that
+it
+is possible to recons
+and
+a
+reasonable
+accuracy
+is
+obtained
+with
+only
+100
+is thethe
+primary determiner
+of RNAare
+function.
+For DNATo
+its do set
+of secondary structures within one base pair of structure 646
+non-zero.
+this,
+ase,592
+whereand
+inferenceSSM
+is onparameters
+a phylogenetic
+tree,
+phylogenies
+from
+noisy
+data
+generated
+by complex
+fold can help determine gene transcription rates.particles,
+Under- suggesting
+that
+it is possible
+to When
+reconstruct
+xtrees
+and k is the
+Boltzmann
+constant.
+given a nucleic 647
+we use existing
+SMC algorithms
+for phylogenetic
+he 593
+SSM parameters
+are
+non-zero.
+To
+do
+this,
+mechanisms.
+standing the folding pathways can be useful for designing
+phylogenies
+from
+noisylutionary
+data
+byare
+complex
+594 SMC
+sequence
+of mgenerated
+bases,
+there
+at most evoO(3m ) sec- 648
+(??Wang,
+2012),
+calling our trees
+algorithm
+at eachacid
+proe existing
+algorithms
+forthat
+phylogenetic
+nano-scale
+machines
+have
+potential
+health
+applications
+lutionary
+mechanisms.
+ondary
+step.
+the structures that can be created from it, making the 649
+ang,595
+2012),posal
+calling
+our We
+algorithm
+each
+pro(Venkataraman
+et al.,review
+2010).atphylogenetic
+For
+these
+reasons,inference
+it is of- in
+3.2. RNA
+pathways
+size
+of the generator
+matrixfolding
+exponential
+in the sequence 650
+596
+where inference
+wegetalso
+in Algorithm
+(7)
+step. We Supplement,
+review
+phylogenetic
+ingive
+theestimate
+ten useful
+in applications
+to
+an accurate
+of the
+length.
+This
+model was described by Flamm et al. (Flamm
+597
+3.2.
+RNA
+folding
+pathways
+[[TODO]]
+the
+details
+of molecule
+how we(7)
+combined
+651
+probability
+a nucleic
+acid
+beginning
+in our
+one method
+ement, where
+we alsothat
+give
+in Algorithm
+et al., 2000).Nucleic acid folding pathways predict how RNA
+598
+with
+phylogenetic
+SMC.
+652
+secondary
+structure,
+x, will transition
+in the givenNucleic
+time, T , acid folding pathways
+DNA molecules
+fold
+in and
+on themselves
+via
+DO]] the details
+of how
+we combined
+our method
+predict how
+RNA
+599
+Results.
+In
+this
+section,
+we
+compare
+the
+accuracy
+of
+653
+toSMC.
+a target structure, y. This is called the transition
+probamolecular
+interactions.
+The
+state
+space
+of
+our
+sto
+phylogenetic
+DNA
+molecules
+fold in
+on themselves
+via intraTo evaluate our method, we sampled 10
+random
+trees
+600
+the
+transitiontic
+probability
+estimates
+given by folding
+our method
+bility, and it is typically computed by either solving a sys654
+process
+that
+describes
+is
+the
+set
+of
+all
+molecular
+The statebyspace
+of sampling
+our stochasthewe
+coalescent
+onrandom
+10 leaves,
+along
+each of interactions.
+which
+601our from
+(TIPS) to those
+forward
+method
+aluate
+method,
+sampled 10
+tem of linear
+differential
+equations
+or trees
+by computing a ma655 acid mo
+or obtained
+secondary
+structures,
+of the (FS)
+nucleic
+we
+simulated
+5
+sets
+of
+molecular
+sequences
+according
+tic
+process
+that
+describes
+folding
+is
+the
+set
+of
+all
+folds,
+602
+the coalescent on 10 leaves, along each of which
+656RNA mole
+which
+is
+a
+combinatorial
+object.
+For
+to our
+evolutionary
+model.
+We used the
+following structures,
+paor secondary
+of the nucleic acid molecule
+603 5 sets
+mulated
+of molecular
+sequences
+according
+the secondary structure is the primary
+determ
+657
+which is a combinatorial
+object. For RNA molecules,
+604
+r evolutionary
+model. We used the following pa658
+the secondary structure is the primary determiner
+659
+
+Efficient Continuous-Time Markov Chain Estimation
+
+which is still widely used in the field of RNA folding pathways (Flamm et al., 2000; Schaeffer, 2012). We used the
+RNA molecules shown in Supplement Table: Biological
+RNA Sequences.
+For each method (TIPS and FS) and molecule, we first approximated the probability Px (XN = y) that beginning in
+its unfolded structure x, the molecule would end, after folding time T , in its MFE structure y. We then computed, as a
+reference, the probability of this transition using an expensive matrix exponential. Computing the matrix exponential
+on the full state space was only possible for the RNAs of
+no more than 12 nucleotides. For the longer RNAs, we restricted the state space to a connected subset S of secondary
+structures (Kirkpatrick et al., 2013). While our method
+scales to longer RNAs, we wanted to be able to compare
+against forward sampling and to the true value obtained by
+matrix exponentiation.
+We ran the experiments with a range of number of particles, {51 , 52 , · · · , 56 }, for 30 replicates on folding times
+from {0.125, 0.25, · · · , 8}. Here, similarly to the previous
+example, we compare the performance of the two methods
+by looking at the absolute log error of the estimate p̂ (i.e.,
+error(p̂) = | log p̂ − log Px (XN = y)|) over all replicates.
+The parameters used for the TIPS method are as follows:
+T
+) where T is the speciα = 23 and β = max(0.25, 1 − 16
+fied folding time interval.
+Figures 2a, 2d show the performance of the FS and TIPS
+methods on selective folding times, {0.25, 1, 4}. Figures
+2b, 2e show the CPU times (in milliseconds) corresponding
+to the minimum number of particles required to satisfy the
+certain accuracy level, I = {p̂ : error(p̂) < 1.0} on all the
+folding times. Supplement Figure: Performance vs. folding time shows similar plots for two other RNA molecules.
+The variances of FS and TIPS weights, for 56 = 15625 particles, are also computed and compared on different folding
+times (see Figures 2c, 2f).
+
+with folding time 4.0, TIPS and FS require 5 and 25 particles, and CPU times, 12 ms and 5 ms, respectively to satisfy
+I.
+One caveat of these results is that in contrast to the phylogenetic setup, where TIPS was not sensitive to a range of
+values of the tuning parameters α, β, it was more sensitive
+to these tuning parameters in the RNA setup. See Supplement Figure: Tuning parameter α. We believe that the behavior of our method is more sensitive to α, β in the RNA
+case because the sampled jump chains are typically longer.
+Intuitively, for longer folding times, the transition probabilities are more influenced by the low probability paths, as
+these low probability paths comprise a greater percent of all
+possible paths. This means that any setting of α that heavily
+biases the sampled paths to be from the region just around
+x and y will need to sample a large number of paths in order
+to approximate the contribution of paths with a low probability. This situation is analogous to the well-known problems in importance sampling of mismatches between the
+proposal and actual distributions. Similar sampling considerations apply to parameter β which controls the number of
+excursions from y. If β is too restrictive, again, paths will
+be sampled that do not well reflect the actual probability
+of excursions. Parameter tuning is therefore an important
+area of future work. It might be possible to use some automated tuners (Hutter et al., 2009; Wang et al., 2013) or to
+approach the problem by essentially creating mixtures of
+proposals each with its own tuning parameters.
+At the same time, note that the reason why FS can still perform reasonably well for longer folding times is that we
+picked the final end point to be the MFE, which has high
+probability under the stationary distribution. For low probability targets, FS will often fail to produce even a single
+hitting trajectory, whereas each trajectory sampled by our
+method will hit the target by construction.
+
+4. Conclusion
+
+The graphs show that our novel method (TIPS) outperforms
+FS in estimating the probability of transition from x to y in
+shorter folding times, since it needs many fewer particles
+(and correspondingly faster CPU times) than FS to be able
+to precisely estimate the probability. For instance, for the
+RNA21 molecule with folding time 0.25, FS cannot satisfy
+the accuracy level I, given above, even with 15625 particles, however TIPS only needs 5 particles with 16 ms of
+CPU time to satisfy the same accuracy level. Similarly, the
+variance of our method is smaller by a larger margin (note
+that the variance is shown in log scale in Figures 2c, 2f).
+
+We have presented an efficient method for approximating
+transition probabilities and posterior distributions over parameters in countably infinite CTMCs. We have demonstrated on real RNA molecules that our method is competitive with existing methods for estimating the transition
+probabilities which marginalize over folding pathways and
+provide a model for the kinetics of a single strand of RNA
+interacting chemically with itself. We have also shown, using a realistic, context-dependent indel evolutionary process, that the posterior distributions approximated by our
+method were accurate in this setting.
+
+For longer folding times in Figure 2, the performance of
+the TIPS and FS methods would be comparable (in terms
+of the obtained errors and CUP times) slightly in favour of
+forward sampling. For example, for the HIV23 molecule
+
+What makes our method particularly attractive in large or
+countably infinite state space CTMCs is that our method’s
+running time per particle is independent of the size of the
+state space. The running time does depend cubically on the
+
+1
+
+4
+
+50
+20
+
+CPU time (ms)
+
+1
+
+●
+●
+
+●
+●
+
+●
+
+●
+
+●
+
+10
+
+TIPS
+
+Error
+
+●
+●
+
+●
+
+5
+
+0
+
+●
+
+10000
+
+100
+
+10000
+
+0.1
+
+0.5
+
+1.0
+
+2.0
+
+5.0 10.0
+
+15 20
+●
+
+●
+
+●
+
+●
+●
+
+●
+
+●
+●
+
+5
+
+0.5
+
+●
+
+0.0
+●
+
+100
+
+0.2
+
+0.5
+
+10000
+
+100
+
+# of particles
+
+(d) HIV23 - error
+
+10000
+
+0.1
+
+0.2
+
+0.5
+
+1.0
+
+2.0
+
+●
+
+5.0 10.0
+
+Folding time
+
+(e) HIV23 - CPU time (ms)
+
+1e−02
+
+30
+
+●
+
+FS
+TIPS
+
+10
+
+Error
+
+CPU time (ms)
+
+TIPS
+
+10000
+
+●
+
+0.1
+
+1.0
+
+2.0
+
+5.0 10.0
+
+(c) RNA21- variance
+
+4
+
+FS
+
+100
+
+●
+
+Folding time
+
+(b) RNA21- CPU time (ms)
+
+1
+
+1.5
+
+1.0
+
+●
+
+●
+
+Folding time
+
+(a) RNA21- error
+0.25
+
+0.2
+
+●
+
+●
+
+●
+
+●
+●
+
+FS
+TIPS
+
+●
+
+●
+●
+●
+
+1e−05
+
+100
+
+# of particles
+
+●
+
+●
+
+●
+
+●
+
+●
+
+●
+
+1e−08
+
+10000
+
+Variance (#particles = 15625)
+
+100
+
+●
+●
+
+●
+
+FS
+TIPS
+
+●
+
+1e−11
+
+2
+
+Variance (#particles = 15625)
+
+100
+
+●
+
+FS
+TIPS
+
+1e−14
+
+0.25
+FS
+
+1e−13 1e−10 1e−07 1e−04 1e−01
+
+Efficient Continuous-Time Markov Chain Estimation
+
+●
+
+0.1
+
+0.2
+
+0.5
+
+1.0
+
+2.0
+
+5.0 10.0
+
+Folding time
+
+(f) HIV23 - variance
+
+Figure 2. Performance of our method (TIPS) and forward sampling (FS) on RNA21 and HIV23 molecules with their subset state space.
+The relative errors of the estimates vs. folding times, {0.25,1,4}, are shown (left) along with the CPU times corresponding to the minimum number of particles required to satisfy the accuracy level I in milliseconds (middle) and the variance of TIPS and FS estimations
+(right) on folding times, {0.125, 0.25, · · · , 8}.
+
+number of imputed jumps, so we expect that our method
+will be most effective when the typical number of transitions between two observations or imputed latent state is
+moderate (no more than approximately a thousand with
+current architectures). The distribution of the jump chain
+should also be reasonably concentrated to ensure that the
+sampler can proceed with a moderate number of particles.
+We have shown two realistic examples where these conditions are empirically met.
+Acknowledgment
+
+Markov model for statistical alignment. Statistical Applications in Genetics and Molecular Biology, 11(1):1–29, 2012.
+Beaumont, M. A. . Estimation of population growth or decline
+in genetically monitored populations. Genetics, 164(3):1139–
+1160, 2003.
+Bouchard-Côté, A. and Jordan, M. I. . Evolutionary inference via the Poisson indel process. Proc. Natl. Acad. Sci.,
+10.1073/pnas.1220450110, 2012.
+Bouchard-Côté, A. , Sankararaman, S. , and Jordan, M. I. . Phylogenetic inference via sequential Monte Carlo. Syst. Biol., 61:
+579–593, 2012.
+
+This work was partially funded by an NSERC Discovery
+Grant and a Google Faculty Award. Computing was supported by WestGrid.
+
+Fan, Y. and Shelton, C. . Sampling for approximate inference
+in continuous time Bayesian networks. In Tenth International
+Symposium on Artificial Intelligence and Mathematics, 2008.
+
+References
+
+Felsenstein, J. . Evolutionary trees from DNA sequences: a maximum likelihood approach. J. Mol. Evol., 17:368–376, 1981.
+
+Akkouchi, M. . On the convolution of exponential distributions.
+Journal of the Chungcheong Mathematical Society, 21(4):502–
+510, 2008.
+Amari, S. and Misra, R. . Closed-form expressions for distribution
+of sum of exponential random variables. IEEE Transactions on
+Reliability, 46(4):519–522, 1997.
+Andrieu, C. and Roberts, G. O. . The pseudo-marginal approach
+for efficient Monte Carlo computations. The Annals of Statistics, 37(2):697–725, 2009.
+Andrieu, C. , Doucet, A. , and Holenstein, R. . Particle Markov
+chain Monte Carlo methods. J. R. Statist. Soc. B, 72(3):269–
+342, 2010.
+Arribas-Gil, A. and Matias, C. . A context dependent pair hidden
+
+Felsenstein, J. . Inferring phylogenies. Sinauer Associates, 2003.
+Flamm, C. , Fontana, W. , Hofacker, I. , and Schuster, P. . RNA
+folding at elementary step resolution. RNA, 6:325–338, 2000.
+Grassmann, W. K. . Transient solutions in Markovian queueing systems. Computers and Operations Research, 4:47–100,
+1977.
+Hickey, G. and Blanchette, M. . A probabilistic model for sequence alignment with context-sensitive indels. Journal of
+Computational Biology, 18(11):1449–1464, 2011. doi: doi:
+10.1089/cmb.2011.0157.
+Huelsenbeck, J. P. and Ronquist, F. . MRBAYES: Bayesian inference of phylogenetic trees. Bioinformatics, 17(8):754–755,
+2001.
+
+Efficient Continuous-Time Markov Chain Estimation
+Hutter, F. , Hoos, H. H. , Leyton-Brown, K. , and Stützle, T. .
+ParamILS: an automatic algorithm configuration framework.
+Journal of Artificial Intelligence Research, 36:267–306, October 2009.
+Juneja, S. and Shahabuddin, P. . Handbooks in Operations Research and Management Science, volume 13, chapter RareEvent Simulation Techniques: An Introduction and Recent Advances, pp. 291–350. Elsevier, 2006.
+Kirkpatrick, B. , Hajiaghayi, M. , and Condon, A. . A new model
+for approximating RNA folding trajectories and population kinetics. Computational Science & Discovery, 6, January 2013.
+Lakner, C. , van der Mark, P. , Huelsenbeck, J. P. , Larget, B. ,
+and Ronquist, F. . Efficiency of Markov chain Monte Carlo
+tree proposals in Bayesian phylogenetics. Syst. Biol., 57(1):
+86–103, 2008.
+Morrison, D. A. . Why would phylogeneticists ignore computerized sequence alignment? Syst. Biol., 58(1):150–158, 2009.
+Munsky, B. and Khammash, M. . The finite state projection algorithm for the solution of the chemical master equation. J.
+Chem. Phys., 124(4):044104–1 – 044104–13, 2006.
+Rao, V. and Teh, Y. W. . Fast MCMC sampling for Markov jump
+processes and continuous time Bayesian networks. In Proceedings of the Twenty-Seventh Conference Annual Conference on
+Uncertainty in Artificial Intelligence (UAI-11), pp. 619–626,
+Corvallis, Oregon, 2011. AUAI Press.
+Rao, V. and Teh, Y. W. . MCMC for continuous-time discretestate systems. NIPS, 2012.
+Saeedi, A. and Bouchard-Côté, A. . Priors over Recurrent Continuous Time Processes. NIPS, 24:2052–2060, 2011.
+Schaeffer, J. M. . The multistrand simulator: Stochastic simulation of the kinetics of multiple interacting dna strands. Master’s
+thesis, California Institute of Technology, 2012.
+Teh, Y. W. , Daumé III, H. , and Roy, D. M. . Bayesian agglomerative clustering with coalescents. In Advances in Neural Information Processing Systems (NIPS), 2008.
+Venkataraman, S. , Dirks, R. M. , Ueda, C. T. , and Pierce,
+N. A. . Selective cell death mediated by small conditional
+RNAs. Proc. Natl. Acad. Sci., 107(39):16777–16782, 2010.
+doi: 10.1073/pnas.1006377107. URL http://www.pnas.
+org/content/107/39/16777.abstract.
+Wang, L. . Bayesian Phylogenetic Inference via Monte Carlo
+Methods. PhD thesis, The University Of British Columbia,
+August 2012.
+Wang, Z. , Mohamed, S. , and de Freitas, N. . Adaptive Hamiltonian and Riemann Monte Carlo samplers. In International
+Conference on Machine Learning (ICML), 2013.
+
+

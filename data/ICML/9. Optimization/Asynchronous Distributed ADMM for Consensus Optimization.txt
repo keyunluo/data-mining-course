@@ -1,0 +1,1410 @@
+Asynchronous Distributed ADMM for Consensus Optimization
+
+Ruiliang Zhang
+RZHANGAF @ CSE . UST. HK
+James T. Kwok
+JAMESK @ CSE . UST. HK
+Department of Computer Science and Engineering, Hong Kong University of Science and Technology, Hong Kong
+
+Abstract
+Distributed optimization algorithms are highly
+attractive for solving big data problems. In particular, many machine learning problems can
+be formulated as the global consensus optimization problem, which can then be solved in
+a distributed manner by the alternating direction method of multipliers (ADMM) algorithm.
+However, this suffers from the straggler problem
+as its updates have to be synchronized. In this
+paper, we propose an asynchronous ADMM algorithm by using two conditions to control the
+asynchrony: partial barrier and bounded delay.
+The proposed algorithm has a simple structure
+and good convergence guarantees (its convergence rate can be reduced to that of its synchronous counterpart). Experiments on different
+distributed ADMM applications show that asynchrony reduces the time on network waiting, and
+achieves faster convergence than its synchronous
+counterpart in terms of the wall clock time.
+
+scent (Shalev-Shwartz et al., 2007). The idea is to replace
+the gradient over the whole data set by the gradient at a single sample (or over a small mini-batch of samples). Hence,
+its per-iteration complexity is much lower, and can scale to
+much larger data sets.
+While the stochastic approach alleviates the big data problem by processing only a small sample subset in each iteration, an alternative is to use distributed processing. This
+is particularly natural for many big data applications, in
+which the data sets are too large to be stored or processed
+on one single computer. In distributed optimization algorithms, communication among the computing nodes is
+based on either shared memory (Niu et al., 2011) or distributed memory (Langford et al., 2009; Agarwal & Duchi,
+2011; Ho et al., 2013; Li et al., 2013). In this paper, we will
+focus on algorithms using distributed memory, as they can
+often handle much larger data sets.
+Consider minimizing a function f (x) in a distributed computing environment with N nodes. Assume that this function can be decomposed into N components as
+f (x) =
+
+1. Introduction
+
+N
+X
+
+fi (x),
+
+(1)
+
+i=1
+
+In this big data era, the data size is growing at an unprecedented scale. From videos in Youtube, security footage at
+airports to astronomical data collected at the large synoptic
+survey telescope, tons of data are being generated everyday
+everywhere. In a recent digital universe study by EMC, the
+world created about 1.8 zettabytes of data in 2011. Facebook alone, for example, is estimated to be creating 12 terabytes of data every day. The amount of data across the
+globe is also expected to double every two years, and will
+reach 35 zettabytes by 2020.
+To alleviate this big data problem, the use of stochastic
+techniques has recently drawn a lot of interest. Most of
+them are based on variants of the stochastic gradient de-
+
+where each fi is a local objective involving only the data
+subset residing on node i. This type of problems is often
+encountered in various areas such as machine learning, signal processing and wireless communication (Bertsekas &
+Tsitsiklis, 1989; Zhu et al., 2010). For example, in regularized risk minimization, x is the model parameter to be
+estimated, and fi is the regularized risk functional defined
+on the data subset at node i.
+The minimization of f (x) can be reformulated as the following global variable consensus optimization problem
+(Boyd et al., 2011; Bertsekas & Tsitsiklis, 1989):
+min
+
+x1 ,...,xN ,z
+st
+
+Proceedings of the 31 International Conference on Machine
+Learning, Beijing, China, 2014. JMLR: W&CP volume 32. Copyright 2014 by the author(s).
+
+N
+X
+
+fi (xi ) : xi = z, i = 1, 2, . . . , N,
+
+(2)
+
+i=1
+
+where z is the so-called consensus variable, and xi is node
+i’s local copy of the parameter to be learned. In a dis-
+
+Asynchronous Distributed ADMM for Consensus Optimization
+
+tributed computing environment, this problem can be efficiently solved by the alternating direction method of multipliers (ADMM) algorithm (Boyd et al., 2011), which has
+been popularly used in various areas such as machine learning, computer vision and data mining. Essentially, one of
+the nodes, called the master, is responsible for updating the
+consensus variable z, while the remaining nodes are called
+workers. Each worker minimizes its local objective fi (in
+parallel) based on its data subset; and sends the updated local copy xi to the master. The master, in turn, updates z by
+driving the xi ’s into consensus, and then distributes the updated value back to the workers, and the process re-iterates.
+However, updates in this distributed ADMM algorithm
+have to be synchronized (Boyd et al., 2011). In other
+words, the master needs to wait for all the workers to finish
+their xi updates before it can proceed. This is at odds with
+the decentralized nature of distributed computing. Moreover, when the workers have different delays (because of
+difference in processing speeds, network delays, etc.), one
+has to wait for the slowest worker to complete its update before the next iteration can proceed. This problem of “straggler”1 allows the system to move forward only at the pace
+of the slowest worker. Besides, if some processors fail,
+which is often not surprising in real-world data centers, a
+synchronous algorithm will come to an immediate halt.
+In contrast to synchronous algorithms, asynchronicity allows more independence of the nodes, a more flexible design and is also more robust to individual node failures.
+Preliminary success of the asynchronous strategy has been
+recently demonstrated in (Langford et al., 2009; Agarwal
+& Duchi, 2011; Niu et al., 2011; Ho et al., 2013; Li et al.,
+2013), though they are mostly interested in distributed gradient descent methods and variants.
+Motivated by these recent advances, we propose in this paper an asynchronous distributed ADMM algorithm for the
+global variable consensus optimization problem. There are
+two essential ingredients. (i) Instead of requiring full synchronization on all the workers in each ADMM iteration, a
+partial synchronization is only needed. (ii) While updates
+from the faster workers will be incorporated more often by
+the master, we require that updates from the slow workers
+cannot be older than a certain maximum delay.
+The rest of this paper is organized as follows. Section 2
+reviews existing works on synchronous and asynchronous
+distributed algorithms that are based on ADMM. Section 3
+describes the proposed asynchronous distributed algorithm,
+with convergence analysis provided in Section 4. In particular, it is shown that when the proposed asynchronous
+1
+
+This problem (sometimes called “the curse of the last reducer” (Suri & Vassilvitskii, 2011)) is also widely known in
+MapReduce, which requires a similar full synchronization in its
+reduce step.
+
+algorithm reduces to a synchronous one, its convergence
+rate also reduces to the standard O( T1 ) rate for ADMM
+(He & Yuan, 2012). Finally, experiments on three different ADMM applications are presented in Section 5, and
+the last section gives some concluding remarks.
+
+2. Related Work
+2.1. Synchronous Distributed Consensus ADMM
+We start with the augmented Lagrangian of problem (2):
+L({xi }, z, ) =
+
+N
+X
+
+fi (xi ) + hλi , xi − zi +
+
+i=1
+
+β
+kxi − zk2 ,
+2
+
+where λi ’s are the Lagrangian multipliers, β > 0 is the
+penalty parameter, and h·, ·i denotes the inner product. At
+the kth iteration, the values of xi and z (denoted xki and
+z k ) are updated by minimizing L({xi }, z) w.r.t. xi and
+z. Unlike the method of multipliers, these are minimized
+in an alternating manner, which allows the problem to be
+more easily decomposed. The resulting ADMM update is
+(Boyd et al., 2011):
+xk+1
+= arg min fi (x) + hλki , xi +
+i
+x
+
+z k+1 = arg min
+z
+
+λk+1
+i
+
+=
+
+λki
+
++
+
+N
+X
+
+−hλki , zi +
+
+i=1
+β(xk+1
+i
+
+β
+kx − z k k2 , (3)
+2
+
+β k+1
+kx
+− zk2 , (4)
+2 i
+
+− z k+1 ).
+
+(5)
+
+The above update can be easily implemented in a distributed system with one master and N workers. Each
+worker i is responsible for updating its (xi , λi ) using (3)
+and (5). The updated xk+1
+’s are then sent to the master,
+i
+which is responsible for updating the consensus variable
+z and distributing its updated value back to the workers.
+Note that as the (xi , λi )’s are local to each worker, their
+updates can be performed by all the workers in parallel.
+However, they have to be synchronized in that the master has to wait for the xi updates from all the N workers. This also necessitates the use of a global clock k.
+In the sequel, this distributed consensus ADMM algorithm
+will be called synchronous ADMM (sync-ADMM). The
+whole update procedures for the master and workers are
+shown in Algorithms 1 and 2, respectively. Recently, it
+has been shown that this can be well implemented in distributed computing environments such as MPI or MapReduce (Lubell-Doughtie & Sondag, 2013).
+2.2. Decentralized Distributed ADMM
+Recently, a number of related ADMM-based distributed algorithms have been proposed. They are decentralized in
+that there is no master, and the workers coordinate among
+
+Asynchronous Distributed ADMM for Consensus Optimization
+
+Algorithm 1 Synchronous ADMM (sync-ADMM): Processing by the master.
+1: initialize: k = 0.
+2: repeat
+3:
+repeat
+4:
+wait;
+5:
+until receive updates from all N workers;
+6:
+update z k+1 by (4);
+7:
+broadcast z k+1 to all the workers;
+8:
+k ← k + 1;
+9: until termination;
+10: output z k .
+Algorithm 2 Synchronous ADMM (sync-ADMM): Processing by worker i.
+1: initialize: k = 0, λ0i = 0.
+2: repeat
+3:
+update xk+1
+using (3);
+i
+4:
+send λki and xk+1
+to the master;
+i
+5:
+repeat
+6:
+wait;
+7:
+until receive the updated z k+1 from the master;
+8:
+update λk+1
+using (5);
+i
+9: until termination.
+
+Similar to the sync-ADMM, the central node still needs to
+wait for all worker updates.
+
+3. Distributed Asynchronous Consensus
+ADMM
+In this section, we present the asynchronous distributed
+ADMM algorithm for the global variable consensus optimization problem. In the sequel, it will be simply called
+asynchronous ADMM (async-ADMM).
+3.1. Master and Worker Clocks
+As for the sync-ADMM in Section 2.1, the master is responsible for updating the consensus variable z, while each
+worker i is responsible for updating the local primal variable xi and local dual variable λi . However, as the proposed algorithm is fully asynchronous, the master keeps a
+clock k, which starts from zero and is incremented by 1 after each z update. Similarly, every worker also has its own
+clock ki , which starts from zero and is incremented by 1
+after each λi update. All the clocks k and {ki }N
+i=1 are run
+independently. Let xki i , λki i be the values of xi and λi when
+worker i’s clock is at ki ; and z k be the value of z when the
+master’s clock is at k.
+3.2. Updating x by the Worker
+
+themselves. For example, Mota et al. (2013) developed
+a communication-efficient distributed algorithm extended
+from the multi-block ADMM algorithm. A fixed sequence
+is used to define the order in which workers are updated.
+Wei & Ozdaglar (2012) proposed another decentralized
+ADMM algorithm, but again, the worker updates are sequential. To alleviate the order problem, Wei & Ozdaglar
+(2013) proposed the asynchronous ADMM algorithm, in
+which workers are partitioned into groups according to
+their interconnection pattern. At each iteration, one of the
+groups is randomly activated, and workers therein are allowed to update.
+These algorithms are different from the proposed algorithm
+in several aspects. First, they are decentralized, while ours
+is a centralized algorithm which requires a master. Second,
+their asynchrony is in the sense that only a selected worker
+(or group of workers) is allowed to update at each iteration. However, this implicitly requires the maintenance of
+a global clock, and each group needs to be aware of each
+other’s progress. Moreover, decentralized ADMM algorithms are highly dependent on the network topology. In
+this paper, we consider the star topology with one central node connecting to all the workers. Each decentralized ADMM iteration then has two steps: (i) the workers
+optimize their local objectives and send updates to the central node; (ii) the central node uses the workers’ updates to
+optimize its local objective, and then broadcast the result.
+
+We first consider a particular worker i (at time ki ). Using
+the most recent2 z value (denoted z̃i ) received by i from the
+master, it updates its local copy xi analogous to (3), as
+β
+kx − z̃i k2 . (6)
+2
+Moreover, as the workers have different speeds, the z̃i ’s
+are in general different. In other words, as in recent distributed asynchronous optimization algorithms (Langford
+et al., 2009; Agarwal & Duchi, 2011; Ho et al., 2013), some
+workers may be using out-of-date versions of the consensus variable. The new xki i +1 , together with λki i , are sent to
+the master. Worker i then waits for the next z update from
+the master before further processing (see Section 3.4).
+xki i +1 = arg min fi (x) + hλki i , xi +
+x
+
+3.3. Updating z by the Master
+The master waits for the workers’ {(xi , λi )} updates before it can update z. Recall that for the sync-ADMM, this
+can proceed only after the {xi } updates from all N workers have finished. In distributed systems, this mechanism is
+called a barrier, and is the simplest synchronization primitive (Albrecht et al., 2006). However, as discussed in Section 1, it suffers from the straggler problem and allows the
+system to move forward only at the pace of the slowest
+2
+On initialization, the worker does not obtain the z value from
+the master, and uses a default z 0 value instead.
+
+Asynchronous Distributed ADMM for Consensus Optimization
+
+worker. To alleviate this problem, we relax it to a partial
+barrier (Albrecht et al., 2006). Specifically, the master only
+needs to wait for a minimum of S updates, where S (≥ 1)
+can be much smaller than N . The synchronous ADMM
+can be regarded as using the extreme setting of S = N .
+Moreover, recall that some workers are using out-of-date
+versions of z. Consequently, their (xi , λi ) updates are also
+out-of-date, an issue that the master has to cope with.
+
+Algorithm 3 Asynchronous ADMM (async-ADMM): Processing by the master.
+
+Besides, the master needs to wait for another precondition
+to be satisfied before it can proceed. Note that if we only
+rely on a partial barrier with small S, updates from the
+slow workers will be incorporated into z much less often
+than those from the faster workers. To ensure sufficient
+freshness of all the updates, we enforce a bounded delay
+condition. Specifically, update from every worker has to
+be serviced by the master at least once every τ iterations,
+where τ ≥ 1 is a user-defined parameter. In other words,
+the (xi , λi ) update from every worker i can at most be τ
+clock cycles old (according to the master’s clock). In the
+implementation, a counter τi is kept by the master for each
+worker i. When (xi , λi ) from worker i arrives at the master, the corresponding τi is reset to 1; otherwise, τi is incremented by 1 as the master’s clock k increments.
+
+6:
+for worker i ∈ Φk do
+7:
+τi ← 1;
+8:
+x̂i ← newly received xi from worker i;
+9:
+λ̂i ← newly received λi from worker i;
+10:
+end for
+11:
+for worker i ∈
+/ Φk do
+12:
+τi ← τi + 1;
+13:
+end for
+14:
+update z k+1 by (7);
+15:
+broadcast z k+1 to all the workers in Φk ;
+16:
+k ← k + 1;
+17: until termination;
+18: output z k .
+
+Note that a similar idea has been used in the machine learning community. In (Langford et al., 2009; Agarwal &
+Duchi, 2011), a cyclic-delay architecture is used in which
+workers communicate with the master or each other with
+fixed numbers of delayed cycles. This is also similar to
+bounded staleness in (Ho et al., 2013), though in (Ho et al.,
+2013) it is the worker that receives a possibly staled version
+of the parameter, while here it is the master that receives a
+possibly out-of-date (xi , λi ) update, which in turn is computed using a possibly out-of-date consensus variable.
+When both the partial barrier and bounded delay conditions
+are met, the master can proceed with the z update. Let Φk
+be the set of workers whose (xi , λi ) updates have arrived
+at the master at (master’s) iteration k. Analogous to (4), the
+master updates z as
+z
+
+k+1
+
+N
+X
+β
+= arg min
+h−λ̂i , zi + kx̂i − zk2
+z
+2
+i=1
+
+N 
+1 X
+1
+=
+x̂i + λ̂i ,
+N i=1
+β
+
+(7)
+
+where x̂i (resp. λ̂i ) is the most recent xi (resp. λi ) received
+from worker i by the master. Note that though as few as
+only S fresh updates have arrived, the update in (7) is still
+based on all the {(x̂i , λ̂i )}N
+i=1 . Hence, it is possible that
+many of these (x̂i , λ̂i )’s are out-of-date.
+Finally, the master’s clock k is incremented by 1, and it
+sends the updated z k+1 back to only the workers in Φk .
+
+1: initialize: k = 0, x̂i = 0, λ̂i = 0, i = 1, 2, . . . , N .
+2: repeat
+3:
+repeat
+4:
+wait;
+5:
+until receive a minimum of S updates from the
+
+workers and max(τ1 , τ2 , . . . , τN ) ≤ τ ;
+
+In other words, those workers whose updates are not received in this iteration will not be aware of this z update.
+A side benefit is that some communication bandwidth can
+be saved. The whole procedure for the master is shown in
+Algorithm 3.
+Remark When S = N or τ = 1, the partial synchronization reduces back to full synchronization. Clearly, the
+proposed algorithm also reduces to sync-ADMM.
+3.3.1. E XAMPLE
+Figure 1 shows an example of how the asynchronous
+ADMM algorithm works, with S = 2 and τ = 10. When
+the master’s clock is at 14, updates from workers 3 and 4
+arrive and the master commits an update to z. When the
+clock is at 21, though workers 1 and 5 have both arrived
+(and so meets the partial barrier condition), the (x2 , λ2 )
+update of worker 2 has resided in the master for 10 iterations. As τ = 10, workers 1 and 5 have to wait until a new
+update from worker 2 arrives.
+3.4. Updating λ by the Worker
+After receiving the updated z̃i from the master, worker i
+resumes its operation and updates its local copy of the dual
+variable in a manner analogous to (5):
+λki i +1 = λki i + β(xki i +1 − z̃i ).
+
+(8)
+
+Finally, it increments its local clock ki by 1, and update its
+local xi as described in Section 3.2. The whole procedure
+for the worker is shown in Algorithm 4.
+
+Asynchronous Distributed ADMM for Consensus Optimization
+
+Assumption 4.1 At any master iteration k, updates from
+the N workers have the same probability of arriving at the
+master.
+Assume that the master clock k has run for T iterations,
+and each worker clock ki for Ti iterations. Let ziki be the z̃i
+received by worker i at P
+its ki th iteration. Moreover, for
+T −1
+worker i, let x̄i = T1i kii=0 xki i be the average of all
+xi ’s generated
+PT −1 throughout its Ti iterations. Similarly, let
+z̄ = T1 k=0 z k be the average of all z’s generated by the
+master throughout its T iterations.
+
+Figure 1. An example showing the operation of the partial barrier
+and bounded delay.
+
+Algorithm 4 Asynchronous ADMM (async-ADMM): Processing by worker i.
+1: initialize: λ0i = 0, ki = 0.
+2: repeat
+3:
+update xki i +1 using (6);
+4:
+send λki i and xki i +1 to the master;
+5:
+repeat
+6:
+wait;
+7:
+until receive z̃i from the master;
+8:
+update λki i +1 using (8);
+9:
+ki ← ki + 1;
+10: until termination.
+3.5. Discussion
+In regularized risk minimization, each fi (x) in (1) can be
+decomposed as f˜i (x) + g(x), where f˜i is the risk and g is
+the regularizer. Thus, (2) can also be written as
+min
+
+x1 ,...,xN ,z
+
+N
+X
+
+f˜i (xi ) + g(z) : xi = z, i = 1, . . . , N. (9)
+
+i=1
+
+This can still be solved by ADMM (Boyd et al., 2011), and
+the processing of g is moved from the xi update (by the
+worker) to the z update (by the master). However, the master will then run slower and the system’s throughput may
+decrease. Hence, in this paper, the formulation in (2) is
+preferred.
+
+4. Convergence Analysis
+In this section, we provide convergence analysis for the
+async-ADMM algorithm. Typically, the sending and receiving of the worker updates are non-deterministic and
+depend on a number of factors, such as network bandwidth
+and traffic, processor configuration and work load, etc. To
+simplify analysis, we make the following assumption:
+
+Theorem 4.2 Let (x∗ , z ∗ ) be the optimal (primal) solution
+of (2), and {λ∗i }N
+i=1 the corresponding optimal dual solution. Then,
+"N
+#
+X
+∗
+∗
+E
+fi (x̄i ) − fi (x ) + hλi , x̄i − z̄i
+i=1
+
+Nτ
+≤
+2T S
+
+(
+
+N
+X
+
+βkzi0
+
+i=1
+
+1
+− z k + kλ0i − λ∗i k2
+β
+
+)
+
+∗ 2
+
+,(10)
+
+where zi0 and λ0i are the initial values of zi and λi , respectively, at worker i.
+τ
+The O( N
+T S ) convergence rate can be intuitively explained
+as follows.
+
+• When N is large, the data subset assigned to each
+worker gets smaller. Thus, each worker update is less
+informative, and more iterations are needed for convergence.
+• A large S means that information from more workers
+are collected in each master update, and so the number
+of iterations required for convergence is reduced.
+• Recall that every worker will be serviced by the master
+at least Tτ times in T master iterations. Hence, a large
+τ means that information from the slow workers are
+incorporated into the master very infrequently. Thus,
+again a larger T is needed for convergence.
+When S = 1, one only uses the bounded delay condition
+but not the partial barrier. This is similar to other distributed
+optimization algorithms such as (Agarwal & Duchi, 2011;
+Ho et al., 2013; Li et al., 2013). The following shows that
+a much tighter bound (by a factor of N ) can be obtained.
+Corollary 4.3 When S = 1,
+"N
+#
+X
+∗
+∗
+fi (x̄i ) − fi (x ) + hλi , x̄i − z̄i
+E
+i=1
+
+≤
+
+τ
+2T
+
+(
+
+N
+X
+i=1
+
+βkzi0
+
+1
+− z k + kλ0i − λ∗i k2
+β
+∗ 2
+
+)
+.(11)
+
+Asynchronous Distributed ADMM for Consensus Optimization
+795
+
+790
+
+790
+
+785
+
+τ=1
+
+785
+
+780
+
+S=1
+
+780
+775
+
+S=2
+
+770
+
+S=4
+
+objective value
+
+objective value
+
+When the workers and network are fast, updates from every
+worker can arrive at each iteration. Essentially, we then
+have S = N , and the bound in (10) becomes O( Tτ ). Since
+all the τi ’s are always 1 in this case, we can simply set
+τ = 1. The bound then reduces to O( T1 ), which is the
+same as that of ADMM (He & Yuan, 2012). Similarly, the
+proposed algorithm also reduces to sync-ADMM when τ =
+1. The master then has to wait for all the workers in each
+iteration. The partial barrier condition is always satisfied
+for any 1 ≤ S ≤ N . In particular, we can set S = N , and
+recover the O( T1 ) convergence rate.
+
+S=16
+
+765
+760
+
+τ=16
+770
+
+τ=∞
+765
+760
+755
+
+755
+
+750
+
+750
+745
+
+τ=4
+775
+
+0
+
+20
+
+40
+
+60
+
+80
+
+100
+
+745
+
+120
+
+0
+
+50
+
+100
+
+150
+
+iteration
+
+200
+
+250
+
+300
+
+350
+
+400
+
+450
+
+500
+
+iteration
+
+(a) τ = ∞.
+
+(b) S = 1.
+
+Figure 2. Convergence of async-ADMM w.r.t. the number of
+(master) iterations on the network average consensus problem.
+Recall that sync-ADMM corresponds to S = 16 or τ = 1.
+
+5. Experiments
+
+5.1. Network Average Consensus
+In this experiment, we have N = 16 workers, each with
+a vector θi ∈ R100 . The elements of θi are drawn i.i.d.
+from the normal distribution with zero mean and unit variance. The task is to find the average of all θi ’s. This can
+be formulated as the optimization problem: minx f (x) =
+PN
+2
+2
+i=1 kx − θi k . Thus, fi (x) in (1) equals kx − θi k .
+5.1.1. C ONVERGENCE W. R . T. N UMBER OF I TERATIONS
+Figure 2 shows the convergence of the objective value at
+different settings. Figure 2(a) shows the case for τ = ∞.
+τ
+Recall from Section 4 that the convergence rate is O( N
+T S ).
+Hence, as can be seen, a smaller S takes more iterations
+for convergence (the case for S = 1 converges to a local
+solution instead of the global one. See the discussion in the
+next paragraph). In Figure 2(b), S is fixed at 1. As can be
+seen, a larger τ leads to more iterations, which again agrees
+with the theoretical convergence rate. Moreover, recall that
+async-ADMM is the same as sync-ADMM when S = N
+3
+
+http://arma.sourceforge.net/
+http://www.netlib.org/
+5
+http://www.mpich.org/
+4
+
+795
+
+790
+
+790
+
+785
+
+785
+780
+
+S=1
+
+775
+
+S=2
+
+770
+765
+
+S=4
+
+760
+
+S=16
+
+775
+770
+765
+760
+755
+
+755
+
+750
+
+750
+745
+
+τ=1
+τ=4
+τ=16
+τ=∞
+
+780
+
+objective value
+
+We use a cluster of 18 computing nodes interconnected with a gigabit Ethernet. Each node has 4 AMD
+Opteron 2216 (2.4GHz) processors and 16GB memory.
+The master and each worker process take up one core. The
+algorithms are implemented in C++, with the Armadillo
+v3.920.3 library3 linked to LAPACK/BLAS4 for efficient
+computation. Moreover, the Message Passing Interface
+(MPI) implementation MPICH v3.0.45 is used for interprocessor communication. Empirically, assumption 4.1 is
+observed to hold for this cluster setup.
+
+or τ = 1. Hence, sync-ADMM has the fastest convergence
+in terms of the number of iterations.
+
+objective value
+
+In this section, we perform experiments on three different ADMM applications: network average consensus (Section 5.1), graph-guided fused lasso (Section 5.2), and lowrank matrix factorization (Section 5.3). To reduce statistical variability, results are averaged over 5 repetitions.
+
+0
+
+10
+
+20
+
+30
+
+40
+
+50
+
+60
+
+70
+
+80
+
+90
+
+100
+
+745
+
+0
+
+20
+
+time(in millisecond)
+
+(a) τ = ∞.
+
+40
+
+60
+
+80
+
+100
+
+120
+
+140
+
+160
+
+180
+
+200
+
+time (in millisecond)
+
+(b) S = 1.
+
+Figure 3. Convergence of async-ADMM w.r.t. the wall clock time
+on the network average consensus problem.
+
+Interestingly, the curves in Figure 2(b) exhibit a staircase
+structure. Note that in this simple consensus problem, the
+computation costs at both the master and workers are very
+small.6 Besides, for workers that reside in the same computing node as the master, their communication costs with
+the master are also negligible. Hence, these workers can
+quickly reach a local consensus among themselves, without waiting for updates from the more distant workers. As
+this local consensus is only based on the θi ’s of the participating workers, it can be very different from the true average. This accounts for the flat regions of the curve. The
+situation remains until the bounded delay condition kicks
+in, and updates from some distant workers arrive, leading
+to a new consensus (the “cliffs” of the curves), and the process repeats. Moreover, the larger the τ , the longer it takes
+for the bounded delay condition to kick in, and the longer
+is the flat region. When τ = ∞, little progress is observed.
+5.1.2. C ONVERGENCE W. R . T. T IME
+On the other hand, the convergence behavior when measured w.r.t. the wall clock time shows a different picture.
+6
+
+It is easy to see that both master and worker updates reduce
+to the solving of quadratic equations, which have simple closedform solutions.
+
+Asynchronous Distributed ADMM for Consensus Optimization
+795
+
+795
+
+790
+
+790
+
+τ=1
+
+τ=1
+785
+
+785
+
+τ=16
+
+τ=16
+
+780
+
+objective value
+
+objective value
+
+Recall that each sync-ADMM iteration requires full synchronization, and thus takes longer than an async-ADMM
+iteration. Figure 3(a) shows the results for τ = ∞. As
+can be seen, async-ADMM with S > 1 converges much
+faster than sync-ADMM. Figure 3(b) shows the case for
+S = 1. As can be seen, async-ADMM still has slower
+convergence than sync-ADMM. The reason, as discussed
+in Section 5.1.1, is that async-ADMM wastes a lot of iterations (and thus time) on reaching inaccurate local consensus. Hence, setting S = 1 may not be suitable in applications where the computation cost is much smaller than the
+worker-to-master communication cost.
+
+τ=64
+
+775
+
+τ=∞
+
+770
+765
+760
+755
+
+τ=64
+775
+
+τ=∞
+770
+765
+760
+755
+
+750
+745
+
+780
+
+750
+
+0
+
+10
+
+20
+
+30
+
+40
+
+50
+
+60
+
+70
+
+80
+
+90
+
+745
+
+100
+
+0
+
+50
+
+iteration
+
+100
+
+150
+
+200
+
+250
+
+time(in millisecond)
+
+(a) Convergence w.r.t. the num- (b) Convergence w.r.t. the wall
+ber of (master) iterations.
+clock time.
+Figure 4. Simulation with one worker suffers temporary failure
+(with S = 2).
+
+5.1.3. T EMPORARY W ORKER FAILURE
+0.7
+
+As discussed in Section 3.3, the bounded delay condition
+guarantees that every worker will be serviced by the master at least Tτ times in T master iterations. With a large τ ,
+a high degree of asynchrony can be ensured though at the
+expense that information in some of the workers may not
+be visited that often. With a sufficiently large T , the obtained solution is still guaranteed to be optimal (Section 4).
+However, when the master is only allowed to run for a
+fixed number of iterations (as is often the case in practice),
+the solution quality may be compromised if some workers
+are very slow or have intermittent failure. One approach
+to alleviate this problem is by employing data redundancy
+schemes (Dean & Ghemawat, 2008), which, however, is
+outside the scope of this paper.
+
+1800
+
+S=2 τ=8
+S=2 τ=16
+S=4 τ=32
+S=16 τ=32
+
+0.55
+
+0.5
+
+1400
+1200
+1000
+800
+600
+400
+200
+
+0.45
+
+0
+
+200
+
+400
+
+600
+
+800
+
+1000
+
+1200
+
+1400
+
+1600
+
+1800
+
+time(in seconds)
+
+0
+
+(64,1)
+
+(2,8)
+
+(2,16)
+
+(4,16)
+
+(4,32)
+
+(S,τ) combination
+
+(a) Convergence of the objective (b) Breakdown into computawith time.
+tion time and network waiting
+time.
+Figure 5. Comparison of sync-ADMM and async-ADMM on the
+graph-guided fused lasso problem. Recall that the combination of
+S = 64, τ = 1 corresponds the sync-ADMM.
+
+ing. Here, we will focus on the graph-guided fused lasso
+(Kim et al., 2009), whose sparsity pattern is specified by
+a graph G(V, E) defined on the d variates of x. By defining Aij = wij andP
+Aji = −wij for any edge (i, j) ∈ E,
+we have kAxk1 = (i,j)∈E wij |xi − xj | which penalizes
+the difference between any two neighboring xi , xj in G.
+Following (Ouyang et al., 2013), G is obtained by sparse
+inverse covariance selection (Banerjee et al., 2008).
+We use the digits 4 and 9 from the MNIST-8M 7 data set,
+resulting in a total of L = 1.6 million 784-dimensional
+samples. These are partitioned uniformly and each of the
+L
+samples. The local objective asN workers is assigned N
+sociated with worker i is thus
+
+5.2. Graph-Guided Fused Lasso
+In this section, we perform classification experiments with
+a variant of the generalized
+lasso model (Tibshirani & TayPL
+lor, 2011): minx L1 i=1 `i (x) + λkAxk1 , where L is the
+number of samples, `i is the logistic loss (which is more
+appropriate than the square loss in classification), λ is the
+regularization parameter and A is is a penalty matrix specifying the desired structured sparsity pattern of x. With different settings of A, this can be reduced to models such
+as the fused lasso, trend filtering, and wavelet smooth-
+
+Total time (in seconds)
+
+0.65
+
+0.6
+
+Computational time
+Network waiting time
+
+1600
+
+S=64, τ=1
+objective value
+
+In this section, we simulate the situation where a worker
+fails temporarily. Specifically, one of the workers (say, A)
+is temporally suspended for 100 milliseconds at its 10th
+iteration. While the sync-ADMM has to come to an immediate halt, async-ADMM allows the system to proceed for
+τ more master iterations (and hopefully the faulty worker
+will be able to recover by then). The convergence behavior
+is shown in Figure 4. As can be seen from Figure 4(b), for
+async-ADMM with τ = 1, 16, 64, their progress is delayed
+(as expected) but their objective values drop again when A
+is resumed operation. However, for τ = ∞, the algorithm
+only converges to a local solution when the master finishes
+its T iterations.
+
+fi (x) =
+
+1 X
+λ
+`j (x) + kAxk1 ,
+L
+N
+j∈Ωi
+
+where Ωi is the sample subset assigned to i. The subproblem in each worker is solved by the inexact ADMM algorithm (Zhang et al., 2011). As shown in (Ouyang et al.,
+2013; Suzuki, 2013), this is more efficient in this context
+than other state-of-the-art solvers.
+Figure 5(a) compares the convergence speeds of sync7
+
+http://www.csie.ntu.edu.tw/∼cjlin/libsvmtools/datasets
+
+Asynchronous Distributed ADMM for Consensus Optimization
+
+ADMM and async-ADMM on a set of 64 workers. As
+can be seen, all four async-ADMM settings are faster than
+sync-ADMM in terms of wall clock time. Figure 5(b)
+shows the breakdown of total running time into computation time and network waiting time. As can be seen, while
+the different (S, τ ) combinations have similar computation
+time, a smaller S and/or larger τ allows for a higher degree
+of asynchrony, and thus less time on network waiting.
+Next, we vary the number of workers (with S = 2 and τ =
+32). Figure 6 shows that async-ADMM is again faster than
+sync-ADMM. Note that with more workers in the cluster,
+the master needs to spend less time on waiting for at least S
+worker updates to arrive. Hence, the network waiting time
+is significantly less than that of sync-ADMM.
+
+workers. The local objective associated with worker i is
+λ1
+kLk2F + λ2 kRi k2F ,
+N
+where Mi and Ri are column subsets of M and R, respectively, assigned to worker i, and L is the consensus variable. The update of each worker is based on the ADMM
+solver proposed in (Ling et al., 2012).
+fi (L) = kMi − LRiT k2F +
+
+Figure 7(a) shows the convergence of the objective with
+wall clock time. As can be seen, async-ADMM (with S =
+2 and τ = 32) again converges faster than sync-ADMM.
+Figure 7(b) shows the breakdown of total running time into
+computation time and network waiting time. As can be
+seen, the speedup by async-ADMM mainly comes from the
+significant reduction in network waiting.
+5
+
+x 10
+
+1200
+1000
+800
+600
+
+Computational time
+Network waiting time
+
+sync−ADMM
+14
+
+async−ADMM
+12
+10
+8
+6
+4
+
+2000
+
+1500
+
+1000
+
+500
+
+2
+
+400
+
+0
+200
+
+400
+
+600
+
+800
+
+1000
+
+1200
+
+1400
+
+time(in seconds)
+
+200
+0
+
+2500
+
+16
+
+Total time(in seconds)
+
+Computational time(sync−ADMM)
+Network waiting time(sync−ADMM)
+Computational time(async−ADMM)
+Network waiting time(async−ADMM)
+
+objective value
+
+Total time(in seconds)
+
+1400
+
+8
+
+16
+
+32
+
+64
+
+number of workers
+
+1600
+
+0
+
+(64,1)
+
+(2,32)
+
+(S,τ) combination
+
+(a) Convergence of the objective (b) Breakdown into communiwith wall clock time.
+cation time and computation
+time.
+
+Figure 6. Computation/network waiting time for sync-ADMM
+and async-ADMM, with different numbers of workers on the
+graph-guide fused lasso problem.
+
+Figure 7. Comparison of sync-ADMM (with S = 64, τ = 1) and
+async-ADMM on the low-rank matrix factorization problem.
+
+5.3. Low-Rank Matrix Factorization
+
+6. Conclusion
+
+Though the focus of this paper is on convex problems, it
+is known that ADMM can also be efficiently used on nonconvex problems in practice (Boyd et al., 2011). In this
+section, we demonstrate the effectiveness of the proposed
+async-ADMM on one such nonconvex problem, namely,
+low-rank matrix factorization (Berry et al., 2007).
+
+Existing asynchronous distributed optimization algorithms
+are mainly limited to the gradient descent and its variants.
+In this paper, we extended asynchronous distributed processing to the ADMM algorithm for the global variable
+consensus problem. It uses two conditions, partial barrier
+and bounded delay, to control the asynchrony. Besides,
+the traditional synchronous ADMM algorithm can be regarded as a special case. The proposed algorithm is easy
+to implement, has theoretical convergence guarantees, and
+is also faster than its synchronous counterpart in practice.
+As many machine learning problems can be formulated as
+a global variable consensus problem, it opens new opportunities for these models to be learned more efficiently in
+distributed computing environments. In the future, we will
+also compare with asynchronous distributed gradient-based
+algorithms such as (Ho et al., 2013; Li et al., 2013).
+
+Given a matrix M ∈ Rm×n , the task is to decompose
+it into LRT , where L ∈ Rm×r and R ∈ Rn×r have
+ranks r  min(m, n). Low-rank matrix factorization
+can be formulated as the following optimization problem:
+minL,R kM −LRT k2F +λ1 kLk2F +λ2 kRk2F , where k·kF is
+the Frobenius norm, and λ1 , λ2 are regularization parameters. More generally, M may also have missing entries,
+which can still be solved by ADMM (Ling et al., 2012).
+In this experiment, we set m = 10000, n = 64000 and
+r = 100. We first generate the ground-truth L∗ and R∗ , by
+drawing entries independently from the normal distribution
+with zero mean and unit variance, and then M is obtained
+as L∗ R∗ T . For simplicity, there is no missing entry in M ,
+and we set λ1 = λ2 = 1. The matrix M is partitioned
+evenly across columns and then assigned to the N = 64
+
+Acknowledgments
+This research was supported in part by the Research Grants
+Council of the Hong Kong Special Administrative Region
+(Grant 614513).
+
+Asynchronous Distributed ADMM for Consensus Optimization
+
+References
+Agarwal, A. and Duchi, J.C. Distributed delayed stochastic
+optimization. In Advances in Neural Information Processing Systems 24, 2011.
+Albrecht, J.R., Tuttle, C., Snoeren, A.C., and Vahdat, A.
+Loose synchronization for large-scale networked systems. In Proceedings of the USENIX Annual Technical
+Conference, pp. 301–314, 2006.
+Banerjee, O., El Ghaoui, L., and d’Aspremont, A. Model
+selection through sparse maximum likelihood estimation
+for multivariate Gaussian or binary data. Journal of Machine Learning Research, 9:485–516, 2008.
+Berry, M.W., Browne, M., Langville, A.N., Pauca, V.P., and
+Plemmons, R.J. Algorithms and applications for approximate nonnegative matrix factorization. Computational
+Statistics & Data Analysis, 52(1):155–173, 2007.
+Bertsekas, D.P. and Tsitsiklis, J.N. Parallel and Distributed
+Computation. Prentice Hall, 1989.
+Boyd, S., Parikh, N., Chu, E., Peleato, B., and Eckstein, J.
+Distributed optimization and statistical learning via the
+alternating direction method of multipliers. Foundations
+and Trends in Machine Learning, 3(1):1–122, 2011.
+Dean, J. and Ghemawat, S. MapReduce: Simplified data
+processing on large clusters. Communications of the
+ACM, 51(1):107–113, 2008.
+He, B. and Yuan, X. On the O(1/n) convergence rate of the
+Douglas-Rachford alternating direction method. SIAM
+Journal on Numerical Analysis, 50(2):700–709, 2012.
+Ho, Q., Cipar, J., Cui, H., Lee, S., Kim, J.K., Gibbons, P.B.,
+Gibson, G.A., Ganger, G., and Xing, E. More effective
+distributed ML via a stale synchronous parallel parameter server. In Advances in Neural Information Processing
+Systems 26, pp. 1223–1231, 2013.
+Kim, S., Sohn, K.-A., and Xing, E.P. A multivariate regression approach to association analysis of a quantitative
+trait network. Bioinformatics, 25(12):i204–i212, 2009.
+Langford, J., Smola, A., and Zinkevich, M. Slow learners
+are fast. In Advances in Neural Information Processing
+Systems 22, 2009.
+Li, M., Andersen, D.G., and Smola, A. Distributed delayed
+proximal gradient methods. In NIPS Workshop on Optimization for Machine Learning, 2013.
+Ling, Q., Xu, Y., Yin, W., and Wen, Z. Decentralized lowrank matrix completion. In Proceedings of the International Conference on Acoustics, Speech and Signal Processing, pp. 2925–2928, 2012.
+
+Lubell-Doughtie, P. and Sondag, J. Practical distributed
+classification using the alternating direction method of
+multipliers algorithm. In Proceedings of the International Conference on Big Data, 2013.
+Mota, J, Xavier, J, Aguiar, P, and Puschel, Markus. Dadmm: A communication-efficient distributed algorithm
+for separable optimization. IEEE Transactions on Signal
+Processing, 61(10):2718–2723, 2013.
+Niu, F., Recht, B., Ré, C., and Wright, S.J. Hogwild!:
+A lock-free approach to parallelizing stochastic gradient
+descent. In Advances in Neural Information Processing
+Systems 24, 2011.
+Ouyang, H., He, N., Tran, L., and Gray, A.G. Stochastic
+alternating direction method of multipliers. In Proceedings of the 30th International Conference on Machine
+Learning, pp. 80–88, 2013.
+Shalev-Shwartz, S., Singer, Y., and Srebro, N. Pegasos:
+Primal estimated sub-gradient solver for SVM. In Proceedings of the 24th International Conference on Machine Learning, pp. 807–814, 2007.
+Suri, S. and Vassilvitskii, S. Counting triangles and the
+curse of the last reducer. In Proceedings of the 20th
+International Conference on World Wide Web, pp. 607–
+614, 2011.
+Suzuki, T. Dual averaging and proximal gradient descent
+for online alternating direction multiplier method. In
+Proceedings of the 30th International Conference on
+Machine Learning, pp. 392–400, 2013.
+Tibshirani, R.J. and Taylor, J. The solution path of the generalized lasso. Annals of Statistics, 39(3):1335–1371,
+2011.
+Wei, E. and Ozdaglar, A. Distributed alternating direction method of multipliers. In Proceedings of the 51st
+Annual Conference on Decision and Control, pp. 5445–
+5450, 2012.
+Wei, E. and Ozdaglar, A. On the O(1/k) convergence of
+asynchronous distributed alternating direction method of
+multipliers. Preprint arXiv:1307.8254, 2013.
+Zhang, X., Burger, M., and Osher, S. A unified primaldual algorithm framework based on Bregman iteration.
+Journal of Scientific Computing, 46(1):20–46, 2011.
+Zhu, H., Cano, A., and Giannakis, G.B. Distributed
+consensus-based demodulation: Algorithms and error
+analysis. IEEE Transactions on Wireless Communications, 9(6):2044–2054, 2010.
+
+

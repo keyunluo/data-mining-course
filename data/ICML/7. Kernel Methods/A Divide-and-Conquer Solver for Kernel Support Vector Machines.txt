@@ -1,0 +1,1042 @@
+A Divide-and-Conquer Solver for Kernel Support Vector Machines
+
+Cho-Jui Hsieh
+Si Si
+Inderjit S. Dhillon
+Department of Computer Science, The University of Texas, Austin, TX 78721, USA
+
+Abstract
+The kernel support vector machine (SVM) is one
+of the most widely used classification methods;
+however, the amount of computation required becomes the bottleneck when facing millions of
+samples. In this paper, we propose and analyze a novel divide-and-conquer solver for kernel SVMs (DC-SVM). In the division step, we
+partition the kernel SVM problem into smaller
+subproblems by clustering the data, so that each
+subproblem can be solved independently and efficiently. We show theoretically that the support vectors identified by the subproblem solution are likely to be support vectors of the entire
+kernel SVM problem, provided that the problem
+is partitioned appropriately by kernel clustering.
+In the conquer step, the local solutions from the
+subproblems are used to initialize a global coordinate descent solver, which converges quickly
+as suggested by our analysis. By extending
+this idea, we develop a multilevel Divide-andConquer SVM algorithm with adaptive clustering and early prediction strategy, which outperforms state-of-the-art methods in terms of training speed, testing accuracy, and memory usage. As an example, on the covtype dataset
+with half-a-million samples, DC-SVM is 7 times
+faster than LIBSVM in obtaining the exact SVM
+solution (to within 10−6 relative error) which
+achieves 96.15% prediction accuracy. Moreover,
+with our proposed early prediction strategy, DCSVM achieves about 96% accuracy in only 12
+minutes, which is more than 100 times faster than
+LIBSVM.
+
+1. Introduction
+The support vector machine (SVM) (Cortes & Vapnik,
+1995) is probably the most widely used classifier in varied machine learning applications. For problems that are
+Proceedings of the 31 st International Conference on Machine
+Learning, Beijing, China, 2014. JMLR: W&CP volume 32. Copyright 2014 by the author(s).
+
+CJHSIEH @ CS . UTEXAS . EDU
+SSI @ CS . UTEXAS . EDU
+INDERJIT @ CS . UTEXAS . EDU
+
+not linearly separable, kernel SVM uses a “kernel trick”
+to implicitly map samples from input space to a highdimensional feature space, where samples become linearly
+separable. Due to its importance, optimization methods
+for kernel SVM have been widely studied (Platt, 1998;
+Joachims, 1998), and efficient libraries such as LIBSVM
+(Chang & Lin, 2011) and SVMLight (Joachims, 1998) are
+well developed. However, the kernel SVM is still hard to
+scale up when the sample size reaches more than one million instances. The bottleneck stems from the high computational cost and memory requirements of computing and
+storing the kernel matrix, which in general is not sparse.
+By approximating the kernel SVM objective function, approximate solvers (Zhang et al., 2012; Le et al., 2013) avoid
+high computational cost and memory requirement, but suffer in terms of prediction accuracy.
+In this paper, we propose a novel divide and conquer approach (DC-SVM) to efficiently solve the kernel SVM
+problem. DC-SVM achieves faster convergence speed
+compared to state-of-the-art exact SVM solvers, as well
+as better prediction accuracy in much less time than approximate solvers. To accomplish this performance, DCSVM first divides the full problem into smaller subproblems, which can be solved independently and efficiently.
+We theoretically show that the kernel kmeans algorithm
+is able to minimize the difference between the solution of
+subproblems and of the whole problem, and support vectors
+identified by subproblems are likely to be support vectors
+of the whole problem. However, running kernel kmeans on
+the whole dataset is time consuming, so we apply a twostep kernel kmeans procedure to efficiently find the partition. In the conquer step, the local solutions from the subproblems are “glued” together to yield an initial point for
+the global problem. As suggested by our analysis, the coordinate descent method in the final stage converges quickly
+to the global optimal.
+Empirically, our proposed Divide-and-Conquer Kernel
+SVM solver can reduce the objective function value much
+faster than existing SVM solvers. For example, on the
+covtype dataset with half a million samples, DC-SVM
+can find a globally optimal solution (to within 10−6 accuracy) within 3 hours on a single machine with 8 GBytes
+
+A Divide-and-Conquer Solver for Kernel Support Vector Machines
+
+RAM, while the state-of-the-art LIBSVM solver takes
+more than 22 hours to achieve a similarly accurate solution (which yields 96.15% prediction accuracy). More interestingly, due to the closeness of the subproblem solutions to the global solution, we can employ an early prediction approach, using which DC-SVM can obtain high
+test accuracy extremely quickly. For example, on the covtype dataset, by using early prediction DC-SVM achieves
+96.03% prediction accuracy within 12 minutes, which is
+more than 100 times faster than LIBSVM (see Figure 3e
+for more details).
+The rest of the paper is outlined as follows. We propose
+the single-level DC-SVM in Section 3, and extend it to the
+multilevel version in Section 4. Experimental comparison
+with other state-of-the-art SVM solvers is shown in Section 5. The relationship between DC-SVM and other methods is discussed in Section 2, and the conclusions are given
+in Section 6. Extensive experimental comparisons are included in the Appendix.
+
+2. Related Work
+Since training SVM requires a large amount of memory, it
+is natural to apply decomposition methods (Platt, 1998),
+where each time only a subset of variables are updated.
+To speedup the decomposition method, (Pérez-Cruz et al.,
+2004) proposed a double chunking approach to maintain a
+chunk of important samples, and the shrinking technique
+(Joachims, 1998) is also widely used to eliminate unimportant samples.
+To speed up kernel SVM training on large-scale datasets,
+it is natural to divide the problem into smaller subproblems, and combine the models trained on each partition.
+(Jacobs et al., 1991) proposed a way to combine models,
+although in their algorithm subproblems are not trained
+independently, while (Tresp, 2000) discussed a Bayesian
+prediction scheme (BCM) for model combination. (Collobert et al., 2002) partition the training dataset arbitrarily
+in the beginning, and then iteratively refine the partition
+to obtain an approximate kernel SVM solution. (Kugler
+et al., 2006) applied the above ideas to solve multi-class
+problems. (Graf et al., 2005) proposed a multilevel approach (CascadeSVM): they randomly build a partition tree
+of samples and train the SVM in a “cascade” way: only
+support vectors in the lower level of the tree are passed to
+the upper level. However, no earlier method appears to discuss an elegant way to partition the data. In this paper, we
+theoretically show that kernel kmeans minimizes the error
+of the solution from the subproblems and the global solution. Based on this division step, we propose a simple
+method to combine locally trained SVM models, and show
+that the testing performance is better than BCM in terms of
+both accuracy and time (as presented in Table 1). More importantly, DC-SVM solves the original SVM problem, not
+just an approximated one. We compare our method with
+Cascade SVM in the experiments.
+
+Another line of research proposes to reduce the training
+time by representing the whole dataset using a smaller set
+of landmark points, and clustering is an effective way to
+find landmark points (cluster centers). (Moody & Darken,
+1989) proposed this idea to train the reduced sized problem
+with RBF kernel (LTPU); (Pavlov et al., 2000) used a similar idea as a preprocessing of the dataset, while (Yu et al.,
+2005) further generalized this approach to a hierarchical
+coarsen-refinement solver for SVM. Based on this idea, the
+kmeans Nyström method (Zhang et al., 2008) was proposed
+to approximate the kernel matrix using landmark points.
+(Boley & Cao, 2004) proposed to find samples with similar α values by clustering, so both the clustering goal and
+training step are quite different from ours. All the above approaches focus on modeling the between-cluster (betweenlandmark points) relationships. In comparison, our method
+focuses on preserving the within-cluster relationships at the
+lower levels and explores the between-cluster information
+in the upper levels. We compare DC-SVM with LLSVM
+(using kmeans Nyström) and LTPU in Section 5.
+There are many other approximate solvers for the kernel
+SVM, including kernel approximation approaches (Fine &
+Scheinberg, 2001; Zhang et al., 2012; Le et al., 2013),
+greedy basis selection (Keerthi et al., 2006), and online
+SVM solvers (Bordes et al., 2005). Recently, (Jose et al.,
+2013) proposed an approximate solver to reduce testing
+time. They use multiple linear hyperplanes for prediction,
+so the time complexity for prediction is proportional to
+the dimensionality instead of number of samples. Therefore they achieve faster prediction but require more training time and have lower prediction accuracy comparing to
+DC-SVM with early prediction strategy.
+
+3. Divide and Conquer Kernel SVM with a
+single level
+Given a set of instance-label pairs (xi , yi ), i =
+1, . . . , n, xi ∈ Rd and yi ∈ {1, −1}, the main task in
+training the kernel SVM is to solve the following quadratic
+optimization problem:
+1
+min f (α) = αT Qα − eT α, s.t. 0 ≤ α ≤ C, (1)
+α
+2
+where e is the vector of all ones; C is the balancing parameter between loss and regularization in the SVM primal problem; α ∈ Rn is the vector of dual variables; and
+Q is an n × n matrix with Qij = yi yj K(xi , xj ), where
+K(xi , xj ) is the kernel function. Note that, as in (Keerthi
+et al., 2006; Joachims, 2006), we ignore the “bias” term –
+indeed, in our experiments reported in Section 5, we did
+not observe any improvement in test accuracy by including
+the bias term. Letting α∗ denote the optimal solution of
+(1),
+value for a test data x can be computed by
+Pn the decision
+∗
+α
+y
+K(x,
+xi ).
+i=1 i i
+We begin by describing the single-level version of our proposed algorithm. The main idea behind our divide and
+conquer SVM solver (DC-SVM) is to divide the data into
+
+A Divide-and-Conquer Solver for Kernel Support Vector Machines
+
+smaller subsets, where each subset can be handled efficiently and independently. The subproblem solutions are
+then used to initialize a coordinate descent solver for the
+whole problem. To do this, we first partition the dual variables into k subsets {V1 , . . . , Vk }, and then solve the respective subproblems independently
+1
+min (α(c) )T Q(c,c) α(c) −eT α(c) , s.t. 0 ≤ α(c) ≤ C, (2)
+α(c) 2
+where c = 1, . . . , k, α(c) denotes the subvector {αp | p ∈
+Vc } and Q(c,c) is the submatrix of Q with row and column
+indexes Vc .
+The quadratic programming problem (1) has n variables,
+and takes at least O(n2 ) time to solve in practice (as shown
+in (Menon, 2009)). By dividing it into k subproblems (2)
+with equal sizes, the time complexity for solving the subproblems can be dramatically reduced to O(k · ( nk )2 ) =
+O(n2 /k). Moreover, the space requirement is also reduced
+from O(n2 ) to O(n2 /k 2 ).
+After computing all the subproblem solutions, we concatenate them to form an approximate solution for the whole
+problem ᾱ = [ᾱ(1) , . . . , ᾱ(k) ], where ᾱ(c) is the optimal
+solution for the c-th subproblem. In the conquer step, ᾱ
+is used to initialize the solver for the whole problem. We
+show that this procedure achieves faster convergence due to
+the following reasons: (1) ᾱ is close to the optimal solution
+for the whole problem α∗ , so the solver only requires a few
+iterations to converge (see Theorem 1); (2) the set of support vectors of the subproblems is expected to be close to
+the set of support vectors of the whole problem (see Theorem 2). Hence, the coordinate descent solver for the whole
+problem converges very quickly.
+Divide Step.
+We now discuss in detail how to divide
+problem (1) into subproblems. In order for our proposed
+method to be efficient, we require ᾱ to be close to the optimal solution of the original problem α∗ . In the following,
+we derive a bound on kᾱ − α∗ k2 by first showing that ᾱ is
+the optimal solution of (1) with an approximate kernel.
+Lemma 1. ᾱ is the optimal solution of (1) with kernel
+function K(xi , xj ) replaced by
+K̄(xi , xj ) = I(π(xi ), π(xj ))K(xi , xj ),
+
+(3)
+
+where π(xi ) is the cluster that xi belongs to; I(a, b) = 1
+iff a = b and I(a, b) = 0 otherwise.
+Based on the above lemma, we are able to bound kα∗ −ᾱk2
+by the sum of between-cluster kernel values:
+Theorem 1. Given data points {(xi , yi )}ni=1 with
+labels yi ∈ {1, −1} and a partition indicator
+{π(x1 ), . . . , π(xn )},
+0 ≤ f (ᾱ) − f (α∗ ) ≤ (1/2)C 2 D(π),
+
+(4)
+
+where f (α) is the objective function in (1) and D(π) =
+P
+∗
+2
+i,j:π(xi )6=π(xj ) |K(xi , xj )|. Furthermore, kα − ᾱk2 ≤
+
+C 2 D(π)/σn where σn is the smallest eigenvalue of the kernel matrix.
+The proof is provided in Appendix 8.2. In order to minimize kα∗ − ᾱk, we want to find a partition with small
+D(π). Moreover, a balanced partition is preferred to
+achieve faster training speed. This can be done by the
+kernel kmeans algorithm, which aims to minimize the offdiagonal values of the kernel matrix with a balancing normalization.
+We now show that the bound derived in Theorem 1 is reasonably tight in practice. On a subset (10000 instances)
+of the covtype data, we try different numbers of clusters
+k = 8, 16, 32, 64, 128; for each k, we use kernel kmeans to
+obtain the data partition {V1 , . . . , Vk }, and then compute
+C 2 D(π)/2 (the right hand side of (4)) and f (ᾱ) − f (α∗ )
+(the left hand side of (4)). The results are presented in Figure 1. The left panel shows the bound (in red) and the
+difference in objectives f (ᾱ) − f (α∗ ) in absolute scale,
+while the right panel shows these values in a log scale.
+Figure 1 shows that the bound is quite close to the difference in objectives in an absolute sense (the red and blue
+curves nearly overlap), especially compared to the difference in objectives when the data is partitioned randomly
+(this also shows effectiveness of the kernel kmeans procedure). Thus, our data partitioning scheme and subsequent
+solution of the subproblems leads to good approximations
+to the global kernel SVM problem.
+
+(a) covtype 10000 samples.
+
+(b) covtype 10000 samples (log
+scale).
+Figure 1: Demonstration of the bound in Theorem 1 – our data
+partitioning scheme leads to good approximations to the global
+solution α∗ . The left plot is on an absolute scale, while the right
+one is on a logarithmic scale.
+
+However, kernel kmeans has O(n2 d) time complexity,
+which is too expensive for large-scale problems. Therefore
+we consider a simple two-step kernel kmeans approach as
+in (Ghitta et al., 2011). The two-step kernel kmeans algorithm first runs kernel kmeans on m randomly sampled data
+points (m  n) to construct cluster centers in the kernel
+space. Based on these centers, each data point computes its
+distance to cluster centers and decides which cluster it belongs to. The algorithm has time complexity O(nmd) and
+space complexity O(m2 ). In our implementation we just
+use random initialization for kernel kmeans, and observe
+good performance in practice.
+A key facet of our proposed divide and conquer algorithm
+
+A Divide-and-Conquer Solver for Kernel Support Vector Machines
+
+(a) rbf kernel, precision
+
+(b) rbf kernel, recall
+
+(c) rbf kernel, time vs. precision
+
+(d) rbf kernel, time vs. recall
+
+(e) polynomial kernel, preci(f) polynomial kernel, recall
+(g) polynomial kernel, time vs.
+(h) polynomial kernel, time vs.
+sion
+precision
+recall
+Figure 2: Our multilevel DC-SVM algorithm computes support vectors for subproblems during the “conquer” phase. The above plots
+show that DC-SVM identifies support vectors more accurately (Figure 2a, 2b, 2e, 2f) than cascade SVM, and more quickly than the
+shrinking strategy in LIBSVM.
+
+is that the set of support vectors from the subproblems
+S̄ := {i | ᾱi > 0}, where ᾱi is the i-th element of ᾱ, is
+very close to that of the whole problem S := {i | αi∗ > 0}.
+Letting f¯(α) denote the objective function of (1) with kernel K̄ defined in (3), the following theorem shows that
+when ᾱi = 0 (xi is not a support vector of the subproblem) and ∇i f¯(ᾱ) is large enough, then xi will not be a
+support vector of the whole problem.
+Theorem 2. For any i ∈ {1, . . . , n}, if ᾱi = 0 and
+p
+√
+∇i f¯(ᾱ) > CD(π)(1 + nKmax / σn D(π)),
+where Kmax = maxi K(xi , xi ), then xi will not be a support vector of the whole problem, i.e., αi∗ = 0.
+The proof is given in Appendix 8.3. In practice also, we observe that DC-SVM can identify the set of support vectors
+of the whole problem very quickly. Figure 2 demonstrates
+that DC-SVM identifies support vectors much faster than
+the shrinking strategy implemented in LIBSVM (Chang &
+Lin, 2011) (we discuss these results in more detail in Section 4).
+Conquer Step. After computing ᾱ from the subproblems,
+we use ᾱ to initialize the solver for the whole problem. In
+principle, we can use any SVM solver in our divide and
+conquer framework, but we focus on using the coordinate
+descent method as in LIBSVM to solve the whole problem. The main idea is to update one variable at a time, and
+always choosing the αi with the largest gradient value to
+update. The benefit of applying coordinate descent is that
+we can avoid a lot of unnecessary access to the kernel matrix entries if αi never changes from zero to nonzero. Since
+ᾱ’s are close to α∗ , the ᾱ-values for most vectors that are
+not support vectors will not become nonzero, and so the
+algorithm converges quickly.
+
+4. Divide and Conquer SVM with multiple
+levels
+There is a trade-off in choosing the number of clusters k for
+a single-level DC-SVM with only one divide and conquer
+step. When k is small, the subproblems have similar sizes
+as the original problem, so we will not gain much speedup.
+On the other hand, when we increase k, time complexity
+for solving subproblems can be reduced, but the resulting ᾱ
+can be quite different from α∗ according to Theorem 1, so
+the conquer step will be slow. Therefore, we propose to run
+DC-SVM with multiple levels to further reduce the time
+for solving the subproblems, and meanwhile still obtain ᾱ
+values that are close to α∗ .
+In multilevel DC-SVM, at the l-th level, we partition the
+(l)
+(l)
+whole dataset into k l clusters {V1 , . . . , Vkl }, and solve
+those k l subproblems independently to get ᾱ(l) . In order
+to solve each subproblem efficiently, we use the solutions
+from the lower level ᾱ(l+1) to initialize the solver at the
+l-th level, so each level requires very few iterations. This
+allows us to use small values of k, for example, we use
+k = 4 for all the experiments. In the following, we discuss
+more insights to further speed up our procedure.
+Adaptive Clustering. The two-step kernel kmeans approach has time complexity O(nmd), so the number of
+samples m cannot be too large. In our implementation we
+use m = 1000. When the data set is very large, the performance of two-step kernel kmeans may not be good because
+we sample only a few data points. This will influence the
+performance of DC-SVM.
+To improve the clustering for DC-SVM, we propose the
+following adaptive clustering approach. The main idea is to
+explore the sparsity of α in the SVM problem, and sample
+
+A Divide-and-Conquer Solver for Kernel Support Vector Machines
+
+Table 1: Comparing prediction methods using a lower level model. Our proposed early prediction strategy is better in terms of prediction
+accuracy and testing time per sample (time given in milliseconds).
+Prediction by (5)
+BCM in (Tresp, 2000)
+Early Prediction by (6)
+
+webspam k = 50
+92.6% / 1.3ms
+98.4% / 2.5ms
+99.1% / .17ms
+
+webspam k = 100
+89.5% / 1.3ms
+95.3% / 3.3ms
+99.0% / .16ms
+
+from the set of support vectors to perform two-step kernel
+kmeans. Suppose we are at the l-th level, and the current
+set of support vectors is defined by S̄ = {i | ᾱi > 0}.
+Suppose the set of support vectors for the final solution
+is given by S ∗ = {i | αi∗ > 0}. We can define the
+∗
+sum
+P of off-diagonal elements on S̄ ∪ S as DS ∗ ∪S̄ (π) =
+i,j∈S ∗ ∪S̄ and π(xi )6=π(xj ) |K(xi , xj )|. The following theorem shows that we can refine the bound in Theorem 1:
+Theorem 3. Given data points x1 , . . . , xn and a partition
+{V1 , . . . , Vk } with indicators π,
+0 ≤ f (ᾱ) − f (α∗ ) ≤ (1/2)C 2 DS ∗ ∪S̄ (π).
+Furthermore, kα∗ − ᾱk22 ≤ C 2 DS ∗ ∪S̄ (π)/σn .
+The proof is given in Appendix 8.4. The above observations suggest that if we know the set of support vectors S̄
+and S ∗ , kα∗ − ᾱk only depends on whether we can obtain
+a good partition of S̄ ∪ S ∗ . Therefore, we can sample m
+points from S̄ ∪ S ∗ instead of the whole dataset to perform
+the clustering. The performance of two-step kernel kmeans
+depends on the sampling rate; we enhance the sampling
+rate from m/n to m/|S ∗ ∪ S̄|. As a result, the performance
+significantly improves when |S ∗ ∪ S̄|  n.
+In practice we do not know S ∗ or S̄ before solving the problem. However, both Theorem 2 and experiments shown
+in Figure 2 suggest that we have a good guess of support vectors even at the bottom level. Therefore, we can
+use the lower level support vectors as a good guess of the
+upper level support vectors. More specifically, after computing ᾱl from level l, we can use its support vector set
+S̄ l := {i | ᾱil > 0} to run two-step kernel kmeans for finding the clusters at the (l − 1)-th level. Using this strategy,
+we obtain progressively better partitioning as we approach
+the original problem at the top level.
+Early identification of support vectors.
+We first
+run LIBSVM to obtain the final set of support vectors,
+and then run DC-SVM with various numbers of clusters
+45 , 44 , . . . , 40 (corresponding to level 5, 4, . . . , 0 for multilevel DC-SVM). We show the precision and recall for the
+support vectors determined at each level (ᾱi > 0) in identifying support vectors. Figure 2 shows that DC-SVM can
+identify about 90% support vectors even when using 256
+clusters. As discussed in Section 2, Cascade SVM (Graf
+et al., 2005) is another way to identify support vectors.
+However, it is clear from Figure 2 that Cascade SVM cannot identify support vectors accurately as (1) it does not
+use kernel kmeans clustering, and (2) it cannot correct the
+false negative error made in lower levels. Figure 2c, 2d, 2g,
+
+covtype k = 50
+94.6% / 2.6ms
+91.5% / 3.7ms
+96.1% / .4ms
+
+covtype k = 100
+92.7% / 2.6ms
+89.3% / 5.6ms
+96.0% / .2ms
+
+2h further shows that DC-SVM identifies support vectors
+more quickly than the shrinking strategy in LIBSVM.
+Early prediction based on the l-th level solution. Computing the exact kernel SVM solution can be quite time
+consuming, so it is important to obtain a good model using limited time and memory. We now propose a way to
+efficiently predict the label of unknown instances using the
+lower-level models ᾱl . We will see in the experiments that
+prediction using ᾱl from a lower level l already can achieve
+near-optimal testing performance.
+When the l-th level solution ᾱl is computed, a naive way
+to predict a new instance x’s label ỹ is:
+!
+n
+X
+l
+ỹ = sign
+yi ᾱi K(x, xi ) .
+(5)
+i=1
+
+Another way to combine the models trained from k clusters is to use the probabilistic framework proposed in the
+Bayesian Committee Machine (BCM) (Tresp, 2000). However, as we show below, both these methods do not give
+good prediction accuracy when the number of clusters is
+large.
+Instead, we propose the following early prediction strategy.
+From Lemma 1, ᾱ is the optimal solution to the SVM dual
+problem (1) on the whole dataset with the approximated
+kernel K̄ defined in (3). Therefore, we propose to use the
+same kernel function K̄ in the testing phase, which leads to
+the prediction
+k X
+X
+c=1 i∈Vc
+
+yi αi K̄(xi , x) =
+
+X
+
+yi αi K(xi , x),
+
+(6)
+
+i∈Vπ(x)
+
+where π(x) can be computed by finding the nearest cluster
+center. Therefore, the testing procedure for early prediction
+is: (1) find the nearest cluster that x belongs to, and then (2)
+use the model trained by data within that cluster to compute
+the decision value.
+We compare this method with prediction by (5) and BCM
+in Table 1. The results show that our proposed testing
+scheme is better in terms of test accuracy. We also compare
+average testing time per instance in Table 1, and our proposed method is much more efficient as we only evaluate
+K(x, xi ) for all xi in the same cluster as x, thus reducing
+the testing time from O(|S|d) to O(|S|d/k), where S is the
+set of support vectors.
+Refine solution before solving the whole problem. Before training the final model at the top level using the whole
+dataset, we can refine the initialization by solving the SVM
+problem induced by all support vectors at the first level, i.e.,
+
+A Divide-and-Conquer Solver for Kernel Support Vector Machines
+
+Table 2: Comparison on real datasets.
+
+DC-SVM (early)
+DC-SVM
+LIBSVM
+LIBSVM (subsapmle)
+LaSVM
+CascadeSVM
+LLSVM
+FastFood
+SpSVM
+LTPU
+
+ijcnn1
+C = 32, γ = 2
+time(s) acc(%)
+12
+98.35
+41
+98.69
+115
+98.69
+6
+98.24
+251
+98.57
+17.1
+98.08
+38
+98.23
+87
+95.95
+20
+94.92
+248
+96.64
+
+cifar
+C = 8, γ = 2−22
+time(s) acc(%)
+1977
+87.02
+16314
+89.50
+42688
+89.50
+2410
+85.71
+57204
+88.19
+6148
+86.8
+9745
+86.5
+3357
+80.3
+21335
+85.6
+17418
+85.3
+
+census
+C = 512, γ = 2−9
+time(s)
+acc(%)
+261
+94.9
+1051
+94.2
+2920
+94.2
+641
+93.2
+3514
+93.2
+849
+93.0
+1212
+92.8
+851
+91.6
+3121
+90.4
+1695
+92.0
+
+level below the final level. As proved in Theorem 2, the
+support vectors of lower level models are likely to be the
+support vectors of the whole model, so this will give a more
+accurate solution, and only requires us to solve a problem
+with O(|S̄ (1) |) samples, where S̄ (1) is the set of support
+vectors at the first level. Our final algorithm is given in
+Algorithm 1.
+Algorithm 1 Divide and Conquer SVM
+Input : Training data {(xi , yi )}ni=1 , balancing parameter
+C, kernel function.
+Output : The SVM dual solution α.
+for l = lmax , . . . , 1 do
+Set number of clusters in the current level kl = k l ;
+if l = lmax then
+Sample m points {xi1 , . . . , xim } from the whole
+training set;
+else
+Sample m points {xi1 , . . . , xim } from
+(l+1)
+{xi | ᾱi
+> 0};
+end
+Run kernel kmeans on {xi1 , . . . , xim } to get cluster
+centers c1 , . . . , ckl ;
+Obtain partition V1 , . . . , Vkl for all data points ;
+for c = 1, . . . , k l do
+(l)
+Obtain ᾱVc by solving SVM for the data in the
+(l+1)
+
+c-th cluster Vc with ᾱVc as the initial point (
++1
+ᾱlVmax
+is set to 0);
+c
+end
+end
+Refine solution: Compute α(0) by solving SVM on
+(1)
+{xi | αi 6= 0} using α(1) as the initial point;
+Solve SVM on the whole data using α(0) as the initial
+point;
+
+5. Experimental Results
+We now compare our proposed algorithm with other SVM
+solvers. All the experiments are conducted on an Intel 2.66GHz CPU with 8G RAM. We use 7 benchmark datasets as shown in Table 3. The cifar dataset
+can be downloaded from http://www.cs.toronto.
+edu/˜kriz/cifar.html, and other datasets can be
+downloaded from http://www.csie.ntu.edu.tw/
+
+covtype
+c = 32, γ = 32
+time(s) acc(%)
+672
+96.12
+11414
+96.15
+83631
+96.15
+5330
+92.46
+102603
+94.39
+5600
+89.51
+4451
+84.21
+8550
+80.1
+15113
+83.37
+11532
+83.25
+
+webspam
+C = 8, γ = 32
+time(s) acc(%)
+670
+99.13
+10485
+99.28
+29472
+99.28
+1267
+98.52
+20342
+99.25
+3515
+98.1
+2853
+97.74
+5563
+96.47
+6235
+95.3
+4005
+96.12
+
+kddcup99
+C = 256, γ = 0.5
+time(s)
+acc(%)
+470
+92.61
+2739
+92.59
+6580
+92.51
+1627
+91.90
+6700
+92.13
+1155
+91.2
+3015
+91.5
+2191
+91.6
+5124
+90.5
+5100
+92.1
+
+mnist8m
+C = 1, γ = 2−21
+time(s) acc(%)
+10287
+99.85
+71823
+99.93
+298900
+99.91
+31526
+99.21
+171400
+98.95
+64151
+98.3
+65121
+97.64
+14917
+96.5
+121563
+96.3
+105210
+97.82
+
+Table 3: Dataset statistics
+dataset
+ijcnn1
+cifar
+census
+covtype
+webspam
+kddcup99
+mnist8m
+
+Number of
+training samples
+49,990
+50,000
+159,619
+464,810
+280,000
+4,898,431
+8,000,000
+
+Number of
+testing samples
+91,701
+10,000
+39,904
+116,202
+70,000
+311,029
+100,000
+
+d
+22
+3072
+409
+54
+254
+125
+784
+
+˜cjlin/libsvmtools/datasets or the UCI data
+repository. We use the raw data without scaling for two
+image datasets cifar and mnist8m, while features in all the
+other datasets are linearly scaled to [0, 1]. mnist8m is a
+digital recognition dataset with 10 numbers, so we follow
+the procedure in (Zhang et al., 2012) to transform it into
+a binary classification problem by classifying round digits
+and non-round digits. Similarly, we transform cifar into
+a binary classification problem by classifying animals and
+non-animals. We use a random 80%-20% split for covtype, webspam, kddcup99, a random 8M/0.1M split for
+mnist8m (used in the original paper (Loosli et al., 2007)),
+and the original training/testing split for ijcnn1 and cifar.
+Competing Methods:
+We include the following exact SVM solvers (LIBSVM, CascadeSVM), approximate
+SVM solvers (SpSVM, LLSVM, FastFood, LTPU), and online SVM (LaSVM) in our comparison:
+1. LIBSVM: the implementation in the LIBSVM library
+(Chang & Lin, 2011) with a small modification to handle SVM without the bias term – we observe that LIBSVM has similar test accuracy with/without bias. We
+also include the results for using LIBSVM with random 1/5 subsamples on each dataset in Table 2.
+2. Cascade SVM: we implement cascade SVM (Graf
+et al., 2005) using LIBSVM as the base solver.
+3. SpSVM: Greedy basis selection for nonlinear SVM
+(Keerthi et al., 2006).
+4. LLSVM: improved Nyström method for nonlinear
+SVM by (Wang et al., 2011).
+5. FastFood: use random Fourier features to approximate
+the kernel function (Le et al., 2013). We solve the
+resulting linear SVM problem by the dual coordinate
+descent solver in LIBLINEAR.
+6. LTPU: Locally-Tuned Processing Units proposed in
+(Moody & Darken, 1989). We set γ equal to the
+
+A Divide-and-Conquer Solver for Kernel Support Vector Machines
+
+(a) webspam objective function
+
+(b) covtype objective function
+
+(c) mnist8m objective function
+
+(d) webspam testing accuracy
+
+(e) covtype testing accuracy
+
+(f) mnist8m testing accuracy
+
+Figure 3: Comparison of algorithms using the RBF kernel. Each point for DC-SVM indicates the result when stopping at different
+levels; each point for LIBSVM and CascadeSVM indicates different stopping conditions; each point for LaSVM indicates various
+number of passes through data points; each point for LTPU and LLSVM, and FastFood indicates different sample sizes; and each point
+for SpSVM indicates different number of basis vectors. Methods with testing performance below the bottom of y-axis are not shown in
+the figures.
+
+best parameter for Gaussian kernel SVM. The linear
+weights are obtained by LIBLINEAR.
+7. LaSVM: An online algorithm proposed in (Bordes
+et al., 2005).
+8. DC-SVM: our proposed method for solving the exact SVM problem. We use the modified LIBSVM to
+solve subproblems.
+9. DC-SVM (early): our proposed method with the early
+stopping approach described in Section 4 to get the
+model before solving the entire kernel SVM optimization problem.
+(Zhang et al., 2012) reported that LLSVM outperforms
+Core Vector Machines (Tsang et al., 2005) and the bundle method (Smola et al., 2007), so we omit those comparisons here. We apply LIBSVM/LIBLINEAR as the default
+solver for DC-SVM, FastFood, Cascade SVM, LLSVM
+and LTPU, so the shrinking heuristic is automatically used
+in the experiments.
+Parameter Setting: We first consider the RBF kernel
+K(xi , xj ) = exp(−γkxi − xj k22 ). We chose the balancing parameter C and kernel parameter γ by 5-fold cross
+validation on a grid of points: C = [2−10 , 2−9 , . . . , 210 ]
+and γ = [2−10 , . . . , 210 ] for ijcnn1, census, covtype,
+webspam, and kddcup99. The average distance between
+samples for un-scaled image datasets mnist8m and cifar is
+much larger than other datasets, so we test them on smaller
+γ’s: γ = [2−30 , 2−29 , . . . , 2−10 ]. Regarding the parameters for DC-SVM, we use 5 levels (lmax = 4) and k = 4,
+so the five levels have 1, 4, 16, 64 and 256 clusters respec-
+
+tively. For DC-SVM (early), we stop at the level with 64
+clusters. The following are parameter settings for other
+methods in Table 2: the rank is set to be 3000 in LLSVM;
+number of Fourier features is 3000 in Fastfood1 ; number of
+clusters is 3000 in LTPU; number of basis vectors is 200
+in SpSVM; the tolerance in the stopping condition for LIBSVM and DC-SVM is set to 10−3 (the default setting of
+LIBSVM); for LaSVM we set the number of passes to be 1;
+for CascadeSVM we output the results after the first round.
+Experimental Results with RBF kernel:
+Table 2
+presents time taken and test accuracies. Experimental results show that the early prediction approach in DC-SVM
+achieves near-optimal test performance. By going to the
+top level (handling the whole problem), DC-SVM achieves
+better test performance but needs more time. Table 2 only
+gives the comparison on one setting; it is natural to ask,
+for example, about the performance of LIBSVM with a
+looser stopping condition, or Fastfood with varied number of Fourier features. Therefore, for each algorithm we
+change the parameter settings and present the detailed experimental results in Figure 3 and Figure 5 in Appendix.
+Figure 3 shows convergence results with time – in 3a, 3b,
+3c the relative error on the y-axis is defined as (f (α) −
+f (α∗ ))/|f (α∗ )|, where α∗ is computed by running LIBSVM with 10−8 accuracy. Online and approximate solvers
+are not included in this comparison as they do not solve
+1
+In Fastfood we control the number of blocks so that number
+of Fourier features is close to 3000 for each dataset.
+
+A Divide-and-Conquer Solver for Kernel Support Vector Machines
+
+(a) webspam objective function
+
+(b) webspam testing accuracy
+
+(c) covtype objective function
+
+(d) covtype testing accuracy
+
+Figure 4: Comparison of algorithms on real datasets using polynomial kernel.
+Table 4: Total time for DC-SVM, DC-SVM (early) and LIBSVM on the grid of parameters C, γ shown in Tables 7, 8, 9, 10.
+dataset
+ijcnn1
+webspam
+covtype
+census
+
+DC-SVM
+(early)
+16.4 mins
+5.6 hours
+10.3 hours
+1.5 hours
+
+DC-SVM
+
+LIBSVM
+
+2.3 hours
+4.3 days
+4.8 days
+1.4 days
+
+6.4 hours
+14.3 days
+36.7 days
+5.3 days
+
+the exact kernel SVM problem. We observe that DC-SVM
+achieves faster convergence in objective function compared
+with the state-of-the-art exact SVM solvers. Moreover,
+DC-SVM is also able to achieve superior test accuracy in
+lesser training time as compared with approximate solvers.
+Figure 3d, 3e, 3f compare the efficiency in achieving different testing accuracies. We can see that DC-SVM consistently achieves more than 50 fold speedup while achieving
+the same test accuracy with LIBSVM.
+Experimental Results with varying values of C, γ: As
+shown in Theorem 1 the quality of approximation depends
+on D(π), which is strongly related to the kernel parameters. In the RBF kernel, when γ is large, a large portion of
+kernel entries will be close to 0, and D(π) will be small so
+that ᾱ is a good initial point for the top level. On the other
+hand, when γ is small, ᾱ may not be close to the optimal
+solution. To test the performance of DC-SVM under different parameters, we conduct the comparison on a wide
+range of parameters (C = [2−10 , 2−6 , 21 , 26 , 210 ], γ =
+[2−10 , 2−6 , 21 , 26 , 210 ]). The results on the ijcnn1, covtype, webspam and census datasets are shown in Tables
+7, 8, 9, 10 (in the appendix). We observe that even when γ
+is small, DC-SVM is still 1-2 times faster than LIBSVM:
+among all the 100 settings, DC-SVM is faster on 96/100
+settings. The reason is that even when ᾱ is not so close to
+α, using ᾱ as the initial point is still better than initialization
+with a random or zero vector. On the other hand, DC-SVM
+(early) is extremely fast, and achieves almost the same or
+even better accuracy when γ is small (as it uses an approximated kernel). In Figure 6, 8, 7, 9 we plot the performance
+of DC-SVM and LIBSVM under various C and γ values,
+the results indicate that DC-SVM (early) is more robust to
+parameters. Note that DC-SVM (early) can be viewed as
+solving SVM with a different kernel K̄, which focuses on
+“within-cluster” information, and there is no reason to believe that the global kernel K always yields better test accurracy than K̄. The accumulated runtimes are shown in
+Table 4.
+
+Experimental Results with polynomial kernel: To show
+that DC-SVM is efficient for different types of kernels, we
+further conduct experiments on covtype and webspam
+datasets for the degree-3 polynomial kernel K(xi , xj ) =
+(η + γxTi xj )3 . For the polynomial kernel, the parameters chosen by cross validation are C = 2, γ = 1 for covtype, and C = 8, γ = 16 for webspam. We set η = 0,
+which is the default setting in LIBSVM. Figures 4a and
+4c compare the training speed of DC-SVM and LIBSVM
+for reducing the objective function value and Figures 4b
+and 4d show the testing accuracy compared with LIBSVM and LaSVM. Since LLSVM, FastFood and LPTU
+are developed for shift-invariant kernels, we do not include
+them in our comparison. We can see that when using the
+polynomial kernel, our algorithm is more than 100 times
+faster than LIBSVM and LaSVM. One main reason for
+such large improvement is that it is hard for LIBSVM and
+LaSVM to identify the right set of support vectors when using the polynomial kernel. As shown in Figure 2, LIBSVM
+cannot identify 20% of the support vectors in 105 seconds,
+while DC-SVM has a very good guess of the support vectors even at the bottom level, where number of clusters is
+256. In Appendix 8.5 we show that the clustering step only
+takes a small portion of the time taken by DC-SVM.
+
+6. Conclusions
+In this paper, we have proposed a novel divide and conquer algorithm for solving kernel SVMs (DC-SVM). Our
+algorithm divides the problem into smaller subproblems
+that can be solved independently and efficiently. We show
+that the subproblem solutions are close to that of the original problem, which motivates us to “glue” solutions from
+subproblems in order to efficiently solve the original kernel SVM problem. Using this, we also incorporate an
+early prediction strategy into our algorithm. We report extensive experiments to demonstrate that DC-SVM significantly outperforms state-of-the-art exact and approximate
+solvers for nonlinear kernel SVM on large-scale datasets.
+The code for DC-SVM is available at http://www.cs.
+utexas.edu/˜cjhsieh/dcsvm.
+
+7. Acknowledgements
+This research was supported by NSF grants CCF-1320746
+and CCF-1117055. C.-J.H also acknowledges support from
+an IBM PhD fellowship.
+
+A Divide-and-Conquer Solver for Kernel Support Vector Machines
+
+References
+Boley, D. and Cao, D. Training support vector machine
+using adaptive clustering. In SDM, 2004.
+
+Menon, A. K. Large-scale support vector machines: algorithms and theory. Technical report, University of California, San Diego, 2009.
+
+Bordes, A., Ertekin, S., Weston, J., and Bottou, L. Fast
+kernel classifiers with online and active learning. JMLR,
+6:1579–1619, 2005.
+
+Moody, John and Darken, Christian J. Fast learning in networks of locally-tuned processing units. Neural Computation, pp. 281–294, 1989.
+
+Chang, Chih-Chung and Lin, Chih-Jen. LIBSVM: A library for support vector machines. ACM Transactions on
+Intelligent Systems and Technology, 2:27:1–27:27, 2011.
+
+Pavlov, D., Chudova, D., and Smyth, P. Towards scalable
+support vector machines using squashing. In KDD, pp.
+295–299, 2000.
+
+Collobert, R., Bengio, S., and Bengio, Y. A parallel mixture
+of SVMs for very large scale problems. In NIPS, 2002.
+
+Pérez-Cruz, F., Figueiras-Vidal, A. R., and ArtésRodrı́guez, A. Double chunking for solving SVMs for
+very large datasets. In Proceedings of Learning, 2004.
+
+Cortes, C. and Vapnik, V. Support-vector networks. Machine Learning, 20:273–297, 1995.
+Fine, S. and Scheinberg, K. Efficient SVM training using low-rank kernel representations. JMLR, 2:243–264,
+2001.
+Ghitta, Radha, Jin, Rong, Havens, Timothy C., and Jain,
+Anil K. Approximate kernel k-means: Solution to large
+scale kernel clustering. In KDD, 2011.
+
+Platt, J. C. Fast training of support vector machines using
+sequential minimal optimization. In Advances in Kernel
+Methods - Support Vector Learning, 1998.
+Smola, A., Vishwanathan, S., and Le, Q. Bundle methods
+for machine learning. NIPS, 2007.
+Tresp, V. A Bayesian committee machine. Neural Computation, 12:2719–2741, 2000.
+
+Graf, H. P., Cosatto, E., Bottou, L., Dundanovic, I., and
+Vapnik, V. Parallel support vector machines: The cascade SVM. In NIPS, 2005.
+
+Tsang, I.W., Kwok, J.T., and Cheung, P.M. Core vector
+machines: Fast SVM training on very large data sets.
+JMLR, 6:363–392, 2005.
+
+Jacobs, R. A., Jordan, M. I., Nowlan, S. J., and Hinton,
+G. E. Adaptive mixtures of local experts. Neural Computation, 3(1):79–87, 1991.
+
+Wang, Z., Djuric, N., Crammer, K., and Vucetic, S.
+Trading representability for scalability: Adaptive multihyperplane machine for nonlinear classification. In
+KDD, 2011.
+
+Joachims, T. Making large-scale SVM learning practical.
+In Advances in Kernel Methods – Support Vector Learning, pp. 169–184, 1998.
+Joachims, T. Training linear SVMs in linear time. In KDD,
+2006.
+
+Yu, Hwanjo, Yang, Jiong, Han, Jiawei, and Li, Xiaolei.
+Making SVMs scalable to large data sets using hierarchical cluster indexing. Data Mining and Knowledge
+Discovery, 11(3):295–321, 2005.
+
+Jose, C., Goyal, P., Aggrwal, P., and Varma, M. Local deep
+kernel learning for efficient non-linear SVM prediction.
+In ICML, 2013.
+
+Zhang, K., Tsang, I. W., and Kwok, J. T. Improved
+Nyström low rank approximation and error analysis. In
+ICML, 2008.
+
+Keerthi, S. S., Chapelle, O., and DeCoste, D. Building support vector machines with reduced classifier complexity.
+JMLR, 7:1493–1515, 2006.
+
+Zhang, K., Lan, L., Wang, Z., and Moerchen, F. Scaling up
+kernel SVM on limited resources: A low-rank linearization approach. In AISTATS, 2012.
+
+Kugler, M., Kuroyanagi, S., Nugroho, A. S., and Iwata,
+A. CombNET-III: a support vector machine based large
+scale classifier with probabilistic framework. IEICE
+Trans. Inf. and Syst., 2006.
+Le, Q. V., Sarlos, T., and Smola, A. J. Fastfood – approximating kernel expansions in loglinear time. In ICML,
+2013.
+Loosli, Gaëlle, Canu, Stéphane, and Bottou, Léon. Training invariant support vector machines using selective
+sampling. In Large Scale Kernel Machines, pp. 301–
+320. 2007.
+
+

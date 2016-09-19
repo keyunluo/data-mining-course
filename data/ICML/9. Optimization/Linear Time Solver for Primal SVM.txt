@@ -1,0 +1,1479 @@
+New Primal SVM Solver with Linear Computational Cost for Big Data
+Classifications
+Feiping Nie
+FEIPINGNIE @ GMAIL . COM
+Yizhen Huang
+HUANG . YIZHEN @ GMAIL . COM
+Xiaoqian Wang
+XIAOQIAN . WANG 93@ MAVS . UTA . EDU
+Heng Huang
+HENG @ UTA . EDU
+Computer Science and Engineering Department, University of Texas at Arlington, Arlington, TX, 76019
+
+Abstract
+
+strained problem:
+n
+
+Support Vector Machines (SVM) is among the
+most popular classification techniques in machine learning, hence designing fast primal SVM
+algorithms for large-scale datasets is a hot topic
+in recent years. This paper presents a new L2norm regularized primal SVM solver using Augmented Lagrange Multipliers, with linear computational cost for Lp-norm loss functions. The
+most computationally intensive steps (that determine the algorithmic complexity) of the proposed algorithm is purely and simply matrix-byvector multiplication, which can be easily parallelized on a multi-core server for parallel computing. We implement and integrate our algorithm into the interfaces and framework of the
+well-known LibLinear software toolbox. Experiments show that our algorithm is with stable performance and on average faster than the stateof-the-art solvers such as SVMperf , Pegasos and
+the LibLinear that integrates the TRON, PCD and
+DCD algorithms.
+
+1. Introduction
+Because most areas of science, simulations and experiments are flooded with big data, there is an urgent need
+to develop large-scale data classification techniques. As
+one of the most widely used classification methods, the
+fast algorithm to solve Support Vector Machines (SVM)
+is desired. Given n instance-label pairs (xi , yi ), 1≤i≤n,
+xi ∈ ℜd , yi ∈ {−1, +1}, the L2-norm regularized SVM
+in the primal form aims to optimize the following unconProceedings of the 31 st International Conference on Machine
+Learning, Beijing, China, 2014. JMLR: W&CP volume 32. Copyright 2014 by the author(s).
+
+X
+
+1
+loss wT xi + b, yi
+min wT w + C
+w,b 2
+i=1
+
+(1)
+
+where the support vector w ∈ ℜd and the intercept (i.e. bias
+term) b ∈ ℜ are the variables; loss (u, v) is a loss function measuring the difference between two scalars u ∈ ℜ
+and v ∈ ℜ; C ∈ ℜ is the weight adjusting the importance between the regularization term wT w and the loss
+n
+
+P
+loss wT xi + b, yi .
+term
+i=1
+
+If the loss function is selected to be the hinge loss function
+loss (u, v) = max(1 − uv, 0), the problem becomes the
+L2-norm regularized L1-norm loss primal SVM, a.k.a L1primal SVM in some literature:
+n
+
+X
+
+1
+1 − (wT xi + b)yi + ,
+min wT w + C
+w,b 2
+i=1
+
+(2)
+
+def
+
+where the operator (u)+ = max(u, 0) returns the input
+scalar u ∈ ℜ unchanged if u is non-negative, and zero otherwise. Such notation is for better readability.
+If the loss function is selected to be the squared hinge loss
+function loss (u, v) = max(1 − uv, 0)2 , the problem becomes the L2-norm regularized L2-norm loss primal SVM,
+a.k.a L2-primal SVM:
+n
+
+X
+2
+1
+1 − (wT xi + b)yi + .
+min wT w + C
+w,b 2
+i=1
+
+(3)
+
+Primal SVM is attractive, partly due to the fact that it assures a continuous decrease in the primal objective function
+(Keerthi & DeCoste, 2005). Designing fast primal SVM
+solvers for large-scale datasets is a hot and important topic
+in recent years: The method in (Mangasarian & Musicant,
+2001) was proposed, but it need compute the inverse of a
+matrix with size of (d + 1) ∗ (d + 1) and is slower than later
+proposed solvers. (Mangasarian, 2002) and (Keerthi & DeCoste, 2005) proposed modified Newton methods to train
+
+Linear Computational Cost Solver for Primal SVM
+
+L2-primal SVM. As Eq.(3) is not 2nd order differentiable,
+to obtain the Newton direction, they have to use the generalized Hessian matrix (i.e. generalized 2nd order derivative), which is not efficient enough. To overcome this limitation, a Trust RegiOn Newton method (TRON) (Lin et al.,
+2008) was proposed to solve L2-primal SVM and logistic
+regression. The toolbox SVMperf (Joachims, 2006) used
+a cutting plane technique to solve L1-primal SVM. (Smola
+et al., 2008) applied bundle methods, and viewed SVMperf
+as a special case. (Zhang, 2004) proposed a Stochastic Gradient Descent (SGD) method for primal SVM with any type
+of loss functions; Pegasos (Shalev-Shwartz et al., 2007) extended Zhang’s work and developed an algorithm which alternates between stochastic gradient descent steps and projection steps with better performance than SVMperf . Another stochastic gradient implementation similar to Pegasos was published in (Bottou, 2007). More recently the
+L2-primal SVM is solved by the PCD (Primal Coordinate
+Descent) algorithm (Chang et al., 2008) with coordinate descent methods.
+All algorithms discussed above are iterative, which update
+w at each iteration. Based on this understanding, it is naturally to find that, there is a tradeoff between the computational cost spent in each iteration and the number of iterations needed (Lin et al., 2008). Pegasos randomly subsamples a few instances at a time, so its cost per iteration
+is low, but the number of iterations is high. Contrastively,
+Newton methods such as the TRON method spends considerable amount of time per iteration, but converges at
+fast rates. The DCD (Dual Coordinate Descent) algorithm
+(Hsieh et al., 2008) bypasses the operation to maintain gradients at each iteration in the PCD (Chang et al., 2008),
+and lowers the algorithmic complexity per iteration from
+¯ to O(d)
+¯ in linear SVM cases, where d¯ is the averO(nd)
+age number of nonzero elements per instance. However,
+such reduction in complexity does not apply for nonlinear
+SVM with kernels. Moreover, as shown in our experiments
+(see §4), the convergence of the DCD may be extremely
+lengthy for some datasets. In large-scale scenarios, usually an approximate solution of the optimization problem is
+enough to produce a good model (Lin et al., 2008; Chang
+et al., 2008; Hsieh et al., 2008). Thus, methods with a lowcost iteration are preferred as they can quickly generate a
+reasonable model. However, if one specifies an unsuitable
+stopping condition, such methods may fall into the situation of lengthy iterations. To address these issues, we propose a new SVM solver using Augmented Lagrange Multipliers (ALM) with simple matrix-by-vector multiplication
+per iteration, linear computational cost, and provable convergence.
+The rest of the manuscript is organized as follows: Section
+2 presents our proposed algorithm; Section 3 analyzes its
+optimality and convergence; experimental results are given
+
+in Section 4; Section 5 contains the concluding remarks.
+
+2. Proposed Algorithm
+For ease of notation and better extensibility, we first unify
+Eq.(2) and Eq.(3), and generalize them to minimize the objective function of the Lp-primal SVM:
+n
+
+obj(w, b) =
+
+X
+p
+1 T
+1−(wT xi +b)yi + ,
+w w+C
+2
+i=1
+
+(4)
+
+where p ∈ ℜ is a constant and typically 1≤p≤2 for being meaningful. A fundamental difficulty in both L2- and
+L1-primal SVM is that, their loss functions (i.e. hinge
+loss and squared hinge loss) is piecewise. With this observation and the trick 1−(wT xi + b)yi = yi yi −(wT xi +
+b)yi = yi (yi −(wT xi + b)), we introduce auxiliary variables ei =yi −(wT xi + b), 1≤i≤n, and the minimization of
+Eq.(4) becomes:
+n
+
+X
+1 T
+(yi ei )p+ .
+w w+C
+w,b,ei =yi −(w T xi +b) 2
+i=1
+min
+
+(5)
+
+Based on ALM (Gill & Robinson, 2012), Eq.(5) is turned
+into an unconstrained optimization problem by studying
+the Lagrangian function of Eq.(5) below:
+n
+X
+1
+(yi ei )p+ +λT (X T w+1b−y+e)
+L(w, b, e, λ)= wT w+C
+2
+i=1
+(6)
+
+where Xd×n =[x1 ,x2 ,..., xn ], 1n×1 =[1,1,..., 1]T , yn×1 =
+[y1 ,y2 ,...,yn ]T , en×1 =[e1 ,e2 ,...,en]T . The last term is the
+pointwise multiplication of the amount of violation of the
+n constraints (wT xi + b)−yi +ei =0 with the vector λ ∈ ℜn
+consisting of n Lagrangian multipliers.
+
+2
+ALM adds µ2 X T w + 1b − y + e (supplemental term)
+to Eq.(6): as µ “augments” to infinity, this term forces the
+n constraints to be satisfied. So the augmented Lagrangian
+function of Eq.(5) is defined as:
+AL(w, b, e, λ, µ) = 12 wT w + C
+
+n
+P
+
+i=1
+
+(yi ei )p+ +
+
+λT (X T w+1b−y+e) + µ2 ||X T w+1b−y+e||2 .
+
+(7)
+
+Arranging the last two terms in Eq.(7) into a quadratic form
+leads to:
+n
+P
+(yi ei )p+
+AL(w, b, e, λ, µ) = 21 wT w + C
+(8)
+i=1
++ µ2 ||X T w + 1b − y + e + µλ ||2 .
+2
+
+λ
+Note that from Eq.(7) to Eq.(8), we add a term 2µ
+that remains constant when performing optimization via the variables w, b and e within a single iteration. As µ → ∞, this
+term is very close to zero and thus negligible eventually.
+
+At the k-th iteration, similar to the Iterative Thresholding
+(IT) method (Wright et al., 2009), the amount of violation
+
+Linear Computational Cost Solver for Primal SVM
+
+of the n constraints is used to update the Lagrangian multiplier vector λ:
+T
+
+λ(k) = λ(k−1) + µ(k) (X w + 1b − y + e) .
+
+(9)
+
+The augmented penalty parameter µ is monotonically nondecreasing over the iterative process. How to determine the
+augmented penalty parameter series µ(k) for every iteration
+k will be discussed in §3. We omit the bracketed subscript
+k when there is no risk to cause any confusion, and actually we only need a single variable (or array) to store these
+scalars (or vectors) for algorithmic implementation. Note
+that the symbols of subscripts and bracketed subscripts refer to quite different meanings in this paper.
+Remarks: A merit of the ALM is that the optimal step size
+to update λ is proven to be the chosen penalty parameter
+µ(k) , making the parameter tuning much easier than that
+of the IT (Gill & Robinson, 2012).
+Now at each iteration, we can split the updating of w, b, e
+into two independent portions: minimizing e with w, b
+fixed and minimizing w, b with e fixed.
+When w, b are fixed, the term wT w is constant and Eq.(8)
+can be decomposed into n independent single-variable
+minimization problems w.r.t. ei :
+ei
+
+=
+
+arg min Fi (ei )
+ei
+
+=
+=
+
+λi
+µ
+||ei −(yi −wT xi −b− )||2
+2
+µ
+ei
+1
+p
+arg min γ (yi ei )+ + (ei − ti )2 ,
+(10)
+2
+ei
+p
+
+arg min C (yi ei )+ +
+
+T
+where γ = C
+µ , λi is the i-th element of λ, ti =yi −w xi −b−
+λi
+µ is a constant. Solving Eq.(10) is easy as ei is the minimizer for the single-variable 2-piece piecewise function
+Fi (ei ), so we just need to find its minima when ei ≤0 and
+ei >0 separately and pick the smaller one. When yi ei ≤0,
+(yi ei ≤0)p+ =0, so we only need to pick the smaller between
+Fi (0) and Fi (ti ). When yi ei >0, we need to solve the equation:
+∂Fi
+= pγ(yi ei )p−1 + ei − ti = 0 .
+(11)
+∂ei
+For arbitrary given p and γ, solving Eq.(11) is difficult. But
+fortunately in our scenario, it is always that p≥1,γ>0. So
+∂Fi
+∂ei is monotonically increasing w.r.t. ei , and we can use
+the well-known binary search method to narrow the possible range of ei by half via each operation, and obtain an εaccurate solution in O(log 1/ε) time. Particularly, we can
+write the explicit solution straightforwardly when p=1 or 2.
+
+For L1-primal SVM (p=1), yi = ±1:
+ei = ti − yi γ when yi ti > γ; ei = 0 when 0 ≤ yi ti ≤ γ;
+ei = ti when yi ti < 0 .
+
+(12)
+
+For L2-primal SVM (p=2), yi = ±1:
+ei = ti /(1 + 2γ) when yi ti > 0; ei = ti when yi ti ≤ 0
+(13)
+Pn
+p
+When e is fixed, the term i=1 (yi ei )+ is constant, and
+Eq.(8) becomes an L2-norm regularized Least Square Regression (LSR) problem:
+
+2
+G(w, b) = min µ−1 wT w + X T w + 1b − z  , (14)
+w,b
+
+where z = y − e − µ−1 λ is a constant vector. Eq.(14) can
+be turned
+into
+LSR problem
+as below,
+
+ if we set
+
+ a standard
+
+XT
+1
+z
+w
+and d =
+v=
+,A=
+1
+0
+b
+µ− 2 I 0
+G(w, b) = G(z) = min kAz − dk2 ,
+z
+
+(15)
+
+which can be resolved by many standard libraries such as
+the default LSQR function in MATLAB.
+Hereby we finish the illustration of the proposed exact
+SVM-ALM algorithm and summarize details in Algorithm
+1. To be compatible with the existing methods such as (Fan
+et al., 2008; Chang et al., 2008; Hsieh et al., 2008; Lin et al.,
+2008), the stopping condition is set to be k∇obj(w, b)k ≤
+ǫ, where the user-specified parameter ǫ is 0.01 by default,
+and ∇obj(w, b) is the gradients of obj(w, b) w.r.t. w.
+However, the LSQR used here costs O(nd¯2 ) where d¯ is the
+average number of nonzero elements per instance, which is
+as costly as computing matrix inverse. This is too expensive as we need to afford such computation every iteration.
+Driven by this consideration and the tradeoff between cost
+per iteration and the number of iterations as discussed in the
+introduction, we use an optimal step-size gradient method
+to update w and b at each iteration.
+The gradients of G(w, b) w.r.t. w and b are as below:
+∂G
+= X(X T w + 1b − z) + µ−1 w ,
+wg =
+∂w
+∂G
+bg =
+= nb + 1T (X T w − z) .
+(16)
+∂b
+Finding the optimal step-size s is a single-variable
+quadratic function minimization problem:
+min µ−1 (w−swg )T (w−swg )+kX T (w−swg )+1(b−sbg )−zk2
+s
+
+(17)
+
+which has the explicit solution
+s=
+=
+
+(X T wg +1bg )T (X T w+1b−z)+µ−1 wgT w
+(X T wg +1bg )T (X T wg +1bg )+µ−1 wgT wg
+wgT wg +bTg bg
+.
+(X T wg +1bg )T (X T wg +1bg )+µ−1 wgT wg
+
+(18)
+
+The last equality is just to simplify the computation of s,
+and can be verified via substituting wg and bg in two denominators with Eq.(16). We prefer the simplified formula,
+because it saves two matrix-by-vector multiplications.
+
+Linear Computational Cost Solver for Primal SVM
+
+So kvk∗ ≤ 1. Then it can be concluded that kvk∗ = 1.
+
+Algorithm 1 Exact SVM-ALM for Lp-primal SVM
+Input: p, X, y, µ(1) , µ(2) , ..., µ(∞)
+Initialize w = 1, b = 0, λ = 0.
+repeat
+1. Update e with Eq.(11) or Eq.(12) or Eq.(13).
+2. Update w, b using the LSQR with Eq.(15).
+3. Update λ with Eq.(9).
+until k∇obj(w, b)k ≤ ǫ
+
+If u = 0, then Eq.(19) is equivalent to
+<v, d> ≤ 1, ∀kdk = 1
+
+(23)
+
+So kvk∗ ≤ 1 by the definition of the dual norm.
+Lemma 2 The sequence {λ(k) } in either Algorithm 1 or
+Algorithm 2 is bounded.
+
+Algorithm 2 Inexact SVM-ALM for Lp-primal SVM
+Input: p, X, y, µ(1) , µ(2) , ..., µ(∞)
+Initialize w = 1, b = 0, λ = 0.
+repeat
+1. Update e with Eq.(11) or Eq.(12) or Eq.(13).
+2. Update w by w − swg , update b by b − sbg , where
+wg , bg , s are computed with Eq.(16) and Eq.(18), respectively.
+3. Update λ with Eq.(9).
+until k∇obj(w, b)k ≤ ǫ
+
+Proof: From w(k) = arg min AL(w, b, e(k) , λ(k−1) , µ(k) ),
+w,b
+
+b(k) = arg min AL(w, b, e(k) , λ(k−1) , µ(k) ), e(k) =
+w,b
+
+arg min AL(w(k−1) , b(k−1) , e, λ(k−1) , µ(k) ), we have:
+e
+
+0 ∈ ∂w AL(w(k) , b(k) , e(k) , λ(k−1) , µ(k) )
+0 ∈ ∂b AL(w(k) , b(k) , e(k) , λ(k−1) , µ(k) )
+0 ∈ ∂e AL(w(k) , b(k) , e(k) , λ(k−1) , µ(k) )
+
+(24)
+
+which indicate:
+0 ∈ ∂kw(k) k2 −λ(k−1) −µ(k) (X T w+1b−y+e)
+
+We summarize the proposed inexact SVM-ALM algorithm
+in Algorithm 2. At each iteration, Algorithm 2 only
+needs three matrix-by-vector multiplications with com¯ where d¯ is the average number of nonzero
+plexity O(nd),
+elements per instance. The several pointwise addition and
+multiplication between two vectors are with complexity
+either O(d) or O(n), and can be neglected compared to
+¯ In large-scale data classifications, the high dimenO(nd).
+sional features are always reduced by the prescreening procedure, hence d¯ is not large. Our new algorithm has linear
+computational cost w.r.t. the number of data instances n.
+
+3. Convergence and Optimality
+We first prove some lemmas.
+Lemma 1 Let H be a real Hilbert space endowed with an
+inner product <·, ·> and a corresponding norm k·k, and
+v ∈ ∂kuk, where ∂f (u) is the subgradient of f (u). Then
+kvk∗ =1 if u6=0, and kvk∗ ≤1 if u=0, where k·k∗ is the dual
+norm of k·k.
+Proof: Because v ∈ ∂kuk,
+kdk − kuk ≥ <v, d−u>, ∀d ∈ H
+
+(19)
+
+If u6=0, setting d = 0, 2u leads to
+kuk = <v, u> ≤ kukkvk
+
+∗
+
+(21)
+
+which leads to
+<v,
+
+d−u
+> ≤ 1, ∀d 6= u
+kd − uk
+
+(22)
+
+p
+
+(25)
+
+T
+
+0 ∈ ∂kC(y e(k) )+ k −λ(k−1) −µ(k) (X w+1b−y+e)
+Therefore
+λ(k) ∈ ∂kw(k) k2 , λ(k) ∈ ∂kC(y T e(k) )+ kp .
+
+(26)
+
+According to Lemma 1, the sequence {λ(k) } in Algorithm
+1 is bounded, because of the factp that, the dual norms of
+k·k2 and k·kp are k·k2 and k·k p−1 (Lin et al., 2009), respectively. The boundedness of {λ(k) } in Algorithm 2 can
+be proved in the same way.
+Lemma 3 The sequences {w(k) },{b(k) },{e(k) } in either Algorithm 1 or Algorithm 2 are all bounded, if
+kw(k+1) k2 +kC(y T e(k+1) )+ kp + 0.5µ(k+1) kX T w(k+1) +
+1b(k+1) − y + e(k+1) k2 ≤ kw(k) k2 +kC(y T e(k) )+ kp +
+0.5µ(k) kX T w(k) + 1b(k) − y + e(k) k2 for every k > 0 and
+∞
+P
+µ(k+1)
+< ∞.
+µ2
+
+k=1
+
+(k)
+
+Proof: As kwk2 +kC(y T e)+ kp +0.5µkX T w+1b−y+ek2
+is non-increasing as Algorithm 1 iterates, it can be verified
+that,
+AL(w(k) , b(k) , e(k) , λ(k−1) , µ(k) )
+≤AL(w(k−1) , b(k−1) , e(k−1) , λ(k−2) , µ(k−1) )+
+2
+0.5µ−2
+(k−1) (µ(k−1) + µ(k) )kλ(k−1) − λ(k−2) k
+
+(20)
+
+Thus we have kvk∗ ≥ 1. On the other side, we have
+kd − uk ≥ kdk − kuk ≥ <v, d−u>, ∀d ∈ H
+
+T
+
+(27)
+
+The above inequality can be derived via substituting with Eq.(9) to eliminate λ(k−1) .
+So
+{AL(w(k) , b(k) , e(k) , λ(k−1) , µ(k) )} is upper bounded,
+∞
+P
+µ(k) +µ(k+1)
+owing to the boundedness of {λ(k) } and
+≤
+µ2
+∞
+P
+
+k=1
+
+k=1
+
+2µ(k+1)
+µ2(k)
+
+< ∞.
+
+(k)
+
+Linear Computational Cost Solver for Primal SVM
+
+Thus, we have
+
+Proof: As the vital natural property of an ALM algorithm,
+the following is true:
+
+kw(k) k2 +kC(y T e(k) )+ kp
+kλ(k) k2
+=AL(w(k) , b(k) , e(k) , λ(k−1) , µ(k) ) −
+2µ(k)
+
+AL(w(k) ,b(k) ,e(k) ,λ(k−1) ,µ(k) )= min AL(w,b,e,λ(k−1) ,µ(k) )
+w,b,e
+
+(28)
+
+as upper bounded. Therefore {w(k) },{e(k) } in Algorithm
+1 are both bounded, which leads to the boundedness of
+{b(k) }, as X T w+1b−y+e = 0.
+It can be verified that, exactly the same properties hold in
+Algorithm 2.
+The non-increasing requirement of kwk2 +kC(y T e)+ kp
++0.5µkX T w + 1b − y + ek2 in Lemma 3 also implies the
+way to generate the sequence {µ(k) } by setting the upper
+limit of µ(k) :
+µ(k+1) =(0.5µ(k) kX T w(k) + 1b(k) − y + e(k) k2 + kw(k) k2
+−kw(k+1) k2 +kC(y T e(k) )+ kp − kC(y T e(k+1) )+ kp )
+÷(0.5kX T w(k+1) + 1b(k+1) − y + e(k+1) k2 )
+
+(29)
+
+≤
+=
+
+≤AL(w(k−1) , b(k−1) , e(k) , λ(k−1) , µ(k) )
+≤AL(w(k−1) , b(k−1) , e(k−1) , λ(k−1) , µ(k) )
+which ensures that {µ(k) } is non-decreasing.
+Owing to precision limit, µ cannot increase to infinity in practical implementations of both Algorithm 1
+and Algorithm 2, otherwise the significant digits of
+n
+P
+(yi ei )p+ in AL(w, b, e, λ, µ)
+the terms 21 wT w and C
+i=1
+
+would be squeezed out by the extremely large term
+µ
+λ 2
+T
+2 kX w + 1b − y + e + µ k . More specifically, µ has a
+upper limit of 105 as an implementation detail. We follow the convention of most existing work by using doubleprecision floating-point numbers. Using single precision
+e.g. (Bottou, 2007) may reduce the computational time in
+some situations, but this setting may cause numerical inaccuracy (Chang et al., 2008). An advantage of the ALM
+is that it converges to the exact optimal solution before µ
+augments to infinity (Gill & Robinson, 2012). In contrast,
+strictly speaking the IT (Wright et al., 2009) only finds approximate solutions.
+Now we have come to the main results of this section. Theorem 1 The solution consisting of the limit of
+the sequences {w(k) },{b(k) },{e(k) } in Algorithm 1 with
+Eq.(29) for updating µ, say (w(∞) ,b(∞) ,e(∞) ), is an optimal solution to the Lp-primal SVM problem and the
+convergence rate is at least O(µ−1
+(k) ) in the sense that
+2
+T
+p
+∗
+∗
+|kw(k) k +kC(y e(k) )+ k − obj |=O(µ−1
+(k) ), where obj
+is the minimal value of obj in Eq.(4).
+
+AL(w,b,e,λ(k−1) ,µ(k) )
+
+min
+
+kwk2 +kC(y T e)+ kp +
+
+w,b,e,X T w+1b−y+e=0
+
+= min kwk2 +kC(1 − (X T w + 1b)y)+ kp +
+w,b
+
+= obj ∗ +
+
+kλ(k−1) k2
+2µ(k)
+
+kλ(k−1) k2
+2µ(k)
+
+kλ(k−1) k2
+2µ(k)
+
+(30)
+The first equality and second inequality are obvious; the
+third equality is because of the fact that, when the constraints w.r.t the auxiliary variables e is satisfied, the last
+term in Eq.(8) degenerates to ||λ(k−1) ||2 /2µ(k) ; the fourth
+equality is obtained just by substituting the constraints,
+similar to the conversion from Eq.(5) to Eq.(4); the fifth
+equality is according to the definition in Eq.(4).
+In Algorithm 1, it can be verified that,
+kw(k) k2 +kC(y T e(k) )+ kp =
+
+Because of Eqs.(10,14), we have
+AL(w(k) , b(k) , e(k) , λ(k−1) , µ(k) )
+
+min
+
+w,b,e,X T w+1b−y+e=0
+
+AL(w(k) , b(k) , e(k) , λ(k−1) , µ(k) ) −
+
+kλ(k) k2
+2µ(k)
+
+(31)
+
+Based on Eq.(30) we have
+kw(k) k2 +kC(y T e(k) )+ kp ≤ obj ∗ +
+
+kλ(k−1) k2
+kλ(k) k2
+−
+2µ(k)
+2µ(k)
+
+The proved boundedness of {λ(k) } in Lemma 2 leads to:
+−1
+2
+T
+p
+∗
+obj ∗ −O(µ−1
+(k) ) ≤ kw(k) k +kC(y e(k) )+ k ≤ obj +O(µ(k) )
+−1
+∗
+Note that the range [obj ∗ − O(µ−1
+(k) ), obj + O(µ(k) )] is
+derived, as the term O(µ−1
+(k) ) may be either positive or negative. Hereby the convergence rate is proved.
+
+When k → ∞, O(µ−1
+(k) ) is negligible, so
+kw(∞) k2 +kC(y T e(∞) )+ kp ≤ obj ∗
+
+(32)
+
+According to Eq.(9), the constraints X T w(k) + 1b(k) − y +
+−1
+e(k) = µ(k)
+(λ(k) − λ(k−1) ) are satisfied when k → ∞:
+X T w(∞) + 1b(∞) − y + e(∞) = 0
+
+(33)
+
+Therefore, (w(∞) ,b(∞) ,e(∞) ) is an optimal solution to the
+Lp-primal SVM problem.
+Theorem 2 The solution consisting of the limit of the sequences {w(k) },{b(k) },{e(k) } in Algorithm 2 with Eq.(29)
+for updating µ, say (w(∞) ,b(∞) ,e(∞) ), is an optimal solu∞
+P
+µ(k+1)
+< ∞ and
+tion to the Lp-primal SVM problem, if
+µ2
+k=1
+
+(k)
+
+lim µ(k) (e(k+1) − e(k) ) = 0.
+
+k→∞
+
+Note that, unlike Theorem 1 for the exact ALM method,
+the above statement only guarantees convergence but does
+
+Linear Computational Cost Solver for Primal SVM
+
+not specify the rate of convergence for the inexact ALM
+method. Although the exact convergence rate of the inexact ALM method is difficult to obtain in theory, extensive
+numerical experiments have shown that for geometrically
+increasing µ, it still converges Q-linearly (Gill & Robinson, 2012; Lin et al., 2009).
+Proof: Our proof here is based on Theorem 1 by comparing the difference of {w(k) },{b(k) },{e(k) } and {λ(k) } in
+Algorithm 1 and Algorithm 2. For distinction purpose, we
+denote {w(k) },{b(k) },{e(k) } and {λ(k) } in Algorithm 1 as
+{ŵ(k) },{b̂(k) },{ê(k) } and {λ̂(k) } respectively, in this proof.
+According to X T w(k) + 1b(k) − y + e(k) = µ−1
+(k) (λ(k) −
+λ(k−1) ) from Eq.(9) and the boundedness of {λ(k) }, we
+have
+lim X T w(k) + 1b(k) − y + e(k) = 0
+(34)
+k→∞
+
+So (w(k) , b(k) , e(k) ) approaches a feasible solution. Further, the boundedness of {λ(k) } and {λ̂(k) } leads to:
+−1
+ke(k+1) − e(k) k = O(µ−1
+(k) kλ̂(k+1) − λ(k+1) k) = O(µ(k) )
+
+Since
+
+∞
+P
+
+k=1
+
+µ−1
+(k) ≤
+
+∞
+P
+
+k=1
+
+µ(k) +µ(k+1)
+µ2(k)
+
+≤
+
+∞
+P
+
+k=1
+
+2µ(k+1)
+µ2(k)
+
+< ∞,
+
+e(k) is a Cauchy sequence, and has a limit e(∞) . Then with
+Eq.(34), w(k) and b(k) also have their corresponding limits
+w(∞) and b(∞) . So (w(∞) , b(∞) , e(∞) ) is a feasible solution. On the other side, we have the optimality condition:
+λ(k) ∈ ∂kw(k) k2 , λ(k) ∈ ∂k(y T e(k) )+ kp .
+
+(35)
+
+Thus, by the convexity of norms (for 1≤p≤2) we have:
+kw(k) k2 +||C(y T e(k) )+ ||
+
+p
+
+≤ obj ∗ −<λ̂(k) ,ŵ(k) −w(k) >−<λ(k) ,ê(k) −e(k) >
+−1
+= obj ∗ −µ−1
+(k) <λ(k) ,λ(k) − λ(k−1) >+µ(k) <λ(k) ,λ̂(k)
+
+− λ̂(k−1) >−<µ(k) (e(k) − e(k−1) ),ŵ(k) −w(k) > (36)
+The second and third terms approach to zero due to the
+boundedness of {λ(k) } and {λ̂(k) }. The last term tends
+to vanish due to the boundedness of {w(k) } and {ŵ(k) }
+together with the assumption lim µ(k) (e(k+1) −e(k) ) = 0.
+k→∞
+
+So when k → ∞, Eq.(36) becomes
+kw(∞) k2 +kC(y T e(∞) )+ kp ≤ obj ∗ .
+
+(37)
+
+So (w(∞) , b(∞) , e(∞) ) is an optimal solution to the Lpprimal SVM problem.
+
+4. Experiments
+This paper follows the concepts of reproducible research.
+All results presented in the manuscript are reproducible
+using the code and public datasets available online at
+
+https://sites.google.com/site/svmalm. All experiments are
+conducted on an 8-core Intel Xeon X5460 3.16GHz (12M
+Cache, 1333 MHz FSB) Linux server with 32G memory.
+For all experiments except in §4.3, we use the default value
+ǫ=0.01 as in LibLinear. We terminate the algorithms when
+the objectives’ changes are less than 10−4 . In our method,
+we empirically set the maximum iteration number as 100,
+because in all our experiments our algorithm converges
+within 100 iterations.
+We use 7 popularly adopted benchmark datasets from various sources for performance evaluations: UCI Forest
+(Collobert et al., 2002) (n = 581, 012, d = 54), ijcnn1
+(Chang & Lin, 2001) (n = 191, 681, d = 22), Webpage
+(Platt, 1999) (n = 64, 700, d = 300), UCI Connect4 (Frank & Asuncion, 2010) (n = 67, 557, d = 126),
+SensIT Vehicle (acoustic/seismic) (Duarte & Hu, 2004)
+(both n = 98, 528, d = 50), Shuttle (Hsu & Lin, 2002)
+(n = 58, 000, d = 9), UCI Poker (Frank & Asuncion,
+2010) (n = 1, 025, 010, d = 10), Epsilon (Sonnenburg
+et al., 2008) (n = 500, 000, d = 2000). The Epsilon
+dataset has very dense features and was used in many previous large-scale data classifications. The five-fold cross
+validation is conducted (except in §4.3 when all samples
+are used for training) as in (Chang et al., 2008).
+For multi-class classification, we follow the default oneversus-the-rest strategy in (Chang & Lin, 2011) and (Fan
+et al., 2008), and simply rely on the existing modules in the
+LibLinear software toolbox. The average training time is
+reported.
+4.1. How Does Training Time Varies with n?
+Fig. 1 shows log-log plots of how the CPU-time used for
+training increases with respect to n, the number of training
+samples. Because when n is small the training time is too
+short to be measured accurately, we run each test for 10
+times and report the total training time in Fig. 1.
+Lines in a log-log plot correspond to polynomial growth
+O(nl ), where l corresponds to the slope of the line. It is
+seen from Fig. 1 that, the training time of both the exact
+SVM-ALM and the inexact SVM-ALM is roughly linear
+with respect to n, since the slopes of the lines representing various datasets are very close to 1. Together with the
+theoretical analysis in §2 that one iteration of the inexact
+¯ Algorithm 2 is shown
+SVM-ALM algorithm costs O(nd),
+to be a linear computational cost solver for the Lp-primal
+SVM.
+Note that an advantage of our algorithms is that, the training time (and obviously the testing time as well) is completely irrelevant with weight C and norm p.
+
+Linear Computational Cost Solver for Primal SVM
+
+4
+
+4
+
+3
+
+10
+
+2
+
+10
+
+1
+
+10
+
+Solving L2−primal SVM by the Exact SVM−ALM
+
+5
+
+10
+
+4
+
+10
+Training Time (Seconds)
+
+Training Time (Seconds)
+
+1
+
+10
+
+Solving L2−primal SVM by the Inexact SVM−ALM
+
+5
+
+10
+
+10
+Training Time (Seconds)
+
+2
+
+10
+
+Solving L1−primal SVM by the Exact SVM−ALM
+
+5
+
+10
+
+UCI Forest
+ijcnn1
+Webpage
+UCI Connect−4
+SensIT Vehicle (acoustic)
+SensIT Vehicle (seismic)
+Shuttle
+UCI Poker
+Epsilon
+
+10
+Training Time (Seconds)
+
+Solving L1−primal SVM by the Inexact SVM−ALM
+
+3
+
+10
+
+3
+
+10
+
+2
+
+10
+
+1
+
+10
+
+3
+
+10
+
+2
+
+10
+
+1
+
+10
+
+0
+
+10
+
+0
+
+0
+
+10
+
+−1
+
+10
+
+−1
+
+2
+
+10
+
+3
+
+4
+
+10
+10
+Number of Training Samples
+
+5
+
+10
+
+10
+
+0
+
+10
+
+10
+
+−1
+
+2
+
+10
+
+3
+
+4
+
+10
+10
+Number of Training Samples
+
+5
+
+10
+
+10
+
+−1
+
+2
+
+10
+
+3
+
+4
+
+10
+10
+Number of Training Samples
+
+5
+
+10
+
+10
+
+2
+
+10
+
+3
+
+4
+
+10
+10
+Number of Training Samples
+
+5
+
+10
+
+Figure 1. Training time of the proposed exact SVM-ALM (Algorithm 1) and inexact SVM-ALM (Algorithm 2) as a function of n.
+
+4.2. Prediction Accuracy Comparison between Exact
+and Inexact SVM-ALM Algorithms
+A natural drawback of the Inexact SVM-ALM Algorithm
+is that it still requires µ augments to infinity for obtaining the exact optimal solution, as analyzed in the proof of
+Theorem 2. This property is similar to the IT algorithms
+(Wright et al., 2009). However, owing to precision limit
+as discussed in §2, µ cannot increase to infinity in practical implementations of the Inexact SVM-ALM Algorithm
+2. So a potential concern is that the speedup of the Inexact
+SVM-ALM over the Exact SVM-ALM comes at the expense of prediction accuracies, but this is not the case in
+fact, as verified experimentally in this subsection.
+Fig. 2 shows the difference in terms of prediction accuracy
+between the classification models produced by the inexact
+SVM-ALM and the exact SVM-ALM. For better readability, the axis of C is plotted in log-scale, and the difference
+is shown in terms of percentage points. A positive value
+indicates that the inexact SVM-ALM has higher prediction
+accuracy, while a negative value indicates that the exact
+SVM-ALM performs better. For almost all values of C
+both algorithms perform almost identically. In particular,
+there is no indication that the models learned by the inexact SVM-ALM are less accurate. Contrarily, the prediction
+accuracy of the inexact SVM-ALM may be slightly better
+than that of the exact SVM-ALM, and such phenomena is
+reasonable because it has been reported that some implementations of SVM solvers achieve higher accuracy before
+the objective function reaches its minimal (Chang et al.,
+2008).
+4.3. Training Time Comparison
+The proposed Algorithm 2 is compared with the state of the
+art solvers SVMperf , Pegasos, BMRM (Bundle Method for
+Regularized Risk Minimization) (Teo et al., 2010) and the
+LibLinear that integrates the TRON, PCD and DCD algorithms.
+The L1-primal SVM cannot be solved by the PCD (Chang
+et al., 2008), because its objective function Eq.(2) is nondifferentiable. Thus the PCD is missing from the test for
+
+the L1-primal SVM. As a convention (Joachims, 2006)
+(Shalev-Shwartz et al., 2007) (Chang et al., 2008) (Hsieh
+et al., 2008) (Lin et al., 2008), SVMperf , Pegasos and the
+TRON method are typically only tested for the L1-primal
+SVM.
+Because the TRON, PCD and DCD algorithms do not support the bias term b, we extend each instance by an additional dimension with a large constant T = 103 , as instructed in (Hsieh et al., 2008; Lin et al., 2008). As long
+as the constant T in the additional dimension is sufficiently
+large, such conversion is equivalent to supporting the training of the bias term b.
+With the same settings as in (Chang et al., 2008) (Hsieh
+et al., 2008) we compare the L1-SVM and L2-SVM solvers
+in term of the training time to reduce the objective function
+obj(·) such that the relative difference of obj to the optimum obj ∗ , (obj − obj ∗ )/|obj ∗ |, is within 0.01. In order
+to obtain the reference solutions, we run TRON with the
+stopping condition ∇obj(w) ≤ 0.01. Since the objective
+functions are stable under such strict stopping conditions,
+these solutions are seen to be very close to the ground-truth
+optima. The results are listed in Tables 2 and 3, from which
+it is seen that, the proposed algorithm is with stable performance and on average faster than its competitors. The advantage of the propose algorithm is more obvious for large
+datasets, such as the UCI Forest, SensIT Vehicle, and UCI
+Poker datasets. The DCD algorithm is not stable, as it may
+get stuck at some testcases but converges extremely fast at
+other testcases. When the dimensionality of features increases to 2000 as the Epsilon data, our algorithm still performs well, and is the fastest solver for L1-SVM and the
+second fastest solver for L2-SVM.
+4.4. The Optimal p for Lp-Primal SVM
+A natural advantage of our proposed algorithms is that, it
+can solve the primal SVM with Lp-norm loss functions for
+any p≥1. It is not difficult to understand the fact that,
+it should be coincidental for either p=1 or p=2 to make
+the prediction accuracy of the Lp-primal SVM the highest
+among all possible p values.
+
+Linear Computational Cost Solver for Primal SVM
+L2−primal SVM
+2
+
+1.5
+
+1.5
+
+1
+
+Prediction accuracy difference(%)
+
+Prediction accuracy difference(%)
+
+L1−primal SVM
+2
+
+0.5
+
+0
+
+−0.5
+
+−1
+
+−1.5
+
+−2
+0
+10
+
+UCI Forest
+ijcnn1
+Webpage
+UCI Connect−4
+SensIT Vehicle (acoustic)
+SensIT Vehicle (seismic)
+Shuttle
+UCI Poker
+Epsilon
+1
+
+10
+
+2
+
+10
+
+1
+
+0.5
+
+0
+
+−0.5
+
+−1
+
+−1.5
+
+3
+
+10
+C
+
+4
+
+10
+
+5
+
+10
+
+6
+
+10
+
+−2
+0
+10
+
+1
+
+10
+
+2
+
+10
+
+3
+
+10
+C
+
+4
+
+10
+
+5
+
+10
+
+6
+
+10
+
+Figure 2. Prediction accuracy difference between the inexact SVM-ALM (Algorithm 2) and the exact SVM-ALM (Algorithm 1) for
+L1-primal and L2-primal SVMs as a function of C.
+
+Table 1. The training time (seconds) for an L1-SVM solver to reduce obj(·) to within 1% of the optimal value. Though the training time of the proposed algorithms is irrelevant with C, the training time of SVMperf , TRON, PCD and DCD may be affected by
+C. Following (Chang et al., 2008) and (Hsieh et al., 2008), we
+set C = 1 for fair comparison. The training time is measured and
+averaged over 10 runs. The solver with the shortest running time
+is boldfaced.
+DATASET
+F OREST
+IJCNN 1
+W EBPAGE
+C ONNECT-4
+S ENS IT (A)
+S ENS IT (S)
+S HUTTLE
+P OKER
+E PSILON
+
+O UR P EGASOS SVMperf
+4.1
+74.1
+139.2
+3.2
+87.9
+105.6
+4.6
+38.3
+62.1
+2.6
+54.2
+122.6
+3.9
+128.7
+399.8
+3.9
+109.3
+335.9
+1.2
+29.6
+66.6
+4.9
+107.4
+303.1
+31.1 396.4
+>500
+
+DCD BMRM
+>500 51.8
+7.8
+63.5
+3.6
+30.2
+>500 42.9
+17.0 102.5
+11.1
+85.2
+2.2
+20.6
+>500 80.6
+93.2 315.2
+
+Thus we conduct an interesting experiment showing this
+phenomenon. Because existing SVM solvers cannot solve
+the Lp-primal SVM for p6=1 or 2, we believe that we are
+the first to report such results in Table 3.
+
+Table 2. The training time (seconds) for an L2-SVM solver to reduce obj(·) to within 1% of the optimal value when C = 1, the
+same as in Table 1. The training time is measured and averaged
+over 10 runs. The solver with the shortest running time is boldfaced.
+DATASET
+O UR TRON PCD DCD BMRM
+F OREST
+3.9
+92.3
+10.0 >500
+50.6
+IJCNN 1
+3.2
+7.7
+3.4
+7.5
+64.2
+W EBPAGE
+4.4
+2.2
+0.9
+3.9
+32.1
+C ONNECT-4 2.7
+10.4
+3.9 >500
+39.7
+S ENS IT (A) 3.9
+27.7
+5.3
+17.5
+99.8
+S ENS IT (S)
+3.7
+28.1
+4.9
+10.9
+86.1
+S HUTTLE
+1.2
+3.6
+0.9
+2.4
+21.1
+P OKER
+5.1
+59.7
+7.1 >500
+79.8
+E PSILON
+32.6 241.9 16.9 83.2
+329.2
+Table 3. Prediction accuracy of L1-SVM, L2-SVM and Lp-SVM,
+where p is tuned by trying the parameter set {1, 1.1, 1.2, 1.3, 1.4,
+1.5, 1.6, 1.7, 1.8, 1.9, 2}.
+DATASET
+F OREST
+IJCNN 1
+W EBPAGE
+C ONNECT-4
+S ENS IT (A)
+S ENS IT (S)
+S HUTTLE
+P OKER
+E PSILON
+
+L1-SVM
+68.1%
+67.3%
+57.3%
+49.3%
+43.5%
+41.6%
+35.9%
+31.5%
+42.9%
+
+L2-SVM
+65.3%
+74.2%
+59.7%
+44.9%
+45.9%
+42.4%
+29.7%
+33.8%
+40.3%
+
+Lp-SVM
+71.0%
+74.6%
+63.4%
+51.8%
+47.3%
+46.8%
+36.1%
+36.9%
+44.6%
+
+p
+1.3
+1.9
+1.6
+1.2
+1.8
+1.6
+1.1
+1.7
+1.4
+
+5. Conclusion
+This paper proposed a novel linear computational cost primal SVM solver using the ALM algorithm for both the L1norm and the L2-norm loss functions. To avoid the difficulty of dealing with piecewise loss functions, an auxiliary
+vector is introduced such that in each iteration, the auxiliary
+vector and the support vector are alternatively optimized
+with the direction of Lagrange multipliers. In extensive
+experiments, our approach is consistently faster than other
+state-of-the-art solvers. From the methodological perspective, the proposed algorithm is novel and totally different
+from existing literatures.
+
+Acknowledgments
+Corresponding Author: Heng Huang (heng@uta.edu)
+This work was partially supported by US NSF IIS1117965, IIS-1302675, IIS-1344152.
+
+References
+Bottou, Leon. Stochastic gradient descent examples, 2007.
+http://leon.bottou.org/projects/sgd.
+Chang, Chih-Chung and Lin, Chih-Jen. Ijcnn 2001 chal-
+
+Linear Computational Cost Solver for Primal SVM
+
+lenge: Generalization ability and text decoding.
+IJCNN, pp. 1031–1036, 2001.
+
+In
+
+Mangasarian, Olvi L. A finite newton method for classification. Optimization Methods and Software, 17(5):913–
+929, 2002.
+
+Chang, Chih-Chung and Lin, Chih-Jen.
+LIBSVM:
+Platt, John C. Fast training of support vector machines
+A library for support vector machines.
+ACM
+using sequential minimal optimization. In Advances in
+TIST, 2(3):27:1–27:27, 2011. Software available at
+http://www.csie.ntu.edu.tw/ cjlin/libsvm. Kernel Methods: Support Vector Learning, pp. 185–208,
+1999.
+Chang, Kai-Wei, Hsieh, Cho-Jui, and Lin, Chih-Jen. CoorShalev-Shwartz, Shai, Singer, Yoram, and Srebro, Nathan.
+dinate descent method for large-scale L2-loss linear svm.
+Pegasos: primal estimated subgradient solver for svm.
+JMLR, 9:1369–1398, 2008.
+In ICML, pp. 807C814, 2007.
+Collobert, R., Bengio, S., and Bengio, Y. A parallel mixture
+Smola, Alex J., Vishwanathan, S. V. N., and Le, Quoc.
+of svms for very large scale problems. Neural ComputaBundle methods for machine learning. In NIPS, pp.
+tion, 14(5):1105–1114, 2002.
+1377–1384, 2008.
+Duarte, M. and Hu, Y. H. Vehicle classification in disSonnenburg, Soeren, Franc, Vojtech, Yom-Tov, Elad, and
+tributed sensor networks. JPDC, 64(7):826–838, 2004.
+Sebag, Michele. Pascal large scale learning challenge,
+Fan, Rong-En, Chang, Kai-Wei, Hsieh, Cho-Jui, Wang,
+Xiang-Rui, and Lin, Chih-Jen. Liblinear: A library for
+large linear classification. JMLR, 9:1871–1874, 2008.
+Frank, A. and Asuncion, A. Uci machine learning repository, 2010. http://archive.ics.uci.edu/ml.
+Gill, Philip E. and Robinson, Daniel P. A primal-dual
+augmented lagrangian. Computational Optimization and
+Applications, 51(1):1–25, 2012.
+Hsieh, Cho-Jui, Chang, Kai-Wei, Keerthi, S. Sathiya, Sundararajan, S., and Lin, Chih-Jen. A dual coordinate descent method for large-scale linear svm. In ICML, pp.
+408–415, 2008.
+Hsu, Chih-Wei and Lin, Chih-Jen. A comparison of methods for multi-class support vector machines. IEEE TNN,
+13(2):415–425, 2002.
+Joachims, Thorsten. Training linear svms in linear time. In
+KDD, pp. 217–226, 2006.
+Keerthi, S. Sathiya and DeCoste, Dennis. A modified finite newton method for fast solution of large scale linear
+svms. JMLR, 6:341–361, 2005.
+Lin, Chih-Jen, Weng, Ruby C., and Keerthi, S. Sathiya.
+Trust region newton method for large-scale logistic regression. JMLR, 9:627–650, 2008.
+Lin, Zhouchen, Chen, Minming, Wu, Leqin, and Ma, Yi.
+The augmented lagrange multiplier method for exact recovery of corrupted low-rank matrices. 2009.
+Mangasarian, O. L. and Musicant, David R. Lagrangian
+support vector machines. Journal of Machine Learning
+Research, 1:161–177, 2001.
+
+2008. http://largescale.ml.tu-berlin.de.
+Teo, Choon Hui, Vishwanathan, S.V.N., Smola, Alex, and
+Le, Quoc V. Bundle methods for regularized risk minimization. JMLR, 11:311–365, 2010.
+Wright, John, Ganesh, Arvind, Rao, Shankar, and Ma, Yi.
+Robust principal component analysis: exact recovery of
+corrupted low-rank matrices by convex optimization. In
+NIPS, pp. 2080–2088, 2009.
+Zhang, Tong. Solving large scale linear prediction problems using stochastic gradient descent algorithms. In
+ICML, pp. 919–926, 2004.
+
+

@@ -1,0 +1,1350 @@
+Landmarking Manifolds with Gaussian Processes
+
+Dawen Liang
+John Paisley
+Department of Electrical Engineering, Columbia University, New York, NY, USA
+
+Abstract
+We present an algorithm for finding landmarks
+along a manifold. These landmarks provide a
+small set of locations spaced out along the manifold such that they capture the low-dimensional
+nonlinear structure of the data embedded in the
+high-dimensional space. The approach does not
+select points directly from the dataset, but instead
+we optimize each landmark by moving along the
+continuous manifold space (as approximated by
+the data) according to the gradient of an objective function. We borrow ideas from active learning with Gaussian processes to define the objective, which has the property that a new landmark is “repelled” by those currently selected,
+allowing for exploration of the manifold. We derive a stochastic algorithm for learning with large
+datasets and show results on several datasets, including the Million Song Dataset and articles
+from the New York Times.
+
+1. Introduction
+In data analysis problems, a typical goal is to learn the
+underlying structure of a dataset, whether it be its statistical properties, latent patterns or the shape of the data itself. For example, Bayesian methods hypothesize a generative model for the data in which latent variables capture
+information about certain structural properties assumed to
+exist a priori. One common property is that the data
+lies on or near a manifold, which is a nonlinear, lowdimensional space embedded in a high-dimensional ambient space. For example, images of faces or normalized
+word histograms of documents may have several thousand
+dimensions, but be restricted in the way they vary within
+that high-dimensional space based on the intrinsic properties of the data-generating processes.
+Proceedings of the 32 nd International Conference on Machine
+Learning, Lille, France, 2015. JMLR: W&CP volume 37. Copyright 2015 by the author(s).
+
+DLIANG @ EE . COLUMBIA . EDU
+JPAISLEY @ COLUMBIA . EDU
+
+In this paper we consider the problem of landmarking manifolds; that is, finding a subset of locations evenly spaced
+along a manifold that captures its low-dimensional, nonlinear characteristics. Learning the overall structure of a
+manifold by focusing on local information has many uses,
+whether it is learning a low-dimensional embedding of
+the data (Roweis & Saul, 2000; Tenenbaum et al., 2000;
+Ng et al., 2001), finding relevant observations from the
+dataset for supervised learning (Cortes & Vapnik, 1995;
+Tipping, 2001) or unsupervised learning (Silva et al., 2005;
+Li & Hao, 2009; Cai & He, 2012; Vladymyrov & CarreiraPerpinán, 2013), or for active learning problems (Kapoor
+et al., 2007; Paisley et al., 2010; Li et al., 2014).
+Previous manifold landmarking approaches focus on selecting a subset of points from within the dataset that characterizes the manifold (Silva et al., 2005; Li & Hao, 2009;
+Vladymyrov & Carreira-Perpinán, 2013). Related supervised approaches such as sparse regression models (Tipping, 2001) implicitly do so as well. Such approaches assume that the dataset provides a densely sampled representation of the manifold, which may not always be the case.
+Furthermore, these methods typically require either a full
+kernel constructed from pairwise distances, or the evaluation of a function using all data points, both of which can be
+computationally prohibitive as the size of the dataset grows.
+We present an unsupervised method for finding points
+along the space of a manifold that does not encounter these
+issues. Our approach learns landmarks that can fall anywhere in the continuous ambient space, but will lie along
+the manifold as approximated by the noisy data. The approach greedily learns these locations by optimizing a sequence of objective functions that naturally “repels” each
+new location from the previously selected ones. The objective function is motivated by a simple active learning method using Gaussian processes (Cohn et al., 1996;
+Rasmussen, 2006; Kapoor et al., 2007). This supervised
+method selects the next location to measure according to
+the level of uncertainty in the predicted response. Interestingly, previous measurements are not used to determine
+this and so the selection process itself is unsupervised. We
+modify this algorithm to efficiently explore manifolds.
+
+Landmarking Manifolds with Gaussian Processes
+13
+
+11
+11
+
+13
+
+5
+
+2
+
+7
+
+2
+
+15
+9
+
+15
+
+4
+
+10
+
+12
+
+4
+
+10
+
+1
+
+1
+
+15
+
+6
+
+3
+
+6
+
+11
+
+12
+
+9
+
+11
+
+12
+
+4
+8
+3
+
+2
+
+8
+
+12
+
+5
+
+3
+
+1
+
+5
+
+2
+
+14
+1
+
+6
+
+9
+
+14
+
+8
+
+4
+
+15
+
+10
+
+14
+13
+
+8
+
+10
+
+6
+
+7
+
+13
+
+3
+
+7
+
+7
+
+5
+
+14
+
+9
+
+(a) Active learning
+
+(b) Manifold landmarking
+
+Figure 1. Landmarking and active learning with two toy manifolds. (a) The first 15 points selected by the active learning procedure in
+Section 2. (b) The first 15 points selected using the continuous ambient space landmarking approach of Section 3. The landmarks in (b)
+do not correspond exactly to any observation, but instead converged to these locations using gradient methods.
+
+In the remainder of the paper, in Section 2 we review active
+learning with Gaussian processes for supervised learning
+problems and motivate this as a good approach for unsupervised manifold learning as well. In Section 3 we use
+this as a starting point for developing our landmarking algorithm. We present a stochastic inference algorithm for
+finding these landmarks with large datasets in Section 4 using a specific kernel mapping. In Section 5 we evaluate our
+method on image datasets, the Million Song Dataset, and
+1.8 million articles from the New York Times.
+
+2. Active learning with Gaussian processes
+Our unsupervised method uses ideas from active learning with Gaussian processes as a starting point and so we
+briefly review this approach. Assume we have a dataset
+(x1 , y1 ), . . . , (xn , yn ), where y is a response associated
+with location x ∈ Rd . We also have a set D = {x} of locations without the corresponding responses y. Active learning seeks to pick the next location xn+1 ∈ D for which
+to query yn+1 such that a large amount of information is
+gained according to some measure. In the Gaussian process regression setting, where y is a real-valued number
+(possibly latent), this can be done by selecting xn+1 for
+which the uncertainty of yn+1 is greatest as measured by
+the variance of yn+1 .
+We recall that y(x) is a Gaussian process (GP) (Rasmussen,
+2006) if all marginals evaluated at a finite set of locations
+are multivariate Gaussian distributed. A GP is defined by
+a mean function m(x) = E[y(x)] and covariance function k(x, x0 ) = E[(y(x) − m(x))(y(x0 ) − m(x0 ))], also
+called a kernel. Assuming a Gaussian process, the vector
+y = [y(x1 ), . . . , y(xn )]T discussed above is therefore distributed as
+y ∼ N (m, K),
+
+(1)
+
+with m = [m(x1 ), . . . , m(xn )]T and Kij = k(xi , xj ). We
+will assume that m(x) = 0 in this paper.
+
+Let the set Dn contain the first n measured locations,
+x1 , . . . , xn , and Kn be the kernel matrix constructed from
+points in Dn . Given (x1 , y1 ), . . . , (xn , yn ), the value y(x)
+at a new x is distributed as
+y(x) | y
+
+∼
+
+N (ξ(x), Σ(x)) ,
+
+ξ(x)
+
+=
+
+k(x, Dn )Kn−1 y,
+
+Σ(x)
+
+=
+
+k(x, x) − k(x, Dn )Kn−1 k(x, Dn )T ,
+
+(2)
+
+where k(x, Dn ) = [k(x, x1 ), . . . , k(x, xn )]. To pick the
+next location x ∈ D for measuring y, one can simply select
+the point with the greatest uncertainty,
+xn+1 = arg max k(x, x)−k(x, Dn )Kn−1 k(x, Dn )T . (3)
+x∈D
+
+When k(x, xi ) = c · exp(−kx − xi k2 /η), the term k(x, x)
+is a constant. In this case, the selected point will have the
+smallest second term. We observe two properties of this
+objective function:
+1. It does not depend on the observed values of y.
+2. The sequence x1 , x2 , x3 , . . . is selected such that the
+space in which x resides is efficiently explored.
+The second property is because k(x, Dn ) penalizes closeness to previously selected locations. Since Kn is a PSD
+matrix, when x is not close to any point x0 ∈ Dn the value
+of k(x, x0 ) is nearly all zero and the second term becomes
+less negative. We illustrate this on two toy manifolds in
+Figure 1(a), where we show the first 15 points selected.
+
+3. Landmarking with Gaussian processes
+As shown in Figure 1(a), the active learning method described in Section 2 also provides a good approach to landmarking a manifold. However, this requires the landmarks
+to correspond exactly to observed locations, and also the
+evaluation of a kernel at (ideally) every point in the dataset.
+
+Landmarking Manifolds with Gaussian Processes
+
+For small, densely sampled and low-dimensional data this
+may be reasonable, but for bigger problems it has drawbacks. For example, in high dimensions data usually isn’t
+densely sampled, even if the manifold dimension is low relative to the ambient space. We may also believe a priori
+that a landmark shouldn’t correspond exactly to an observation, for example in face or document datasets, in which
+case we might want the landmark to be a local average of
+related faces, or the underlying topics of a corpus of documents. In these cases, we might wish to avoid selecting
+from the raw data regardless of the data size.
+We build on the ideas of Section 2 to derive an algorithm
+for finding relevant points along a manifold as defined by
+the observed noisy data. We demonstrate the output of
+the algorithm we will present on the same toy manifolds
+from Section 2 in Figure 1(b). We see that we again learn
+points evenly spaced along the manifolds, but this time
+those points are not required to correspond exactly to an observed location. Instead, we extend the objective function
+in Equation (3) to allow for a gradient method that converges to a local optimal location in the continuous manifold space as approximated by the data.
+Let M be a manifold in some ambient space S. (S is not
+necessarily Rd , for example, it can be the intersection of
+the unit sphere with the positive orthant.) Often M has a
+low-dimensional nonlinear structure. Let both µ and N be
+probability distributions on S, with the support of µ being
+constrained to the manifold M and N a zero mean noise
+process. We assume the observed data point x = x̂+ ∈ S,
+where x̂ ∼i.i.d µ and  ∼i.i.d. N ; that is, the data is a
+randomly selected point from the manifold corrupted by
+noise, which we assume to be small (Little et al., 2012).
+We define the kernel function between points t, t0 ∈ S as
+Z
+k(t, t0 ) =
+φx̂ (t)φx̂ (t0 )dµ(x̂).
+(4)
+x̂∈S
+
+In this paper we use φx̂ (t) = exp(−kt − x̂k2 /η). Notice
+that µ has support M, and so the integral is effectively over
+the manifold. This kernel function is closely related to the
+Gaussian kernel in Section 2, but will only consider t and
+t0 to be “close” (i.e., k(t, t0 ) will be “large”) according to
+the path between them along the manifold.
+This representation is problematic since we do not have the
+distribution µ, or even the samples x̂ ∼i.i.d. µ. We therefore approximate Equation (4) with the observed noisy data
+using a plug-in estimator,
+N
+1 ~ T~ 0
+1 X
+φxi (t)φxi (t0 ) := φ(t)
+φ(t ),
+k(t, t0 ) ≈
+N i=1
+N
+
+(5)
+
+In this case, the data serves a different purpose from Section 2. With this approach we are constructing k(t, t0 ) with
+
+any two points t, t0 from the continuous ambient space S,
+but restricting the kernel integral to the manifold. In Equation (5) the data x ∈ D allows us to approximate this manifold and helps define what is being integrated out, whereas
+using a Gaussian kernel in the framework of Section 2, the
+kernel is evaluated at the data points and the implied integral is over Rd with dµ(x) → dx.
+Returning briefly to the ideal setting, given n selected landmarks Tn = {t1 , . . . , tn } from S, let Kn be the pairwise
+kernel matrix of points in Tn using Equation (4). As with
+active learning in Section 2, the goal is to select a new t
+that is informative according to the objective function,
+tn+1 = arg max k(t, t) − k(t, Tn )Kn−1 k(t, Tn )T .
+t∈S
+
+(6)
+
+However, since we cannot calculate k exactly, we estimate each of these values with the plug-in approximation of
+~ 1 ), . . . , φ(t
+~ n )],
+Equation (5). Defining the matrix Φ = [φ(t
+we can approximate tn+1 as
+~ T φ(t)
+~ − φ(t)
+~ T Φ(ΦT Φ)−1 ΦT φ(t).
+~
+tn+1 ≈ arg max φ(t)
+t∈S
+
+(7)
+This objective function can be interpreted as selecting the
+~ exvalue of t such that the high-dimensional mapping φ(t)
+tends the greatest Euclidean distance into the null space defined by Φ. This can be seen by rewriting the objective in
+~ T (I −Φ(ΦT Φ)−1 ΦT )φ(t):
+~
+Equation (7) as φ(t)
+the product
+T
+−1 T ~
+~
+(I − Φ(Φ Φ) Φ )φ(t) projects φ(t) into the null space
+of Φ, and so the objective is equal to the squared magnitude
+~ is calculated using the data,
+of this projection. Since φ(t)
+we can see that tn+1 should be close to many x ∈ D, but
+this set of points ideally will be disjoint from those used to
+~ 1 ), . . . , φ(t
+~ n ).
+define the span of φ(t
+
+4. A stochastic algorithm for landmarking
+We next present an algorithm for finding the sequence of
+landmarks t1 , t2 , . . . , near the manifold M. Since t can
+be any point in the continuous ambient space S, we cannot simply evaluate over all possible values as done with
+the active learning approach in Section 2. Furthermore, the
+objective function in Equation (7) does not have a simple
+closed form solution, and the number of observations N
+~ at each observed point
+may be too large to construct φ(t)
+in practice. We therefore derive a stochastic gradient algorithm for learning each value of t (Bottou, 1998).
+For point tn+1 , we rewrite the objective in Equation (7) as
+fn (t, D)
+
+=
+
+N X
+N
+X
+
+Mij φxi (t)φxj (t),
+
+(8)
+
+i=1 j=1
+
+Mij
+
+=
+
+δij − Φ(ΦT Φ)−1 ΦT
+
+
+ij
+
+,
+
+with δij a delta function indicating whether i = j. A simple
+
+Landmarking Manifolds with Gaussian Processes
+
+Algorithm 1 Manifold landmarking with GPs
+(1)
+
+1: To find landmark tn+1 given t1 , . . . , tn , initialize tn+1
+
+and do the following:
+2: for s = 1, . . . S do
+3: Randomly subsample a set Bs of observations x ∈ D.
+~ s (tk ) using x ∈ Bs and the
+4: For each tk , construct φ
+
+function φx (tk ) = exp(−kx − tk k2 /η).
+~ s (t1 ), . . . , φ
+~ s (tn )] and set
+5: Define the matrix Φ = [φ
+M = I − Φ(ΦT Φ)−1 ΦT .
+P
+6: Let fn (t, Bs ) = xi ,xj ∈Bs Mij φxi (t)φxj (t).
+
+Figure 2. The first eight landmarks from the Yale faces dataset.
+
+(s)
+
+Calculate γ = tn+1 + ρs ∇t fn (t, Bs )|t(s) using
+n+1
+Equation (10) and step size ρs .
+(s+1)
+8: Project γ onto S ⊆ Rd to obtain tn+1 .
+9: end for
+
+7:
+
+projected gradient method (Bertsekas, 1999) for maximizing fn is to iterate between the following two steps:
+(s)
+
+γ = tn+1 + ρs ∇t fn (t, D)|tn+1 ,
+
+(s+1)
+
+tn+1 = ProjS (γ), (9)
+
+where ρs is a step size and ProjS (·) is the projection onto
+the feasible set S ⊂ Rd . (When S = Rd , this step is unnecessary.) For the non-convex objective in Equation (8), this
+procedure will converge to a local optimal solution.
+When φx (t) = exp(−kt − xk2 /η), the gradient of fn is
+
+
+N X
+N
+X
+xi + xj
+4Mij
+∇ t fn = −
+t−
+φxi (t)φxj (t).
+η
+2
+i=1 j=1
+(10)
+We observe that symmetry can be exploited to efficiently
+calculate this vector in practice.
+The more data that is available, the better defined the sampled manifold M will be, which will help learn better
+landmarks. However, when the number of observations is
+~ can be prohibitively
+very large, calculating the vectors φ(t)
+slow. The final step of our algorithm is to perform stochastic gradient optimization of fn (t, D) by randomly subsampling a subset of points Bs ⊂ D at step s and approxi1
+mating the gradient of
+Pfn . To ensure
+Pconvergence, we use
+step sizes such that s |ρs | = ∞, s ρ2s < ∞ (Robbins
+& Monro, 1951). We summarize the final algorithm for
+manifold landmarking in Algorithm 1.
+
+For the music and text problems, the data consists of vectors that lie on the intersection of the unit sphere with the
+positive orthant, which is a result of the data processing discussed later. For both of these problems our projection onto
+S is made accordingly. For all problems we use a step size
+of ρs = (s0 + s)−τ with s0 = 10 and τ = 0.51. The algorithm was robust to changes in these values. We take 1000
+steps for each landmark and use batch size |Bs | = 1000
+P unless noted otherwise. We set the kernel width η = i σ̂i2 ,
+where σ̂i2 is an empirical approximation of the variance of
+the ith dimension of the data. To initialize each landmark,
+we draw from a Gaussian with the empirical mean and diagonal covariance of the data.
+5.1. Qualitative evaluation
+We evaluate our method qualitatively on two face datasets.
+In Figure 2 we show the first eight landmarks using 2,475
+images of size 42 × 48 from the Yale faces database2 . The
+dataset contains 165 images of various illuminations for
+15 people. We see that the first eight landmarks capture
+various illuminations of an average face that doesn’t correspond to any single person in the dataset.
+We also consider the larger PIE faces dataset, consisting of
+11,554 images of size 64 × 64 across 68 people with various illuminations and frontal poses. In Figure 3 we show
+a 2D embedding of 1,000 randomly selected images from
+the dataset, along with the first twenty landmarks learned
+from the full dataset, using the t-SNE algorithm (Van der
+Maaten & Hinton, 2008). It is evident that the landmarks
+effectively explore the space where the data resides. We
+also show the five closest faces to some of the landmarks.
+We again see averages of various genders and ethnicities
+for different poses and illuminations.
+
+We evaluate our manifold landmarking algorithm on images, text and music data. For images, we consider the data
+as lying near a manifold in the ambient space S = Rd+ .
+
+We show running times for the PIE data in Figure 4(a) for
+32 × 32 and 64 × 64 images. We see that the time to learn
+a new landmark increases as the number of existing landmarks increases, due to the larger size of the matrix inversions and products in Equation (10). We also observe that
+
+1
+We observe that the original gradient is stochastic as well by
+approximating M with a noise-corrupted x̂ ∼i.i.d. µ.
+
+2
+http://www.cad.zju.edu.cn/home/dengcai/
+Data/FaceData.html
+
+5. Experiments
+
+Landmarking Manifolds with Gaussian Processes
+
+12
+20
+15
+
+5
+
+3
+
+19
+8
+
+7
+
+10
+
+16
+
+11
+6
+
+4
+1
+17
+
+14
+
+2
+
+9
+13
+
+18
+
+Figure 3. A 2D embedding of 1,000 randomly selected images from the PIE faces dataset (black dots), along with the first twenty
+landmarks (numbered red dots), using t-SNE algorithm (Van der Maaten & Hinton, 2008). For some of the landmarks, we also show the
+closest five faces. The landmarks locally average along the manifold (see later quantitative comparison with k-means).
+
+Minutes per
+1000 steps
+
+as the dimensionality increases, the running time increases.
+
+1.6
+1.4
+1.2
+1.0
+0.8
+0.6
+0.4
+0.2
+0
+
+64 x 64
+
+32 x 32
+20
+
+40
+60
+Location number
+
+80
+
+100
+
+Minutes per 1000 steps
+
+(a) Runtime for PIE
+
+We also consider a corpus of roughly 1.8 million documents from the New York Times, as well as the 20 Newsgroup data set. For this data, we set each data point xd near
+the manifold to be the square root of the normalized word
+histogram constructed using a vocabulary size of 8000 and
+1545, respectively. That is, if wdn is the index of the nth
+word in the dth document and document d has nd total
+words, then we set
+sP
+n 1(wdn = j)
+xd (j) =
+.
+(11)
+nd
+
+8
+
+jBs j =2000
+
+7
+6
+5
+4
+
+jBs j =1000
+
+3
+
+jBs j =500
+jBs j =250
+
+2
+1
+0
+0
+
+20
+
+40
+
+60
+
+80
+
+Location number
+
+100
+
+(b) Runtime for New York Times
+Figure 4. The running time for (a) PIE as a function of landmark
+number and image size and batch size |Bs | = 1000; (b) the New
+York Times dataset. Learning speed is comparable to scalable
+topic models such as online LDA (Hoffman et al., 2013).
+
+Each landmark t is also restricted to lie in this same space.
+The function φx (t) therefore uses the Hellinger distance to
+measure closeness between a landmark and a document.
+We can naturally interpret the square of the elements of t as
+a topic comparable to those learned by topic models. The
+meaning of a landmark can then be interpreted by showing
+the “most probable” words in the standard way. In Table
+1 we show the top words for the first 11 landmarks of the
+New York Times and the first 12 landmarks of 20 Newsgroup. As is clear, these landmarks correspond to thematically meaningful concepts such as “sports”, “food”, and
+“politics”. In Figure 4(b) we show the running time per
+
+Landmarking Manifolds with Gaussian Processes
+Table 1. (top) The “most probable” words for the first 11 landmarks learned on the 1.8 million document New York Times dataset.
+(bottom) The first 12 landmarks from the 20 Newsgroup dataset.
+t2
+
+t3
+
+inc
+net
+share
+reports
+earns
+qtr
+earnings
+
+beloved
+notice
+paid
+deaths
+wife
+loving
+mother
+
+t1
+
+t2
+
+t3
+
+good
+make
+ve
+work
+back
+
+windows
+dos
+card
+mb
+system
+
+team
+game
+year
+games
+season
+
+t4
+
+t5
+
+t6
+
+t7
+
+t8
+
+t9
+
+t10
+
+t11
+
+street
+sunday
+music
+avenue
+theater
+art
+museum
+
+treasury
+bills
+rate
+bonds
+bond
+notes
+municipal
+
+republican
+house
+bush
+senate
+political
+government
+democrats
+
+minutes
+add
+oil
+salt
+cup
+pepper
+tblspoon
+
+mrs
+daughter
+graduated
+married
+son
+father
+yesterday
+
+game
+season
+team
+games
+play
+second
+left
+
+percent
+market
+stock
+billion
+yesterday
+prices
+quarter
+
+film
+life
+man
+story
+book
+movie
+love
+
+t4
+
+t5
+
+t6
+
+t7
+
+t8
+
+t9
+
+t10
+
+t11
+
+t12
+
+turkish
+turks
+armenia
+soviet
+today
+
+encryption
+key
+technology
+government
+chip
+
+god
+jesus
+bible
+christ
+christians
+
+ftp
+file
+pub
+mail
+program
+
+car
+good
+cars
+price
+buy
+
+israel
+israeli
+jews
+arab
+state
+
+nasa
+gov
+space
+long
+orbit
+
+scsi
+drive
+ide
+mb
+hard
+
+gun
+guns
+weapons
+crime
+control
+
+landmark on New York Times for several different batch
+sizes on a laptop computer. As is to be expected, the time
+increases as batch size increases, but all experiments can be
+performed within a few hours on a single computer, which
+is comparable to scalable topic models such as online LDA
+(Hoffman et al., 2013).
+5.2. MNIST classification with landmarks
+One major distinction between our proposed method and
+active learning with Gaussian processes as described in
+Section 2 is that we allow the landmarks to move along
+the continuous ambient space S. From the low-dimensional
+toy examples in Figure 1, the advantage appears small because the data is dense on the manifold. In the next experiment, we quantitatively evaluate the landmarks learned
+from high-dimensional image data.
+We consider the handwritten digit classification problem
+on the MNIST dataset (LeCun et al., 1998), and use a
+low-dimensional representation from different landmark
+approaches to evaluate their performance.3 Given n selected landmarks Tn = {t1 , . . . , tn }, we compute the
+n-dimensional landmark-based feature for the image xd
+as w(x
+~ d ) = [φt1 (xd ), . . . , φtn (xd )]T where again we
+use φtk (xd ) = exp(−ktk − xd k2 /η). We perform `2 regularized logistic regression for classification. We use
+50,000 images for training to learn both the landmarks and
+to train the classifier. We use 10,000 images as a validation set to select the regularization parameter among
+λ = {0.001, 0.01, . . . , 1000}, and another 10,000 images
+for classification testing.
+3
+This is intended to quantitatively compare methods in the
+same “domain”, and not argue for our approach as a state-of-theart dimensionality reduction technique.
+
+0.95
+0.94
+
+Test Accuracy
+
+t1
+percent
+going
+national
+public
+life
+ago
+house
+
+0.93
+0.92
+0.91
+
+Rand
+Act5K
+ML
+
+0.90
+0.89
+0.88
+
+50
+
+60
+
+70
+80
+# manifold locations
+
+90
+
+100
+
+Figure 5. Test accuracy on MNIST with different landmarkderived features.
+
+In addition to our landmarking approach, we consider two
+other approaches for obtaining landmarks, Tn :
+1. Random selection: This serves as a baseline. We simply randomly select n data points as the landmarks.
+2. Active learning: The landmarks are selected using
+Equation (3). However, since this requires constructing the kernel matrix, which cannot be entirely read
+into memory even for moderate-sized datasets, we
+first subsample the digits and select landmarks from
+within this group using active learning. Here we report results on a 5,000-image subset. (We note the
+results are similar with other subsample sizes.)
+We show the test accuracy as a function of the number of
+landmarks for our manifold landmarking algorithm (ML),
+random selection (Rand), and active learning (Act5K) in
+Figure 5. Not surprisingly, randomly landmarking does the
+worst. On the other hand, our proposed method is consistently better than active learning, which indicates that in the
+high-dimensional ambient space, we benefit from allowing
+landmarks to fall on the continuous manifold between data
+points rather than correspond to exactly one of them.
+
+F-score
+
+Landmarking Manifolds with Gaussian Processes
+0.17
+0.16
+0.15
+0.14
+0.13
+0.12
+0.11
+0.10
+0.09
+0.08
+
+J =256
+
+10
+
+50
+
+100
+
+150
+
+200
+
+0.78
+
+AROC
+
+0.14
+
+0.16
+
+0.12
+
+0.15
+
+0.10
+
+0.14
+
+0.08
+
+0.13
+10
+
+50
+
+100
+
+150
+
+200
+
+0.66
+0.64
+
+10
+
+50
+
+100
+
+150
+
+200
+
+300
+
+400
+
+50
+
+100
+
+200
+
+300
+
+400
+
+50
+
+100
+
+200
+
+300
+
+400
+
+0.74
+
+0.68
+
+0.68
+
+200
+
+0.75
+
+0.70
+
+0.66
+
+100
+
+0.76
+
+0.72
+
+0.72
+
+50
+
+0.77
+
+0.74
+
+0.70
+
+0.12
+0.78
+
+0.76
+
+0.76
+
+MAP
+
+0.17
+
+0.06
+
+J =1024
+
+0.18
+
+0.78
+
+0.74
+
+0.17
+0.16
+0.15
+0.14
+0.13
+0.12
+0.11
+0.10
+0.09
+0.08
+
+J =512
+
+0.18
+0.16
+
+0.73
+10
+
+50
+
+100
+
+150
+
+200
+
+0.72
+0.17
+
+0.16
+
+NMF
+Act5K
+
+10
+
+50
+
+100
+
+k-means
+ML
+
+150
+
+200
+
+0.16
+
+0.14
+
+0.15
+
+0.12
+
+0.14
+
+0.10
+
+0.13
+0.12
+
+0.08
+10
+
+50
+
+100
+
+150
+
+200
+
+0.11
+
+# manifold locations/latent components
+
+Figure 6. The annotation and retrieval performance of each algorithm with various codebook size, J. (Small amount of jitters is added
+for visualization.) For the feature derived from manifold landmarks (ML), active-learning-based landmarks (Act5K), k-means, and nonnegative matrix factorization (NMF), the metrics are reported with increasing number of landmarks/latent components. The straight line
+is the baseline performance of logistic regression trained on the raw VQ features. Error bars correspond to one standard error.
+
+5.3. Automatic Music tagging
+We use an automatic music tagging problem to further
+evaluate the performance of our algorithm on a more constrained ambient space.
+Automatic music tagging (Eck et al., 2007) is the task of
+analyzing the audio content (waveform) of a music recording and assigning to it human-relevant semantic tags concerning, e.g., style, genre or instrumentation. We perform
+experiments on the Million Song Dataset (Bertin-Mahieux
+et al., 2011) which contains the audio features and metadata
+(user tagging information from Last.fm) for one million
+songs. After preprocessing the data and removing songs
+with fewer than 20 tags from the test set, we obtained a
+dataset with 561 tags, 371,209 songs for training and 2,757
+songs for testing.
+Instead of directly working with the audio, we vector quantize features extracted from audio using the standard procedure: We run the k-means algorithm on a large subset of
+randomly selected feature vectors to learn J cluster centroids (codewords). For each song, we assign each feature vector extracted from the song to the cluster with the
+smallest Euclidean distance to the centroid, normalize a
+histogram of these quantizations on this codebook and take
+the square root to obtain a location xd for song d. This VQ
+
+approach (without taking the square root) has been successfully applied to the music tagging problem and achieved
+state-of-the-art results (Xie et al., 2011; Liang et al., 2014).
+We use Echo Nest’s timbre features provided in the Million
+Song Dataset to learn the codebook, which is similar to the
+widely used Mel-frequency cepstral coefficients (MFCCs).
+Since songs tend to have consistent timbre, the manifold
+approximated by xd should be lower dimensional than the
+ambient space, which in this case is the intersection of the
+unit sphere with the positive orthant.
+We treat music tagging as a binary classification problem:
+For each tag, we make independent predictions on whether
+the song is tagged with it or not. To this end, using the
+manifold landmarks learned from all xd , we vectorize the
+dth song as w(x
+~ d ) = [φt1 (xd ), . . . , φtn (xd )]T where again
+φtk (xd ) = exp(−ktk − xd k2 /η). Again this uses the
+Hellinger distance between two probability vectors.
+We evaluate the performance on an annotation and a retrieval task: For the annotation task we seek to automatically tag unlabeled songs. To evaluate the model’s ability to
+annotate songs, we compute the average per-tag precision,
+recall, and F-score on the held-out test set. For the retrieval
+task, given a query tag we seek to provide a list of songs
+which are related to that tag. To evaluate retrieval performance, for each tag in the vocabulary we ranked each song
+
+Landmarking Manifolds with Gaussian Processes
+
+in the test set by the predicted probability. We then calculate the area under the receiver-operator curve (AROC) and
+mean average precision (MAP) for each ranking.
+For both of these tasks, we use `2 -regularized logistic regression on the vectors w.
+~ Logistic regression has been
+shown to have state-of-the-art performance when applied
+directly on VQ features (Xie et al., 2011), which we use
+as our baseline. We also consider the following three approaches for comparison:
+Non-negative matrix factorization (NMF): NMF (Lee &
+Seung, 2001) learns a parts-based representation. If we
+consider the learned latent components as landmarks, it
+shares the same property with our algorithm: The landmarks do not have to correspond exactly to a data point.
+The difference is that NMF can only capture linear structure. We fit the unnormalized VQ histogram using NMF
+with Kullback-Leibler divergence cost function and use the
+weights from the learned factorization as features to train
+the logistic regression.
+Active learning: Similar to the MNIST experiment, we use
+Equation (3) to select landmarks from 5,000 subsampled
+songs and derive landmark-based feature as in Section 5.2.
+k-means: We also treat the centroids of k-means as landmarks. These centroids can also capture non-linear structure, but the absence of a kernel may result in centroids
+that fall well off of the manifold. Another key difference
+is that k-means does not enjoy the sequential property of
+our method, i.e., we learn landmarks in their order of informativeness, whereas k-means must be restarted if the number of clusters changes. We fit the data with k-means++
+(Arthur & Vassilvitskii, 2007) and treat the cluster centroids as landmarks, constructing landmark-based features
+in the same fashion as active learning and our proposed algorithm.
+We show results for both annotation and retrieval in
+Figure 6 for several codebook size. For each logistic regression model, we use 5-fold cross-validation to
+search for the best regularization parameter among λ =
+{0.001, 0.01, . . . , 1000}. As these plots show, the features
+derived from the proposed method consistently outperform those from other methods, regardless of the number
+of landmarks/latent components. Furthermore, the model
+trained on the landmark-derived features often outperforms
+the model trained on the raw VQ features. For example,
+with a codebook size J = 1024, we achieve similar results
+with only 100 locations (less than 10% of the original dimensionality) and significantly better with 200 locations.
+We note that similar results were observed for larger values
+of J.
+
+6. Conclusion and Discussion
+We have presented a method for finding landmarks on manifolds. Our approach borrows ideas from active learning
+with Gaussian processes to define an objective function for
+finding each landmark sequentially. We treat the data as
+noise-corrupted i.i.d. samples from some underlying distribution on the manifold, which we use to derive a stochastic gradient algorithm for finding landmarks near the manifold as approximately defined by these samples. This has
+the benefit of not requiring each landmark to correspond
+exactly to an observation, and allows for a fast stochastic
+learning algorithm.
+Currently, we set the kernel width η from a simple heuristic. As future work, we will investigate a joint optimization
+over all the landmarks, which could potentially reduce the
+influence on the choice of η. Also, as presented each location is learned in a greedy fashion and then fixed. However, a simple (but slower) extension for joint optimization
+would be to modify a previously learned landmark given
+the subsequent ones. This can have the advantage of further
+spacing out the landmarks to provide better coverage of the
+manifold. For example, in the “circles” manifold of Figure
+1(b) we see that landmarks 5, 9 and 11 are not spaced as
+well as might be desired. This is because landmarks 5 and
+9 were fixed after being learned, and landmark 11 represents a local optimal solution sensitive to these values. If
+we returned to landmark 9 and continued to step along the
+gradient given the subsequent landmarks, this point would
+move down the circle to be more evenly spaced between
+the 5th and 11th landmarks.
+
+References
+Arthur, David and Vassilvitskii, Sergei. k-means++: The
+advantages of careful seeding. In Proceedings of the
+eighteenth annual ACM-SIAM symposium on Discrete
+algorithms, pp. 1027–1035, 2007.
+Bertin-Mahieux, Thierry, Ellis, Daniel P. W., Whitman,
+Brian, and Lamere, Paul. The Million Song Dataset. In
+Proceedings of the International Society for Music Information Retrieval Conference, pp. 591–596, 2011.
+Bertsekas, Dimitri P. Nonlinear programming. Athena Scientific, 1999.
+Bottou, Léon. Online learning and stochastic approximations. On-line Learning in Neural Networks, 17(9),
+1998.
+Cai, Deng and He, Xiaofei. Manifold adaptive experimental design for text categorization. IEEE Trans. on Knowledge and Data Engineering, 24(4):707–719, 2012.
+Cohn, David A., Ghahramani, Zoubin, and Jordan,
+
+Landmarking Manifolds with Gaussian Processes
+
+Michael I. Active learning with statistical models. Journal of Artificial Intelligence Research, 4:129–145, 1996.
+Cortes, Corinna and Vapnik, Vladimir. Support-vector networks. Machine learning, 20(3):273–297, 1995.
+Eck, Douglas, Lamere, Paul, Bertin-Mahieux, Thierry, and
+Green, Stephen. Automatic generation of social tags for
+music recommendation. In Advances in Neural Information Processing Systems, pp. 385–392, 2007.
+Hoffman, Matthew D., Blei, David M., Wang, Chong, and
+Paisley, John. Stochastic variational inference. Journal
+of Machine Learning Research, 14(1):1303–1347, 2013.
+Kapoor, Ashish, Grauman, Kristen, Urtasun, Raquel, and
+Darrell, Trevor. Active learning with Gaussian processes
+for object categorization. In International Conference on
+Computer Vision, 2007.
+LeCun, Yann, Bottou, Léon, Bengio, Yoshua, and Haffner,
+Patrick. Gradient-based learning applied to document
+recognition. Proceedings of the IEEE, 86(11):2278–
+2324, 1998.
+
+Robbins, Herbert and Monro, Sutton. A stochastic approximation method. The Annals of Mathematical Statistics,
+pp. 400–407, 1951.
+Roweis, Sam T. and Saul, Lawrence K. Nonlinear dimensionality reduction by locally linear embedding. Science,
+290(5500):2323–2326, 2000.
+Silva, Jorge, Marques, Jorge S, and Lemos, João Miranda.
+Selecting landmark points for sparse manifold learning.
+In Advances in Neural Information Systems, 2005.
+Tenenbaum, Joshua B., De Silva, Vin, and Langford,
+John C. A global geometric framework for nonlinear dimensionality reduction. Science, 290(5500):2319–2323,
+2000.
+Tipping, Michael E. Sparse Bayesian learning and the relevance vector machine. The Journal of Machine Learning
+Research, 1:211–244, 2001.
+Van der Maaten, Laurens and Hinton, Geoffrey. Visualizing data using t-SNE. Journal of Machine Learning
+Research, 9:2579–2605, 2008.
+
+Lee, Daniel D. and Seung, H. Sebastian. Algorithms for
+non-negative matrix factorization. In Advances in neural
+information processing systems, pp. 556–562, 2001.
+
+Vladymyrov, Max and Carreira-Perpinán, Miguel Á. Locally linear landmarks for large-scale manifold learning.
+In European Conference on Machine Learning, 2013.
+
+Li, Cheng, Liu, Haifeng, and Cai, Deng. Active learning
+on manifolds. Neuroscience, 123:398–405, 2014.
+
+Xie, Bo, Bian, Wei, Tao, Dacheng, and Chordia, Parag.
+Music tagging with regularized logistic regression. In
+Proceedings of the International Society for Music Information Retrieval Conference, pp. 711–716, 2011.
+
+Li, Jun and Hao, Pengwei. Finding representative landmarks of data on manifolds. Pattern Recognition, 42
+(11):2335–2352, 2009.
+Liang, Dawen, Paisley, John, and Ellis, Daniel P. W.
+Codebook-based scalable music tagging with Poisson
+matrix factorization. In Proceedings of the International
+Society for Music Information Retrieval Conference, pp.
+167–172, 2014.
+Little, Anna V, Maggioni, Mauro, and Rosasco, Lorenzo.
+Multiscale geometric methods for data sets I: Multiscale
+SVD, noise and curvature. Technical report, Computer
+Science and Artificial Intelligence Laboratory, Massachusetts Institute of Technology, 2012.
+Ng, Andrew Y., Jordan, Michael I., and Weiss, Yair. On
+spectral clustering: Analysis and an algorithm. In Advances in Neural Information Processing Systems, 2001.
+Paisley, John, Liao, Xuejun, and Carin, Lawrence. Active
+learning and basis selection for kernel-based linear models: A Bayesian perspective. IEEE Trans. on Signal Processing, 58(5):2686–2700, 2010.
+Rasmussen, Carl E. Gaussian processes for machine learning. MIT Press, 2006.
+
+

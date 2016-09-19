@@ -1,0 +1,997 @@
+Taming the Monster: A Fast and Simple Algorithm for Contextual Bandits
+
+Alekh Agarwal
+Microsoft Research, New York, NY
+
+ALEKHA @ MICROSOFT. COM
+
+Daniel Hsu
+Columbia University, New York, NY
+
+DJHSU @ CS . COLUMBIA . EDU
+
+Satyen Kale
+Yahoo! Labs, New York, NY
+
+SATYEN @ SATYENKALE . COM
+
+John Langford
+Microsoft Research, New York, NY
+
+JCL @ MICROSOFT. COM
+
+Lihong Li
+Microsoft Research, Redmond, WA
+
+LIHONGLI @ MICROSOFT. COM
+
+Robert E. Schapire
+Princeton University, Princeton, NJ
+
+SCHAPIRE @ CS . PRINCETON . EDU
+
+Abstract
+We present a new algorithm for the contextual
+bandit learning problem, where the learner repeatedly takes one of K actions in response to
+the observed context, and observes the reward
+only for that action. Our method assumes access
+to an oracle for solving fully supervised costsensitive classification problems and achieves the
+statistically
+optimal regret guarantee with only
+√
+Õ( KT ) oracle calls across all T rounds. By
+doing so, we obtain the most practical contextual
+bandit learning algorithm amongst approaches
+that work for general policy classes. We conduct
+a proof-of-concept experiment which demonstrates the excellent computational and statistical
+performance of (an online variant of) our algorithm relative to several strong baselines.
+
+1. Introduction
+In the contextual bandit problem, an agent collects rewards
+for actions taken over a sequence of rounds; in each round,
+the agent chooses an action to take on the basis of (i) context (or features) for the current round, as well as (ii) feedback, in the form of rewards, obtained in previous rounds.
+Proceedings of the 31 st International Conference on Machine
+Learning, Beijing, China, 2014. JMLR: W&CP volume 32. Copyright 2014 by the author(s).
+
+The feedback is incomplete: in any given round, the agent
+observes the reward only for the chosen action; the agent
+does not observe the reward for other actions. Contextual
+bandit problems are found in many important applications
+such as online recommendation and clinical trials, and represent a natural half-way point between supervised learning and reinforcement learning. The use of features to encode context is inherited from supervised machine learning, while exploration is necessary for good performance
+as in reinforcement learning.
+The choice of exploration distribution on actions is important. The strongest known results (Auer et al., 2002;
+McMahan & Streeter, 2009; Beygelzimer et al., 2011) provide algorithms that carefully control the exploration distribution
+to achieve an optimal regret after T rounds of
+p
+O( KT log(|Π|/δ)), with probability at least 1 − δ, relative to a set of policies Π ⊆ AX mapping contexts x ∈ X
+to actions a ∈ A (where K is the number of actions). The
+regret is the difference between the cumulative reward of
+the best policy in Π and the cumulative reward collected by
+the algorithm. Because the bound has only a logarithmic
+dependence on |Π|, the algorithm can compete with very
+large policy classes that are likely to yield high rewards, in
+which case the algorithm also earns high rewards. However, the computational cost of the above algorithms is linear in |Π|, which is tractable only for simple policy classes.
+A sub-linear in |Π| running time is possible for policy
+classes that can be efficiently searched. In this work, we
+
+Taming the Monster: A Fast and Simple Algorithm for Contextual Bandits
+
+use the abstraction of an optimization oracle to capture this
+property: given a set of context/reward vector pairs, the
+oracle returns a policy in Π with maximum total reward.
+Using such an oracle in an i.i.d. setting (formally defined
+in Section 2.1), it is possible to create -greedy (Sutton &
+Barto, 1998) or epoch-greedy (Langford & Zhang, 2007)
+algorithms that run in time O(log |Π|) with only a single
+call to the oracle per round. However, these algorithms
+have suboptimal regret bounds of O((K log |Π|)1/3 T 2/3 )
+because the algorithms randomize uniformly over actions
+when they choose to explore.
+The Randomized UCB algorithm of Dudı́k et al. (2011a)
+achieves the optimal regret bound (up to logarithmic factors) in the i.i.d. setting, and runs in time poly(T, log |Π|)
+with Õ(T 5 ) calls to the optimization oracle per round.
+Naively this would amount to Õ(T 6 ) calls to the oracle
+over T rounds, although a doubling trick from our analysis can be adapted to ensure only Õ(T 5 ) calls to the oracle
+are needed over all T rounds in the Randomized UCB algorithm. This is a fascinating result because it shows that
+the oracle can provide an exponential speed-up over previous algorithms with optimal regret bounds. However, the
+running time of this algorithm is still prohibitive for most
+natural problems owing to the Õ(T 5 ) scaling.
+In this work, we prove the following1 :
+Theorem 1. There is an algorithm for the i.i.d. contextual bandit
+q problem with an optimal regret bound requirKT
+calls to the optimization oracle over
+ing Õ
+ln(|Π|/δ)
+T rounds, with probability at least 1 − δ.
+p
+Concretely, we make Õ( KT / ln(|Π|/δ))
+p calls to the or1.5
+acle with a net running time of Õ(T
+K log |Π|), vastly
+improving over the complexity of Randomized UCB. The
+major components of the new algorithm are (i) a new coordinate descent procedure for computing a very sparse
+distribution over policies which can be efficiently sampled
+from, and (ii) a new epoch structure which allows the distribution over policies to be updated very infrequently. We
+consider variants of the epoch structure that make different computational trade-offs; on one extreme we concentrate thep
+entire computational burden on O(log T ) rounds
+with Õ( KT / ln(|Π|/δ)) oracle calls each
+√time, while on
+thep
+other we spread our computation over T rounds with
+Õ( K/ ln(|Π|/δ)) oracle calls for each of these rounds.
+We stress that in either case, the total number of calls to the
+oracle is only sublinear in T . Finally, we develop a more
+efficient online variant, and conduct a proof-of-concept experiment showing low computational complexity and high
+reward relative to several natural baselines.
+1
+
+Throughout this paper, we use the Õ notation to suppress
+dependence on logarithmic factors in T and K, as well as
+log(|Π|/δ) (i.e. terms which are O(log log(|Π|/δ)).
+
+Motivation and related work. The EXP4-family of algorithms (Auer et al., 2002; McMahan & Streeter, 2009;
+Beygelzimer et al., 2011) solve the contextual bandit problem with optimal regret by updating weights (multiplicatively) over all policies in every round. Except for a few
+special cases (Helmbold & Schapire, 1997; Beygelzimer
+et al., 2011), the running time of such measure-based algorithms is generally linear in the number of policies.
+In contrast, the Randomized UCB algorithm of Dudı́k et al.
+(2011a) is based on a natural abstraction from supervised
+learning: efficiently finding a function in a rich function
+class that minimizes the loss on a training set. This abstraction is encapsulated in the notion of an optimization oracle,
+which is also used by -greedy (Sutton & Barto, 1998) and
+epoch-greedy (Langford & Zhang, 2007).
+Another class of approaches based on Bayesian updating is
+Thompson sampling (Thompson, 1933; Li, 2013), which
+often enjoys strong theoretical guarantees in expectation
+over the prior and good empirical performance (Chapelle
+& Li, 2011). Such algorithms, as well as the closely
+related upper-confidence bound algorithms (Auer, 2002;
+Chu et al., 2011), are computationally tractable in cases
+where the posterior distribution over policies can be efficiently maintained or approximated. In our experiments,
+we compare to a strong baseline algorithm that uses this
+approach (Chu et al., 2011).
+To circumvent the Ω(|Π|) running time barrier, we restrict
+attention to algorithms that only access the policy class
+via the optimization oracle. Specifically, we use a costsensitive classification oracle, and a key challenge is to design good supervised learning problems for querying this
+oracle. The Randomized UCB algorithm of Dudı́k et al.
+(2011a) uses a similar oracle to construct a distribution over
+policies that solves a certain convex program. However, the
+number of oracle calls in their work is prohibitively large,
+and the statistical analysis is also rather complex.2
+Main contributions. In this work, we present a new and
+simple algorithm for solving a similar convex program as
+that used by Randomized UCB. The new algorithm is based
+on coordinate descent: in each iteration, the algorithm calls
+the optimization oracle to obtain a policy; the output is a
+sparse distribution over these policies. The number of iterations
+prequired to compute the distribution is small—at most
+Õ( Kt/ ln(|Π|/δ)) in any round t. In fact, we present a
+more general scheme based on epochs and warm start in
+which the total number
+p of calls to the oracle is, with high
+probability, just Õ( KT / ln(|Π|/δ)) over all T rounds;
+we prove that this is nearly optimal for a certain class of
+optimization-based algorithms. The algorithm is natural
+2
+The paper of Dudı́k et al. (2011a) is colloquially referred to,
+by its authors, as the “monster paper” (Langford, 2014).
+
+Taming the Monster: A Fast and Simple Algorithm for Contextual Bandits
+
+and simple to implement, and we provide an arguably simpler analysis than that for Randomized UCB. Finally, we
+report proof-of-concept experimental results using a variant algorithm showing strong empirical performance.
+
+2. Preliminaries
+In this section, we recall the i.i.d. contextual bandit setting
+and some basic techniques used in previous works (Auer
+et al., 2002; Beygelzimer et al., 2011; Dudı́k et al., 2011a).
+2.1. Learning Setting
+Let A be a finite set of K actions, X be a space of possible
+contexts (e.g., a feature space), and Π ⊆ AX be a finite set
+of policies that map contexts x ∈ X to actions
+a ∈ A.3 Let
+P
+Π
+Π
+∆ := {Q ∈ R : Q(π) ≥ 0 ∀π ∈ Π, π∈Π Q(π) ≤ 1}
+be the set of non-negative weights over policies with total
+A
+weight at most one, and let RA
+: r(a) ≥
++ := {r ∈ R
+0 ∀a ∈ A} be the set of non-negative reward vectors.
+Let D be a probability distribution over X × [0, 1]A , the
+joint space of contexts and reward vectors; we assume actions’ rewards from D are always in the interval [0, 1]. Let
+DX denote the marginal distribution of D over X.
+In the i.i.d. contextual bandit setting, the context/reward
+vector pairs (xt , rt ) ∈ X × [0, 1]A over all rounds t =
+1, 2, . . . are randomly drawn independently from D. In
+round t, the agent first observes the context xt , then (randomly) chooses an action at ∈ A, and finally receives the
+reward rt (at ) ∈ [0, 1] for the chosen action. The (observable) record of interaction resulting from round t is the
+quadruple (xt , at , rt (at ), pt (at )) ∈ X × A × [0, 1] × [0, 1];
+here, pt (at ) ∈ [0, 1] is the probability that the agent chose
+action at ∈ A. We let Ht ⊆ X × A × [0, 1] × [0, 1] denote
+the history (set) of interaction records in the first t rounds.
+b x∼H [·] to denote expectation when a context x is
+We use E
+t
+uniformly chosen at random from the t contexts in Ht .
+Let R(π) := E(x,r)∼D [r(π(x))] denote the expected (instantaneous) reward of a policy π ∈ Π, and let π? :=
+arg maxπ∈Π R(π) be a policy that maximizes the expected
+reward (the optimal policy). Let Reg(π) := R(π? ) − R(π)
+denote the expected (instantaneous) regret of a policy π ∈
+Π relative to the optimal policy. Finally, the (empirical cumulative) regret of the agent
+ after T rounds is defined as
+P
+T
+r
+(π
+(x
+))
+−
+r
+(a
+)
+.
+t
+?
+t
+t
+t
+t=1
+2.2. Inverse Propensity Scoring
+An unbiased estimate of a policy’s reward R(π) may be
+obtained from a history of interaction records Ht using inverse propensity scoring (IPS; also called inverse proba3
+
+Extension to VC classes is simple using standard arguments.
+
+bility weighting): the expected reward of policy π ∈ Π is
+estimated as
+t
+
+X ri (ai ) · 1{π(xi ) = ai }
+b t (π) := 1
+R
+.
+t i=1
+pi (ai )
+
+(1)
+
+This technique can be viewed as mapping Ht 7→ IPS(Ht )
+of interaction records (x, a, r(a), p(a)) to context/reward
+vector pairs (x, r̂), where r̂ ∈ RA
++ is a fictitious reward
+vector that assigns to the chosen action a a scaled reward
+r(a)/p(a) (possibly greater than one), and assigns to all
+other actions zero
+rewards. We may equivalently write
+b t (π) = t−1 P
+R
+(x,r̂)∈IPS(Ht ) r̂(π(x)); it is easy to verify
+that E[r̂(π(x))|(x, r)] = r(π(x)), as p(a) is indeed the
+agent’s probability (conditioned on (x, r)) of picking acb t (π) is an unbiased estimator for any
+tion a. This implies R
+history Ht .
+b t (π) denote a policy that maxLet πt := arg maxπ∈Π R
+imizes the expected reward estimate based on inverse
+propensity scoring with history Ht (π0 can be arbitrary),
+d t (π) := R
+b t (πt ) − R
+b t (π) denote estimated reand let Reg
+d
+gret relative to πt . Note that Regt (π) is generally not an
+unbiased estimate of Reg(π), because πt is not always π? .
+2.3. Optimization Oracle
+One natural mode for accessing the set of policies Π is enumeration, but this is impractical in general. In this work, we
+instead only access Π via an optimization oracle which corresponds to a cost-sensitive learner. Following Dudı́k et al.
+(2011a), we call this oracle AMO4 .
+Definition 1. For a set of policies Π, the arg max oracle
+(AMO) is an algorithm, which for any sequence of context
+and reward vectors, (x1 , rP
+1 ), (x2 , r2 ), . . . , (xt , rt ) ∈ X ×
+t
+,
+returns
+arg
+max
+RA
+π∈Π
++
+τ =1 rτ (π(xτ )).
+2.4. Projections and Smoothing
+In each round, our algorithm chooses an action by randomly drawing a policy π from a distribution over Π, and
+then picking the action π(x) recommended by π on the
+current context x. This is equivalent
+to drawing an acP
+tion according to Q(a|x) := π∈Π:π(x)=a Q(π), ∀a ∈ A.
+For keeping the variance of reward estimates from IPS in
+check, it is desirable to prevent the probability of any action from being too small. Thus, as in previous work, we
+also use a smoothed projection
+Qµ (·|x) for µ ∈ [0, 1/K],
+P
+µ
+Q (a|x) := (1 − Kµ) π∈Π:π(x)=a Q(π) + µ, ∀a ∈ A.
+Every action has probability at least µ under Qµ (·|x).
+For technical reasons, our algorithm maintains nonnegative weights Q ∈ ∆Π over policies that sum to at
+4
+Cost-sensitive learners often need a cost instead of reward, in
+which case we use ct = 1 − rt .
+
+Taming the Monster: A Fast and Simple Algorithm for Contextual Bandits
+
+most one, but not necessarily equal to one; hence, we
+put any remaining mass on a default policy π̄ ∈ Π to
+obtain a legitimate
+ distribution over policies
+P probability
+Q̃ = Q + 1 − π∈Π Q(π) 1π̄ . We then pick an action
+from the smoothed projection Q̃µ (·|x) of Q̃ as above.
+
+3. Algorithm and Main Results
+Our algorithm (ILOVETOCONBANDITS) is an epochbased variant of the Randomized UCB algorithm of Dudı́k
+et al. (2011a) and is given in Algorithm 1.
+Like
+Randomized UCB, ILOVETOCONBANDITS solves an
+optimization problem (OP) to obtain a distribution over
+policies to sample from (Step 7), but does so on an
+epoch schedule, i.e., only on certain pre-specified rounds
+τ1 , τ2 , . . .. The only requirement of the epoch schedule is
+that the length of epoch m is bounded as τm+1 − τm =
+O(τm ). For simplicity, we assume τm+1 ≤ 2τm for
+m ≥ 1, and τ1 = O(1).
+The crucial step here is solving (OP). Before stating the
+main result, let us get some intuition about this problem.
+The first constraint, Eq. (2), requires the average estimated
+regret of the distribution Q over policies to be small, since
+bπ is a rescaled version of the estimated regret of policy
+π. This constraint skews our distribution to put more mass
+on “good policies” (as judged by our current information),
+and can be seen as the exploitation component of our algorithm. The second set of constraints, Eq. (3), requires the
+distribution Q to place sufficient mass on the actions chosen by each policy π, in expectation over contexts. This can
+be thought of as the exploration constraint, since it requires
+the distribution to be sufficiently diverse for most contexts.
+As we will see later, the left hand side of the constraint is
+a bound on the variance of our reward estimates for policy
+π, and the constraint requires the variance to be controlled
+at the level of the estimated regret of π. That is, we require
+the reward estimates to be more accurate for good policies
+than we do for bad ones, allowing for much more adaptive
+exploration than that of -greedy style algorithms.
+This problem is very similar to the one in Dudı́k et al.
+(2011a), and our coordinate descent algorithm in Section 3.1 gives a constructive proof that the problem is feasible. As in Dudı́k et al. (2011a), we have the following
+regret bound:5
+Theorem 2. Assume the optimization problem (OP) can
+be solved whenever required in Algorithm 1.
+With
+probability at least 1 − δ, the regret of Algorithm 1
+(ILOVETOCONBANDITS) after T rounds is
+
+p
+KT ln(T |Π|/δ) + K ln(T |Π|/δ) .
+O
+5
+Omitted proofs and other details are given in the full version
+of the paper (Agarwal et al., 2014).
+
+Algorithm 1 Importance-weighted LOw-Variance EpochTimed Oracleized CONtextual BANDITS algorithm
+(ILOVETOCONBANDITS)
+input Epoch schedule 0 = τ0 < τ1 < τ2 < · · · , allowed
+failure probability δ ∈ (0, 1).
+Π
+1: Initial weights Q0 := 0 ∈ ∆
+p , initial epoch m := 1.
+2 |Π|/δ)/(Kτ )}
+1
+Define µm := min{ /2K , ln(16τm
+m
+for all m ≥ 0.
+2: for round t = 1, 2, . . . do
+3:
+Observe context xt ∈ X.
+4:
+(at , pt (at )) := Sample(xt , Qm−1 , πτm −1 , µm−1 ).
+5:
+Select action at and observe reward rt (at ) ∈ [0, 1].
+6:
+if t = τm then
+7:
+Let Qm be a solution to (OP) with history Ht and
+minimum probability µm .
+8:
+m := m + 1.
+9:
+end if
+10: end for
+Optimization Problem (OP)
+Given a history Ht and minimum probability µm , define
+bπ :=
+
+d (π)
+Reg
+t
+ψµm
+
+for ψ := 100, and find Q ∈ ∆Π such that
+X
+
+Q(π)bπ ≤ 2K
+
+(2)
+
+π∈Π
+
+
+b x∼H
+∀π ∈ Π : E
+t
+
+1
+Qµm (π(x)|x)
+
+
+≤ 2K + bπ . (3)
+
+3.1. Solving (OP) via Coordinate Descent
+We now present a coordinate descent algorithm to solve
+(OP). The pseudocode is given in Algorithm 2. Our analysis, as well as the algorithm itself, are based on a potential
+function which we use to measure progress. The algorithm
+can be viewed as a form of coordinate descent applied to
+this same potential function. The main idea of our analysis is to show that this function decreases substantially on
+every iteration of this algorithm; since the function is nonnegative, this gives an upper bound on the total number of
+iterations as expressed in the following theorem.
+Theorem 3. Algorithm 2 (with Qinit := 0) halts in at most
+4 ln(1/(Kµm ))
+iterations, and outputs a solution Q to (OP).
+µm
+3.2. Using an Optimization Oracle
+We now show how to implement Algorithm 2 via AMO
+(c.f. Section 2.3).
+Lemma 1. Algorithm 2 can be implemented using one call
+to AMO before the loop is started, and one call for each
+iteration of the loop thereafter.
+Proof. At the very beginning, before the loop is started,
+
+Taming the Monster: A Fast and Simple Algorithm for Contextual Bandits
+
+Algorithm 2 Coordinate Descent Algorithm
+Require: History Ht , minimum probability µ, initial
+weights Qinit ∈ ∆Π .
+1: Set Q := Qinit .
+2: loop
+3:
+Define, for all π ∈ Π,
+
+Sπ (Q)
+
+b x∼H [1/Qµ (π(x)|x)]
+= E
+t
+
+
+b
+= Ex∼H 1/(Qµ (π(x)|x))2
+
+Dπ (Q)
+
+= Vπ (Q) − (2K + bπ ).
+
+Vπ (Q)
+
+4:
+5:
+
+if
+
+t
+
+P
+
+π Q(π)(2K + bπ ) > 2K then
+Replace Q by cQ, where
+
+2K
+< 1.
+Q(π)(2K
++ bπ )
+π
+
+c := P
+6:
+7:
+8:
+
+(4)
+
+end if
+if there is a policy π for which Dπ (Q) > 0 then
+Add the (positive) quantity
+απ (Q) =
+
+Vπ (Q) + Dπ (Q)
+2(1 − Kµ)Sπ (Q)
+
+to Q(π) and leave all other weights unchanged.
+9:
+else
+10:
+Halt and output the current set of weights Q.
+11:
+end if
+12: end loop
+
+we compute the best empirical policy so far, πt , by calling
+AMO on the sequence of historical contexts and estimated
+reward vectors; i.e., on (xτ , r̂τ ), for τ = 1, 2, . . . , t.
+Next, we show that each iteration in the loop of Algorithm 2
+can be implemented via one call to AMO. Going over the
+pseudocode, first note that operations involving Q in Step 4
+can be performed efficiently since Q has sparse support.
+Note that the definitions in Step 3 don’t actually need to be
+computed for all policies π ∈ Π, as long as we can identify
+a policy π for which Dπ (Q) > 0. We can identify such a
+policy using one call to AMO as follows.
+First, note that for any policy π, we have Vπ (Q) =
+Pt
+b t (πt )/(ψµ) −
+t−1 τ =1 1/Qµ (π(xτ )|xτ ), and bπ = R
+P
+t
+(ψµt)−1 τ =1 r̂τ (π(xτ )). Now consider the sequence of
+historical contexts and reward vectors, (xτ , r̃τ ) for τ =
+1, 2, . . . , t, where for any action a we define
+
+
+1
+ψµ
+r̃τ (a) :=
++
+r̂
+(a)
+.
+(5)
+τ
+t Qµ (a|xτ )
+Pt
+Observe that Dπ (Q) = (ψµ)−1 τ =1 r̃τ (π(xτ ))+ a constant independent
+Pt of π. Therefore, arg maxπ∈Π Dπ (Q) =
+arg maxπ∈Π τ =1 r̃τ (π(xτ )), and hence, calling AMO
+
+once on the sequence (xτ , r̃τ ) for τ = 1, 2, . . . , t, we obtain a policy that maximizes Dπ (Q), and thereby identify a
+policy for which Dπ (Q) > 0 whenever one exists.
+3.3. Epoch Schedule
+Recalling the setting of µm in Algorithm 1, Theorem
+p 3 shows that Algorithm 2 solves (OP) with
+Õ( Kt/ ln(|Π|/δ)) calls to AMO in round t. Thus, if we
+use the epoch schedule τm = m (i.e.,p
+run Algorithm 2 in
+every round), then we get a total of Õ( KT 3 / ln(|Π|/δ))
+calls to AMO over all T rounds. This number can be
+dramatically reduced using a more carefully chosen epoch
+schedule.
+m−1
+Lemma 2. For the epoch schedule
+, the total
+p τm := 2
+number of calls to AMO is Õ( KT / ln(|Π|/δ)).
+
+Proof. The epoch schedule satisfies the requirement
+τm+1 ≤ 2τm . With this epoch schedule, Algorithm 2
+is run
+p only O(log T ) times over T rounds, leading to
+Õ( KT / ln(|Π|/δ)) total calls to AMO.
+3.4. Warm Start
+We now present a different technique to reduce the number
+of calls to AMO. This is based on the observation that practically speaking, it seems terribly wasteful, at the start of a
+new epoch, to throw out the results of all of the preceding
+computations and to begin yet again from nothing. Instead,
+intuitively, we expect computations to be more moderate if
+we begin again where we left off last, i.e., a “warm-start”
+approach. Here, when Algorithm 2 is called at the end of
+epoch m, we use Qinit := Qm−1 (the previously computed
+weights) rather than 0.
+We can combine warm-start
+with a different epoch schedp
+ule to guarantee Õ(
+KT
+/
+ln(|Π|/δ))
+total calls to AMO,
+√
+spread across O( T ) calls to Algorithm 2.
+Lemma 3. Define the epoch schedule (τ1 , τ2 ) := (3, 5)
+and τm := m2 for m ≥ 3 (this satisfies τm+1 ≤ 2τm ).
+With high probability,
+the warm-start variant of Algop
+rithm 1 makes √
+Õ( KT / ln(|Π|/δ)) calls to AMO over T
+rounds and O( T ) calls to Algorithm 2.
+3.5. Computational Complexity
+So far, we have only considered computational complexity in terms of the number of oracle calls. However, the
+reduction also involves the creation of cost-sensitive classification examples, which must be accounted for in the
+net computational cost. With some natural bookkeeping
+of probabilities, the computational complexity of our algorithm,
+p modulo the oracle running time, can be made to be
+Õ( (KT )3 / ln(|Π|/δ)). Details are given in the full version of the paper.
+
+Taming the Monster: A Fast and Simple Algorithm for Contextual Bandits
+
+3.6. A Lower Bound on the Support Size
+An attractive feature of Algorithm 2 is that the number of
+calls to AMO is directly related to the number of policies in
+the support of Qm . For instance, with the doubling schedule of Section 3.3, Theorem 3 implies that we never have
+m ))
+policies in
+non-zero weights for more than 4 ln(1/(Kµ
+µm
+epoch m. The support size of the distributions Qm in Algorithm 1 is crucial to the computational cost of sampling
+an action.
+We now demonstrate a lower bound showing that it is not
+possible to construct substantially sparser distributions that
+also satisfy the low-variance constraint (3) in the optimization problem (OP). To formally state the lower bound, for
+a given an epoch schedule (τm ), define the following set of
+non-negative vectors over policies:
+Qm := {Q ∈ ∆Π : Q satisfies Eq. (3) in round τm }.
+(The distribution Qm computed by Algorithm 1 is in Qm .)
+Recall that supp(Q) denotes the support of Q (the set of
+policies where Q puts non-zero entries). We have the following lower bound on |supp(Q)|.
+Theorem 4. For any epoch schedule 0 = τ0 < τ1 < τ2 <
+· · · and any M ∈ N sufficiently large, there exists a distribution D over X × [0, 1]A and a policy class Π such that,
+with probability at least 1 − δ,
+s
+!
+KτM
+.
+inf
+inf |supp(Q)| = Ω
+m∈N: Q∈Qm
+ln(|Π|τM /δ)
+τm ≥τM /2
+
+In the context of our problem, this lower bound shows that
+the bounds in Lemma 2 and Lemma 3 are unimprovable,
+since the number of calls to AMO is at least the size of the
+support, given our mode of access to Π.
+
+4. Regret Analysis
+In this section, we outline the regret analysis for our algorithm ILOVETOCONBANDITS.
+b t (π) are
+The deviations of the policy reward estimates R
+controlled by (a bound on) the variance of each term in
+Eq. (1): essentially the left-hand side of Eq. (3) from (OP),
+b x∼H [·] replaced by Ex∼D [·]. Resolving this
+except with E
+t
+X
+discrepancy is handled using deviation bounds, so Eq. (3)
+holds with Ex∼DX [·], with worse right-hand side constants.
+The rest of the analysis, which deviates from that of
+Randomized UCB, compares the expected regret Reg(π)
+d t (π) using
+of any policy π with the estimated regret Reg
+the variance constraints Eq. (3):
+Lemma 4 (Informally). With high probability, for each m
+such that τm ≥ Õ(K log |Π|), each round t in epoch m,
+d t (π) + O(Kµm ).
+and each π ∈ Π, Reg(π) ≤ 2Reg
+
+This lemma can easily be combined with the
+constraint Eq. (2) from (OP): since the weights
+Qm−1 used in any round t in epoch m satisfy
+P
+d
+≤ ψ · 2Kµτm −1 , we
+π∈Π Qm−1 (π)Regτm −1 (π)
+obtain a bound on the (conditionally) expected regret in
+round
+t using the above lemma: with high probability,
+P
+e
+π∈Π Qm−1 Reg(π) ≤ O(Kµm−1 ). Summing these
+terms up over all T rounds and applying martingale
+concentration gives the bound in Theorem 2.
+
+5. Analysis of the Optimization Algorithm
+In this section, we give a sketch of the analysis of our main
+optimization algorithm for computing weights Qm on each
+epoch as in Algorithm 2. As mentioned in Section 3.1, this
+analysis is based on a potential function.
+Since our attention for now is on a single epoch m, here and
+in what follows, when clear from context, we drop m from
+our notation and write simply τ = τm , µ = µm , etc. Let
+UA be the uniform distribution over the action set A. We
+define the following potential function for use on epoch m:
+!
+P
+b x [RE (UA kQµ (· | x))]
+E
+π∈Π Q(π)bπ
++
+.
+Φm (Q) = τ µ
+1 − Kµ
+2K
+This function is defined for all vectors Q ∈ ∆Π . Also,
+RE (pkq) denotes the unnormalized relative entropy between two nonnegative vectors p P
+and q over the action
+space (or any set) A: RE (pkq) = a∈A (pa ln(pa /qa ) +
+qa − pa ), which is always nonnegative. Here, Qµ (·|x) denotes the “distribution” (which might not sum to 1) over A
+induced by Qµ for context x as given in Section 2.4. Thus,
+ignoring constants, this potential function is a combination
+of two terms: The first measures how far from uniform are
+the distributions induced by Qµ , and the second is an estimate of expected regret under Q since bπ is proportional to
+the empirical regret of π. Making Φm small thus encourages Q to choose actions as uniformly as possible while
+also incurring low regret — exactly the aims of our algorithm. The constants that appear in this definition are for
+later mathematical convenience.
+For further intuition, note that, by straightforward calculus, the partial derivative ∂Φm /∂Q(π) is roughly proportional to the variance constraint for π given in Eq. (3) (up
+to a slight mismatch of constants). This shows that if this
+constraint is not satisfied, then ∂Φm /∂Q(π) is likely to be
+negative, meaning that Φm can be decreased by increasing
+Q(π). Thus, the weight vector Q that minimizes Φm satisfies the variance constraint for every policy π. It turns
+out that this minimizing Q also satisfies the low regret constraint in Eq. (2), and also must sum to at most 1; in other
+words, it provides a complete solution to our optimization
+problem. Algorithm 2 does not fully minimize Φm , but it
+
+Taming the Monster: A Fast and Simple Algorithm for Contextual Bandits
+
+is based roughly on coordinate descent. This is because
+in each iteration one of the weights (coordinate directions)
+Q(π) is increased. This weight is one whose corresponding
+partial derivative is large and negative.
+To analyze the algorithm, we first argue that it is correct
+in the sense of satisfying the required constraints, provided
+that it halts.
+Lemma 5. If Algorithm 2 halts and outputs a weight vector
+Q, then the constraints Eq. (3) and Eq. (2) must hold, and
+furthermore the sum of the weights Q(π) is at most 1.
+What remains is the more challenging task of bounding the
+number of iterations until the algorithm does halt. We do
+this by showing that significant progress is made in reducing Φm on every iteration. To begin, we show that scaling
+Q as in Step 4 cannot cause Φm to increase.
+Lemma
+6. Let Q be a weight vector such that
+P
+Q(π)(2K
++ bπ ) > 2K, and let c be as in Eq. (4).
+π
+Then Φm (cQ) ≤ Φm (Q).
+Next, we show that substantial progress will be made in
+reducing Φm each time that Step 8 is executed.
+Lemma 7. Let Q denote a set of weights and suppose,
+for some policy π, that Dπ (Q) > 0. Let Q0 be a new
+set of weights which is an exact copy of Q except that
+Q0 (π) = Q(π) + α where α = απ (Q) > 0. Then
+Φm (Q) − Φm (Q0 ) ≥ τ µ2 /(4(1 − Kµ)).
+So Step 4 does not cause Φm to increase, and Step 8 causes
+Φm to decrease by at least the amount given in Lemma 7.
+This immediately implies Theorem 3: for Qinit = 0, the
+initial potential is bounded by τ µ ln(1/(Kµ))/(1 − Kµ),
+and it is never negative, so the number of times Step 8 is
+executed is bounded by 4 ln(1/(Kµ))/µ as required.
+5.1. Epoching and Warm Start
+As shown in Section 2.3, the bound on the number of iterations of the algorithm from Theorem 3 also gives a bound
+on the number of times the oracle is called. To reduce
+the number of oracle calls, one approach is the “doubling
+trick” of Section 3.3, which enables us to bound the total
+combined number ofp
+iterations of Algorithm 2 in the first
+T rounds is only Õ( KT / ln(|Π|/δ)). This means that
+thep
+average number of calls to the arg-max oracle is only
+Õ( K/(T ln(|Π|/δ))) per round, meaning that the oracle
+is called far less than once per round, and in fact, at a vanishingly low rate.
+We now turn to warm-start approach of Section 3.4, where
+in each epoch m + 1 we initialize the coordinate descent algorithm with Qinit = Qm , i.e. the weights computed in the
+previous epoch m. To analyze this, we bound how much
+the potential changes from Φm (Qm ) at the end of epoch
+
+m to Φm+1 (Qm ) at the very start of epoch m + 1. This,
+combined with our earlier results regarding how quickly
+Algorithm 2 drives down the potential, we are able to get
+an overall bound on the total number of updates across T
+rounds.
+Lemma 8. Let M be the largest integer for which τM +1 ≤
+T . With probability at least 1 − 2δ, for all T , the total
+epoch-to-epoch increase in potential is
+!
+r
+M
+X
+T ln(|Π|/δ)
+,
+(Φm+1 (Qm ) − Φm (Qm )) ≤ Õ
+K
+m=1
+where M is the largest integer for which τM +1 ≤ T .
+This lemma, along with Lemma 7 can be used to further
+establish Lemma 3. We only provide an intuitive sketch
+here, with the details deferred to the appendix. As we observe in Lemma 8, the total amount that
+p the potential increases across T rounds is at most Õ( T ln(|Π|/δ)/K).
+On the other hand, Lemma 7 shows that each time Q is
+updated by Algorithm 2 the potential decreases by at least
+Ω̃(ln(|Π|/δ)/K) (using our choice of µ). Therefore, the
+total number of updates
+p of the algorithm totaled over all T
+rounds is at most Õ( KT / ln(|Π|/δ)). For instance, if we
+use (τ1 , τ2 ) := (3, 5) and√τm := m2 for m ≥ 3, then the
+Q is only updated about T times over Tp
+rounds; on each
+of those rounds, Algorithm 2 requires Õ( K/ ln(|Π|/δ))
+iterations, on average, giving the claim in Lemma 3.
+
+6. Experimental Evaluation
+In this section we evaluate a variant of Algorithm 1 against
+several baselines. While Algorithm 1 is significantly more
+efficient than many previous approaches, the overall computational complexity is still at least Õ((KT )1.5 ) plus the
+total cost of the oracle calls, as discussed in Section 3.5.
+This is markedly larger than the complexity of an ordinary
+supervised learning problem where it is typically possible
+to perform an O(1)-complexity update upon receiving a
+fresh example using online algorithms.
+A natural solution is to use an online oracle that is stateful
+and accepts examples one by one. An online cost-sensitive
+classification (CSC) oracle takes as input a weighted example and returns a predicted class (corresponding to one
+of K actions in our setting). Since the oracle is stateful, it
+remembers and uses examples from all previous calls in answering questions, thereby reducing the complexity of each
+oracle invocation to O(1) as in supervised learning. Using
+several such oracles, we can efficiently track a distribution
+over good policies and sample from it. We detail this approach (which we call Online Cover) in the full version of
+the paper. The algorithm maintains a uniform distribution
+over a fixed number n of policies where n is a parameter of
+the algorithm. Upon receiving a fresh example, it updates
+
+Taming the Monster: A Fast and Simple Algorithm for Contextual Bandits
+Table 1. Progressive validation loss, best hyperparameter values, and running times of various algorithm on RCV1.
+
+Algorithm
+P.V. Loss
+Searched
+Seconds
+
+-greedy
+0.148
+0.1 = 
+17
+
+Explore-first
+0.081
+2 × 105 first
+2.6
+
+Bagging
+0.059
+16 bags
+275
+
+LinUCB
+0.128
+103 dim, minibatch-10
+212 × 103
+
+Online Cover
+0.053
+cover n = 1
+12
+
+Supervised
+0.051
+nothing
+5.3
+
+all n policies with the suitable CSC examples (Eq. (5)). The
+specific CSC oracle we use is a reduction to squared-loss
+regression (Algorithms 4 and 5 of Beygelzimer & Langford
+(2009)) which is amenable to online updates. Our implementation is included in Vowpal Wabbit.6
+
+with a cover set of size 1—apparently for this problem the small decaying amount of uniform random
+sampling imposed is adequate exploration. Prediction
+performance is similar with a larger cover set.
+
+Due to lack of public datasets for contextual bandit problems, we use a simple supervised-to-contextual-bandit
+transformation (Dudı́k et al., 2011b) on the CCAT document classification problem in RCV1 (Lewis et al., 2004).
+This dataset has 781265 examples and 47152 TF-IDF features. We treated the class labels as actions, and one minus
+0/1-loss as the reward. Our evaluation criteria is progressive validation (Blum et al., 1999) on 0/1 loss. We compare
+several baseline algorithms to Online Cover; all algorithms
+take advantage of linear representations which are known
+to work well on this dataset. For each algorithm, we report
+the result for the best parameter settings (shown in Table 6).
+
+All baselines except for LinUCB are implemented as a simple modification of Vowpal Wabbit. All reported results
+use default parameters where not otherwise specified. The
+contextual bandit learning algorithms all use a doubly robust reward estimator instead of the importance weighted
+estimators used in our analysis (Dudı́k et al., 2011b).
+
+1. -greedy (Sutton & Barto, 1998) explores randomly
+with probability  and otherwise exploits.
+2. Explore-first is a variant that begins with uniform exploration, then switches to an exploit-only phase.
+3. A less common but powerful baseline is based on bagging: multiple predictors (policies) are trained with
+examples sampled with replacement. Given a context,
+these predictors yield a distribution over actions from
+which we can sample.
+4. LinUCB (Auer, 2002; Chu et al., 2011) has been quite
+effective in past evaluations (Li et al., 2010; Chapelle
+& Li, 2011). It is impractical to run “as is” due to
+high-dimensional matrix inversions, so we report results for this algorithm after reducing to 1000 dimensions via random projections. Still, the algorithm required 59 hours7 . An alternative is to use diagonal
+approximation to the covariance, which runs substantially faster (≈1 hour), but gives a worse error of
+0.137.
+5. Finally, our algorithm achieves the best loss of 0.0530.
+Somewhat surprisingly, the minimum occurs for us
+6
+
+http://hunch.net/˜vw. The implementation is in the
+file cbify.cc and is enabled using --cover.
+7
+The linear algebra routines are based on Intel MKL package.
+
+Because RCV1 is actually a fully supervised dataset, we
+can apply a fully supervised online multiclass algorithm to
+solve it. We use a simple one-against-all implementation
+to reduce this to binary classification, yielding an error rate
+of 0.051 which is competitive with the best previously reported results. This is effectively a lower bound on the loss
+we can hope to achieve with algorithms using only partial
+information. Our algorithm is less than 2.3 times slower
+and nearly achieves the bound. Hence on this dataset, very
+little further algorithmic improvement is possible.
+
+7. Conclusions
+In this paper we have presented the first practical algorithm
+to our knowledge that attains the statistically optimal regret guarantee and is computationally efficient in the setting of general policy classes. A remarkable feature of the
+algorithm is that the total number of oracle calls over all T
+rounds is sublinear—a remarkable improvement over previous works in this setting. We believe that the online variant of the approach which we implemented in our experiments has the right practical flavor for a scalable solution to
+the contextual bandit problem. In future work, it would be
+interesting to directly analyze the Online Cover algorithm.
+Acknowledgements
+We thank Dean Foster and Matus Telgarsky for helpful discussions. Part of this work was completed while DH and
+RES were visiting Microsoft Research.
+
+References
+Agarwal, Alekh, Hsu, Daniel, Kale, Satyen, Langford,
+John, Li, Lihong, and Schapire, Robert E. Taming the
+
+Taming the Monster: A Fast and Simple Algorithm for Contextual Bandits
+
+monster: A fast and simple algorithm for contextual bandits. CoRR, abs/1402.0555, 2014.
+Auer, Peter. Using confidence bounds for exploitationexploration trade-offs. Journal of Machine Learning Research, 3:397–422, 2002.
+Auer, Peter, Cesa-Bianchi, Nicolò, Freund, Yoav, and
+Schapire, Robert E. The nonstochastic multiarmed bandit problem. SIAM Journal of Computing, 32(1):48–77,
+2002.
+Beygelzimer, Alina and Langford, John. The offset tree for
+learning with partial labels. In KDD, 2009.
+Beygelzimer, Alina, Langford, John, Li, Lihong, Reyzin,
+Lev, and Schapire, Robert E. Contextual bandit algorithms with supervised learning guarantees. In AISTATS,
+2011.
+Blum, Avrim, Kalai, Adam, and Langford, John. Beating
+the holdout: Bounds for k-fold and progressive crossvalidation. In COLT, 1999.
+Chapelle, Olivier and Li, Lihong. An empirical evaluation
+of Thompson sampling. In NIPS, 2011.
+Chu, Wei, Li, Lihong, Reyzin, Lev, and Schapire, Robert E.
+Contextual bandits with linear payoff functions. In AISTATS, 2011.
+Dudı́k, Miroslav, Hsu, Daniel, Kale, Satyen, Karampatziakis, Nikos, Langford, John, Reyzin, Lev, and Zhang,
+Tong. Efficient optimal learning for contextual bandits.
+In UAI, 2011a.
+Dudı́k, Miroslav, Langford, John, and Li, Lihong. Doubly
+robust policy evaluation and learning. In ICML, 2011b.
+Helmbold, David P. and Schapire, Robert E. Predicting
+nearly as well as the best pruning of a decision tree. Machine Learning, 27(1):51–68, 1997.
+Langford, John.
+Interactive machine learning, January 2014.
+URL http://hunch.net/˜jl/
+projects/interactive/index.html.
+Langford, John and Zhang, Tong. The epoch-greedy algorithm for contextual multi-armed bandits. In NIPS, 2007.
+Lewis, David D, Yang, Yiming, Rose, Tony G, and Li,
+Fan. Rcv1: A new benchmark collection for text categorization research. The Journal of Machine Learning
+Research, 5:361–397, 2004.
+Li, Lihong. Generalized Thompson sampling for contextual bandits. CoRR, abs/1310.7163, 2013.
+
+Li, Lihong, Chu, Wei, Langford, John, and Schapire,
+Robert E. A contextual-bandit approach to personalized
+news article recommendation. In WWW, 2010.
+McMahan, H. Brendan and Streeter, Matthew. Tighter
+bounds for multi-armed bandits with expert advice. In
+COLT, 2009.
+Sutton, Richard S. and Barto, Andrew G. Reinforcement
+learning, an introduction. MIT Press, 1998.
+Thompson, William R. On the likelihood that one unknown
+probability exceeds another in view of the evidence of
+two samples. Biometrika, 25(3–4):285–294, 1933.
+
+

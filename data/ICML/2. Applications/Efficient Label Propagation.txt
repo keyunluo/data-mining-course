@@ -1,0 +1,1092 @@
+Efficient Label Propagation
+
+Yasuhiro Fujiwara
+FUJIWARA . YASUHIRO @ LAB . NTT. CO . JP
+NTT Software Innovation Center, 3-9-11 Midori-cho Musashino-shi, Tokyo, Japan
+Go Irie
+NTT Media Intelligence Laboratories, 1-1 Hikarinooka Yokosuka-shi, Kanagawa, Japan
+
+Abstract
+Label propagation is a popular graph-based semisupervised learning framework. So as to obtain
+the optimal labeling scores, the label propagation
+algorithm requires an inverse matrix which incurs the high computational cost of O(n3 + cn2 ),
+where n and c are the numbers of data points and
+labels, respectively. This paper proposes an efficient label propagation algorithm that guarantees
+exactly the same labeling results as those yielded
+by optimal labeling scores. The key to our approach is to iteratively compute lower and upper
+bounds of labeling scores to prune unnecessary
+score computations. This idea significantly reduces the computational cost to O(cnt) where t
+is the average number of iterations for each label
+and t ≪ n in practice. Experiments demonstrate
+the significant superiority of our algorithm over
+existing label propagation methods.
+
+1. Introduction
+Semi-supervised learning has been a dominant research
+topic in the machine learning area. Given a dataset consisting of both labeled and unlabeled data points, the task
+is to assign labels to the unlabeled subset. A number
+of semi-supervised learning methods have been proposed
+(Chapelle et al., 2010). One major framework, label propagation, was proposed by Zhou et al. (Zhou et al., 2003).
+Our goal in this paper is to develop an efficient algorithm
+for label propagation.
+The key assumption in label propagation is that data points
+occupying the same manifold are very likely to share the
+same semantic label (Zhou et al., 2003). To this end, label
+propagation aims to “propagate” labels of the labeled data
+Proceedings of the 31 st International Conference on Machine
+Learning, Beijing, China, 2014. JMLR: W&CP volume 32. Copyright 2014 by the author(s).
+
+IRIE . GO @ LAB . NTT. CO . JP
+
+points to the unlabeled data points according to the intrinsic data manifold structures collectively revealed by a large
+number of data points. This implies that the label propagation algorithm can more successfully estimate the labels as
+the number of (labeled or unlabeled) data points increases.
+Obviously this results in higher computation time.
+Theoretically, the labeling scores of the unlabeled data
+points are computed by minimizing the cost function where
+the optimal solution is obtained by means of the inverse of
+the adjacency matrix of a data graph (e.g., k-NN graph)
+(Zhou et al., 2003). Since the size of the adjacency matrix
+is generally O(n2 ), computing its inverse takes O(n3 ) time
+where n is the number of data points (Belkin et al., 2006).
+Consequently, O(n3 + cn2 ) time is required to determine
+the labels for all unlabeled data points from c types of labels, which might be intractable for large-scale datasets.
+The original label propagation algorithm proposed by Zhou
+et al. uses the power method (Golub & Loan, 2012) to enhance computation speed (Zhou et al., 2003); the power
+method is the standard approach for label propagation.
+Even though the power method converges to the theoretically correct scores, practically, the algorithm terminates
+when the residual is less than some predetermined value
+(Xu et al., 2011). The labeling results (scores) after termination can differ from the theoretical ones in practice,
+resulting in unsatisfactory performance.
+In this paper, we propose a new efficient label propagation algorithm. The key idea of our approach is to compute lower and upper bounding scores and thus iteratively
+prune unnecessary score computations in determining a label for each node. The resulting computation time of our
+approach falls to O(cnt), where t is the average number of iterations for each label. In practice, t ≪ n, so
+our approach is significantly faster than the original algorithm. Even though many approximation approaches have
+been proposed for efficient label propagation (Fergus et al.,
+2009; Kumar et al., 2009; Talwalkar et al., 2008; Yu & Yu,
+2005; Zhu et al., 2003), one key advantage of our approach
+compared to them is that it guarantees the same label-
+
+Efficient Label Propagation
+
+Table 1. Definition of main symbols.
+Symbol
+n
+c
+xi
+li
+y(xi )
+f (xi |lj )
+f t (xi |lj )
+f (xi |lj )
+t
+fi
+yi
+W
+S
+F
+Y
+
+Definition
+Number of data points
+Number of labels
+i-th data point
+i-th label
+Label of data point xi
+i-th element of vector fj
+Upper bound of f (xi |lj ) in the t-th iteration
+Lower bound of f (xi |lj ) in the t-th iteration
+i-th column vector of matrix F
+i-th column vector of matrix Y
+n × n adjacency matrix of the k-NN graph
+Normalization matrix of W
+n × c classification matrix
+n × c initial label matrix
+
+ing results as the optimal solution yielded by the inverse
+matrix computation. Moreover, our approach can handle several types of graphs such as the linear neighborhood graph and the sparse L1 graph (Wang & Zhang, 2008;
+Elhamifar & Vidal, 2011). On the other hand, the previous approaches do not have this property since their focus is on the graph Laplacian, where edge weights are
+forced to be non-negative (von Luxburg, 2007). Alexandrescu et al. collapsed multiple nodes having the same
+label before applying the power method to increase its
+speed (Alexandrescu & Kirchhoff, 2007). In addition, Subramanya et al. effectively used the cache in a parallel
+computing implementation by ordering the nodes for the
+power method (Subramanya & Bilmes, 2009). Since we
+iteratively compute the estimations similar to the power
+method, their approaches complement our approach. Experiments confirm that our approach is much faster than
+the existing methods. Note that our approach does not require users to set any inner-parameters whereas the previous approaches, including the power method, have innerparameters that significantly impact the labeling results.
+The remainder of this paper is organized as follows. Section 2 briefly reviews the original label propagation approach by Zhou et al. and the power method. Section 3
+introduces the main ideas and details of our algorithm. Section 4 reviews the results of our experiments. Section 5
+provides our conclusions.
+
+2. Preliminary
+In this section, we briefly review label propagation proposed by Zhou et al. (Zhou et al., 2003). Table 1
+lists the main symbols and their definitions. X =
+{x1 , x2 , . . . , xm , xm+1 , . . . , xn } represents a set of data
+points, and L = {l1 , l2 , . . . , lc } is the label set. The
+first m data points, {x1 , x2 , . . . , xm }, are labeled by
+{y(x1 ), y(x2 ), . . . , y(xm )|y(xi ) ∈ L} and the remaining
+data points are unlabeled. The goal of label propagation is
+to predict the labels of unlabeled data points which can be
+achieved as mentioned below.
+
+First, a graph G = {V, E} is constructed where the set of
+nodes V is the set of data points X, i.e., V = X. E is the
+set of edges whose weights reflect the similarities among
+data points. The k-NN graph scheme is the most popular approach for graph construction. In the k-NN graph,
+a node pair share an undirected edge if the two nodes are
+k-nearest neighbors (von Luxburg, 2007). This indicates
+that the number of edges is O(n) and the graph is symmetric. Conventionally, the edge weight between point xi and
+xj , Wij , is obtained by a Gaussian kernel (Bishop, 2007);
+Wij = exp{−||xi − xj ||2 /2σ 2 } if an edge connects data
+point xi to xj , otherwise Wij = 0. In this equation, σ is a
+hyperparameter. Many researchers have proposed efficient
+approaches for the k-NN graph construction (Chen et al.,
+2009; Connor & Kumar, 2010; Dong et al., 2011).
+Next, the node scores are computed for each label to determine labels for unlabeled data points. In label propagation,
+the labeling scores are defined as the optimal solution that
+minimizes the cost function. The n × c size matrix F corresponds to a classification on data points X by labeling
+each data point; matrix F holds the labeling scores of all
+data points for each label. Y is an n × c size matrix where
+Yij = 1 if point xi is initially labeled as y(xi ) = lj and
+Yij = 0 otherwise. Let Fi and Yi be the i-th row vector
+of F and Y, respectively, i.e., F = [F1 , F2 , . . . , Fn ]T and
+Y = [Y1 , Y2 , . . . , Yn ]T . The cost function C(F) associated with classification matrix F is defined as follows:
+2
+
+∑n
+
+
+F
+C(F) = 12 i,j=1 Wij  √FDi − √ j 
+ii
+Djj
+(1)
+(
+) ∑n
+2
++ α1 − 1
+∥F
+−
+Y
+∥
+i
+i
+i=1
+In
+∑nEquation (1), D is a diagonal matrix where Dii =
+j=1 Wij , and α is a constant parameter such that 0 <
+α < 1 (Zhou et al., 2003). The cost function is designed
+to enhance the accuracy of label prediction. The first and
+second terms in the cost function C(F) correspond to the
+smoothness constraint and the fitting constraint, respectively. The smoothness constraint means that a good classifying function should not change too much between nearby
+points. The fitting constraint means good classification
+should not change too much from the initial label assignment. Minimizing the cost function yields the optimal F in
+the following closed form:
+F = (I − αS)−1 Y
+
+(2)
+
+where I is an identity matrix of size n × n and S is computed from matrix W as S = D−1/2 WD−1/2 . Let fi
+(1 ≤ i ≤ c) be the i-th column vector of matrix F that
+corresponds to label li , and let f (xi |lj ) be the i-th element
+of vector fj that corresponds to data point xi . The label of
+data point xi , y(xi ), is obtained as follows:
+y(xi ) = arg max1≤j≤c f (xi |lj )
+
+(3)
+
+Efficient Label Propagation
+
+Equation (2) indicates that the labeling score computation
+involves the matrix inversion operation; it requires O(n3 )
+time to compute the inverse matrix (Belkin et al., 2006).
+Moreover, it takes O(cn2 ) time to compute the classification matrix F since matrix F is obtained as the product
+of matrix (I − αS)−1 and Y whose sizes are n × n and
+n × c, respectively. Consequently, the approach requires
+O(n3 + cn2 ) time to obtain labels from the graph which is
+prohibitively high.
+Zhou et al.
+proposed to utilize the power method
+(Golub & Loan, 2012) to enhance the labeling speed, and
+this is the standard approach for label propagation. Their
+approach iteratively updates the labeling scores in the following form where Ft is the classification matrix of the t-th
+iteration (Zhou et al., 2003):
+Ft+1 = αSFt + (1 − α)Y
+
+(4)
+
+It is known that the scores yielded by the power method are
+equivalent to those by the optimal solution (Equation (2))
+after convergence; F∞ = F. However, in practice, the
+power method terminates the iterations when the residual is
+less than some predetermined value (Xu et al., 2011). This
+indicates that the power method approximately computes
+the labeling scores. Even though the power method is the
+standard approach for label propagation, it does not output
+the same labeling results as the the optimal solution.
+
+3. Proposed method
+This section presents our fast label propagation approach;
+it outputs the same labeling results as the optimal solution. First, we give an overview of the ideas underlying
+our approach and then provide a full description in Sections 3.1 to 3.4. We also give some theoretical analyses
+of its performance in Section 3.5. Finally, we show that
+we can handle other graph construction approaches, such
+as linear neighborhood graphs (Wang & Zhang, 2008) and
+sparse L1 graphs (Elhamifar & Vidal, 2011), as well as kNN graphs in Section 3.6.
+3.1. Ideas
+The power method iteratively computes the labeling scores
+until convergence for all labels. In order to enhance the
+efficiency, we do not update the scores for all labels. Instead, our approach updates labeling scores for a subset
+of labels. Subset membership is determined by using the
+lower and upper bounds of labeling scores. This approach
+has several strong advantages. First, if there is no label to
+be updated, we terminate the iterations without waiting for
+convergence, unlike the power method. This implies that
+our approach needs fewer iterations than the power method.
+Second, we can obtain exactly the same labeling results
+as the optimal solution. This is because the lower/upper
+
+bounds allow us to safely discard unnecessary score computations. Finally, our approach does not require any userdefined inner-parameter. By contrast, the power method
+requires setting of the predetermined threshold for iteration
+termination, which induces a trade-off between efficiency
+and accuracy. That is, our approach is user-friendly.
+3.2. Lower/upper bounds
+We iteratively compute the lower and upper bounds for
+the labeling scores to efficiently obtain a label for each
+node. In the t-th iteration (t = 0, 1, 2, . . .), we compute the
+lower/upper bounds for label set Lt ; we detail the procedure used to obtain Lt in Section 3.3. Let yi be the i-th column vector of matrix Y, and let y(xi |lj ) be the i-th element
+of vector yj . yi corresponds to scores of initially labeled
+nodes for label li . y(xi |lj ) = Yij is the initial label score
+of data point xi with respect to label lj . We here introduce propagation score pt (xi |l) to obtain the lower/upper
+bounds. We iteratively compute propagation score pt (xi |l)
+of data point xi for label l in the t-th iteration as follows:
+{
+y(x
+(t = 0)
+∑ i |l)
+pt (xi |l) =
+(5)
+S
+p
+(x
+|l)
+(t
+̸= 0)
+ij
+t−1
+j
+xj ∈X
+This equation indicates that (1) the propagation scores are
+initialized by the initial label setting if t = 0 and (2) the
+propagation scores are incrementally updated from those of
+the previous iteration and the matrix S. The lower bound
+of data point xi for label l, f t (xi |l), is obtained by using
+the propagation scores as follows:
+Definition 1 (Lower bound) The lower bound of labeling
+score f (xi |l) in the t-th iteration is computed as follows:
+{∑
+}
+αt+1 σ p (l)
+t
+τ
+t
+{α
+p
+(x
+|l)}+
+f t (xi |l) = (1−α)
+(6)
+τ
+i
+τ =0
+1−ασ
+where σ and pt (l) are defined as follows:
+∑
+σ = min1≤i≤n xj ∈X Sij
+
+(7)
+
+pt (l) = min1≤i≤n pt (xi |l)
+
+(8)
+
+Before describing the lower bounding property of f t (xi |l),
+we introduce the following two lemmas which underlie the
+lower bounding property:
+Lemma 1 (L1 norm of row elements) The value of σ is
+not larger than 1, i.e. , σ ≤ 1.
+Proof As shown in (Zhou et al., 2003), the i-th eigenvalue
+of matrix S, λi , is −1 ≤ λi ≤ 1. Since S is clearly
+a non-negative matrix, we have the following inequality
+for the spectral radius of matrix S, ρ(S), from the PerronFrobenius theorem (Golub & Loan, 2012):
+∑
+σ = min1≤i≤n xj ∈X Sij ≤ ρ(S) = max1≤i≤n |λi | ≤ 1
+Therefore, we have σ ≤ 1.
+
+□
+
+Efficient Label Propagation
+
+□
+
+Lemma 2 (Lower bounding difference) For the (t + τ )th iteration where τ ≥ 1, we have pt+τ (xi |l) ≥ pt (l)σ τ
+Proof We prove Lemma 2 by mathematical induction
+(Gunderson, 2010).
+
+which completes the proof.
+
+Initial step: From Equation (5), we have the following inequality in the (t+1)-th iteration:
+∑
+∑
+pt+1 (xi |l) = xj ∈X Sij pt (xj |l) ≥ pt (l) xj ∈X Sij ≥ pt (l)σ
+
+Definition 2 (Upper bound) In the t-th iteration, the following equation gives the upper bound of labeling score
+f (xi |l), f t (xi |l):
+
+Inductive step: In the (t+τ−1)-th iteration, we assume that
+pt+τ −1 (xi |l) ≥ pt (l)σ τ −1 holds. From Equation (5),
+∑
+pt+τ (xi |l) = xj ∈X Sij pt+τ −1 (xj |l)
+∑
+≥ pt (l)σ τ −1 xj ∈X Sij ≥ pt (l)σ τ
+This completes the inductive step. Therefore, pt+τ (xi |l) ≥
+pt (l)σ τ holds.
+□
+By utilizing Lemma 1 and 2, we show the lower bounding
+property of f t (xi |l).
+Lemma 3 (Lower bound) For the labeling score of data
+point xi , f t(xi |l) ≤ f (xi |l) holds in the t-th iteration.
+Proof From Equation (4), we have
+Ft = αSFt−1 +(1−α)Y = α2 S2 Ft−2 +(1−α)(αSY+Y)
+∑t−1
+= . . . = αt St Y + (1 − α) τ =0 (ατ Sτ Y)
+Since (1) limt→∞ (αS)t = 0 as shown in (Zhou et al.,
+2003) and (2) the power method has the property of converging to the theoretically correct scores, we have
+∑t−1
+F = lim {(αS)t Y + (1 − α) τ =0 (ατ Sτ Y)}
+t→∞
+∑∞
+= (1 − α) τ =0 (ατ Sτ Y)
+Therefore, for column vector f in matrix F and the corresponding column vector y in matrix Y, we have the following equation from Equation (5):
+∑∞
+∑∞
+f = (1 − α) τ =0 (ατ Sτ y) = (1 − α) τ =0 (ατ pτ (l))
+where pτ (l) is an n × 1 vector where the i-th element is
+pτ (xi |l). Consequently, the i-th element of vector f , which
+corresponds to data point xi , can be computed as follows:
+∑∞
+f (xi |l) = (1 − α) τ =0 {ατ pτ (xi |l)}
+
+The upper bound can be obtained by exploiting the propagation scores as follows:
+
+f t (xi |l) =
+{
+} (9)
+∑t
+t S(xi )
+(1−α) τ=0 {ατ pτ (xi |l)}+αt+1 pt (xi |l)+nδ1−α
+In this equation, S(xi ) and δt are defined as follows:
+S(xi ) = max1≤j≤n Sij
+(10)
+{
+n
+(t = 0)
+δt = ∑
+(11)
+xi ∈X max{pt (xi |l)−pt−1 (xi |l), 0} (t ̸= 0)
+The upper bounding property of Definition 2 is based on
+the following two lemmas:
+Lemma 4 (L1 norm of column elements) Letting ei be
+an n × 1 vector of zeros with only the i-th element set to
+1, we have Sτ ei ≤ n.
+Proof Let U = [u1 , u2 , . . . , un ] be an n × n matrix composed of the eigenvectors of S where ui is eigenvector of
+eigenvalue λi . In addition, let D be a diagonal matrix of
+eigenvalues such that D = diag (λ1 , λ2 , . . . , λn ). Since
+matrix S is symmetric, we have U−1 = UT . Therefore,
+Sτ = (UDU−1 )τ = UDτ UT . As shown in (Zhou et al.,
+2003), we have −1 ≤ λi ≤ 1. Therefore,
+∑
+∑
+Sτ ei = 1≤j≤n λτj uj uTj ei ≤ 1≤j≤n 1τ uj uTj ei = n
+As a result, we have Sτ ei ≤ n.
+
+□
+
+Lemma 5 (Upper bounding difference) For the (t+τ )-th
+iteration, pt+τ (xi |l) ≤ pt (xi |l) + τ nδt S(xi ) holds.
+τ −1
+Proof Letting Sij
+be the (i, j) element of matrix Sτ −1 ,
+from Equation (5), we have
+pt+τ (xi |l) − pt+τ −1 (xi |l)
+∑
+∑
+τ −1
+{pt (xk |l) − pt−1 (xk |l)}
+= xj ∈X xk ∈X Sij Sjk
+∑
+∑
+τ −1
+≤ xk ∈X xj ∈X S(xi )Sjk
+max{pt (xk |l) − pt−1 (xk |l), 0}
+(∑
+)
+∑
+τ −1
+=S(xi ) xk∈X max{pt (xk |l)−pt−1 (xk |l), 0} xj∈X Sjk
+
+∑
+τ −1
+From the above equation and Lemma 2, f t (xi |l) can be
+From Lemma 4, we have xj ∈X Sjk
+= Sτ −1 ek ≤ n.
+computed as follows:
+Therefore, from Equation (11),
+{∑t
+}
+∑∞ t+τ
+τ
+f (xi|l) =(1−α)
+pt+τ (xi|l))
+pt+τ (xi |l) − pt+τ −1 (xi |l) ≤ nδt S(xi )
+τ=0 (α pτ (xi|l))+
+τ=1 (α
+{∑t
+}
+∑
+∞
+τ
+t
+τ τ
+≥(1−α)
+τ=0 (α pτ (xi|l))+α pt (l)
+τ=1 (α σ )
+As a result,
+Since
+α < 1 and σ τ ≤ 1 from Lemma 1, we have
+∑∞ 0 <
+ασ
+τ τ
+τ =1 (α σ ) = 1−ασ . As a result,
+}
+{∑
+αt+1 σ p (l)
+t
+τ
+t
+= f t(xi |l)
+f (xi |l) ≥ (1−α)
+{α
+p
+(x
+|l)}+
+τ
+i
+τ =0
+1−ασ
+
+pt+τ(xi |l)≤ pt+τ−1(xi |l)+nδt S(xi )≤ . . . ≤ pt(xi |l)+τ nδt S(xi )
+which completes the proof.
+The upper bounding property is introduced as follows:
+
+□
+
+Efficient Label Propagation
+
+Lemma 6 (Upper bound) We have f t(xi |l) ≥ f (xi |l) for
+3.3. Label set
+the labeling score of data point xi in the t-th iteration.
+In the t-th iteration, we compute the lower/upper bounds
+Proof As shown in the proof of Lemma 3,
+for
+label set Lt instead of all the labels to enhance the effi{∑t
+}
+∑∞
+τ
+t+τ
+f (xi |l) = (1−α)
+(α
+p
+(x
+|l))+
+(α
+p
+(x
+|l))
+ciency.
+In this section, we first define label set Lt , and then
+τ
+i
+t+τ
+i
+τ =0
+τ =1
+introduce its theoretical property.
+Therefore, from Lemma 5, we have
+{ ∑t
+We obtain label set Lt by using the lower/upper bounds in
+τ
+f (xi |l) ≤ (1 − α)
+τ =0 (α pτ (xi |l))+
+each iteration. Formally, the label set in the t-th iteration,
+}
+∑
+∑
+∞
+∞
+αt pt (xi |l) τ =1 ατ + αt nδt S(xi ) τ =1 τ ατ
+Lt , is given as follows:
+∑∞
+∑∞
+α
+α
+τ
+τ
+Since τ =1 α = 1−α and τ =1 τ α = (1−α)2 ,
+Definition 3 (Label set) Letting lj ̸= li and t ̸= 0, label li
+{∑
+t
+is included in label set Lt if the following condition holds
+τ
+f (xi |l) ≤ (1 − α)
+τ =0 (α pτ (xi |l))+
+for data point x such that x ∈ X:
+}
+αt+1 nδt S(xi )
+αt+1 pt (xi |l)
++ (1−α)2
+= f t (xi |l)
+1−α
+(1) ∃lj s.t. f t−1 (x|li ) ≤ f t−1 (x|lj ), and
+Consequently, we have f t (xi |l) ≥ f (xi |l).
+□
+(2) ∀l ∈ L, f (x|l ) ≥ f (x|l )
+j
+
+As described in Section 3.1, we iteratively compute the
+lower/upper bounds. Note that we do not compute the
+bounds with Definition 1 and 2 in each iteration. Instead,
+we incrementally update the lower/upper bounds for efficient labeling by using the following property:
+Lemma 7 (Incremental update) In the t-th iteration, if
+the propagation score of data point xi is obtained, the
+lower/upper bounds of the t-th iteration can be incrementally updated from those of the (t − 1)-th iteration at O(1)
+time as follows:
+f t (xi |l) =
+
+{
+}
+σ(αp (l)−p (l))
+t
+t−1
+f t−1(xi |l)+(1−α)α pt (xi |l)+
+1−ασ
+t
+
+(12)
+
+f t (xi |l) =
+
+{
+} (13)
+t−δt−1)
+ft−1(xi |l)+αt pt (xi |l)−pt−1(xi |l)+nS(xi)(αδ
+1−α
+
+The proof of Lemma 7 is omitted due to space limits. However, this property can be shown by computing f t (xi |l) −
+f t−1 (xi |l) and f t (xi |l) − f t−1 (xi |l) from Definition 1 and
+2, respectively. We can efficiently compute the lower/upper
+bounds in the iterations by utilizing Lemma 7.
+For the convergence values of f t (xi |l) and f t (xi |l), we
+have the following property:
+Lemma 8 (Convergence of the lower/upper bounds)
+The lower/upper bounds converge to the exact labeling
+score. That is, f ∞ (xi |l) = f ∞ (xi |l) = f (xi |l) holds.
+Even though we omit the proof of this lemma due to space
+limits, it can be derived from Equation (6) and (9) by using the property of pt (xi |l) ≤ n obtained from Lemma 4.
+This lemma implies that the bounds are expected to tighten
+as the number of iterations increases. Furthermore, this
+lemma gives the theoretical guarantee that our approach
+outputs the same labeling results as the optimal solution.
+
+t−1
+
+i
+
+t−1
+
+j
+
+If t = 0, the label set Lt is initialized as L, i.e., Lt = L.
+We introduce the following two lemmas to describe the
+property of label set Lt :
+Lemma 9 (Labeled data) If we have f t (x|li ) > f t (x|lj )
+for all labels lj such that lj ̸= li and lj ∈ L, the label of
+data point x is determined as li by the optimal solution.
+Proof If f t (x|li ) > f t (x|lj ) holds for such label lj , from
+Lemma 3 and 6, we have
+f (x|lj ) ≤ f t (x|lj ) < f t (x|li ) ≤ f (x|li )
+Therefore, it is clear that max1≤k≤c f (x|lk ) = f (x|li ). As
+a result, from Equation (3),
+y(x) = arg max1≤k≤c f (x|lk ) = li
+Therefore, the optimal solution labels data point x as li . □
+Lemma 10 (Unlabeled data) The optimal solution determines the label of data point x as not li if f t (x|li ) <
+f t (x|lj ) holds for a label lj such that lj ̸= li and lj ∈ L.
+Proof If f t (x|li ) < f t (x|lj ) holds for such label lj , from
+Lemma 3 and 6, we have
+f (x|li ) ≤ f t (x|li ) < f t (x|lj ) ≤ f (x|lj )
+Therefore, it is clear that max1≤k≤c f (x|lk ) ̸= f (x|li ).
+Consequently, from Equation (3),
+y(x) = arg max1≤k≤c f (x|lk ) ̸= li
+This indicates that data point x is not labeled as li by the
+optimal solution.
+□
+From Lemma 9 and 10, we introduce the following property of label set Lt :
+
+Efficient Label Propagation
+
+Lemma 11 (Label set) If label li is included in label set
+Lt and t ̸= 0, there exists data point x whose label is not
+determined as or as not li by the lower and upper bounds.
+Proof If lj ̸= li and t ̸= 0, from Lemma 9 and 10,
+there are the following two conditions under which data
+point x is not determined to have/not to have label li by
+the lower/upper bounds: (1) there exists a label lj such that
+f t−1 (x|li ) ≤ f t−1 (x|lj ), and (2) f t−1 (x|li ) ≥ f t−1 (x|lj )
+holds for all labels lj ∈ L. These two conditions are equivalent to those of the label set Lt as shown in Definition 3.
+Consequently, the statement of Lemma 11 holds.
+□
+Lemma 11 validates our approach with the property to output the same labeling results as the optimal solution.
+3.4. Labeling algorithm
+Algorithm 1 is the full description of our approach. We
+initially set t := 0 and Lt := L (lines 1-2). If t = 0, we
+compute the lower and upper bounds from Equation (6) and
+(9), respectively (lines 5-9). Otherwise, we incrementally
+update the lower/upper bounds to enhance the processing
+speed from Lemma 7 (lines 10-16). We then compute label
+set Lt+1 from Definition 3 (lines 18-24). We iteratively
+repeat these procedures until no label remains in Lt+1 (line
+28). We finally determine the label of each node from the
+lower bounds (lines 29-31).
+Note that, our algorithm does not require any user-defined
+inner-parameters. Moreover, it terminates the iterations automatically unlike the power method. Therefore, our approach provides to the user with a simple way to determine
+labels with enhanced processing speed.
+3.5. Theoretical analyses
+We introduce theoretical analyses addressing labeling results and the computational cost of our approach.
+
+Algorithm 1 Proposed algorithm
+1: t := 0;
+2: Lt := L;
+3: repeat
+4: for each label li ∈ Lt do
+5:
+if t = 0 then
+6:
+for each data point xj ∈ X do
+7:
+compute propagation score pt (xj |li ) by Equation (5);
+8:
+compute the lower/upper bounds by Equation (6) and (9);
+9:
+end for
+10:
+else
+11:
+for each data point xj ∈ X do
+12:
+update propagation score pt (xj |li ) by Equation (5);
+13:
+update the lower/upper bounds by Equation (12) and (13);
+14:
+end for
+15:
+end if
+16: end for
+17: Lt+1 := ∅;
+18: for each data point xi ∈ X do
+19:
+for each label lj ∈ Lt do
+20:
+if ∃lk s.t.f (xi|lj )≤f t(xi|lk ) and∀lk∈L,f t(xi|lj )≥f (xi|lk ) then
+t
+t
+21:
+add label lj to label set Lt+1 ;
+22:
+end if
+23:
+end for
+24: end for
+25: if Lt ̸= ∅ then
+26:
+t := t + 1;
+27: end if
+28: until Lt = ∅
+29: for each data point xi ∈ X do
+30: y(xi ) = arg max1≤j≤c f t (xi |lj );
+31: end for
+
+Lemma 3 and 6, we have
+y(x) = arg max1≤k≤c f t (x|lk ) = li
+Therefore, our approach also determines li as the label of
+data point x.
+If we have f t (x|li ) < f t (x|lj ) for a label lj , li is not determined as the label of data point x according to the optimal
+solution from Lemma 10. In addition, since f t (x|li ) ≤
+f t (x|li ) < f t (x|lj ) holds from Lemma 3 and 6, we have
+y(x) = arg max1≤k≤c f t (x|lk ) ̸= li
+
+Theorem 1 (Labeling results) The labeling results of our
+approach are the same as those of the optimal solution.
+
+As a result, our approach also determines the label of data
+point x as not li .
+
+Proof We assume that we reach termination after t iterations. As shown in Algorithm 1, we determine the label of
+data point x as follows:
+
+Consequently, the labeling results of the optimal solution
+and our approach are identical.
+□
+
+y(x) = arg max1≤k≤c f t (x|lk )
+
+Theorem 2 (Computational cost) Our approach requires
+O(cnt) time to obtain the labeling result.
+
+In addition, we perform iterations until the label set contains no label. Therefore, let label li and lj be li , lj ∈ L
+and li ̸= lj , we have (1) ∀lj , f t (x|li ) > f t (x|lj ) or (2)
+∃lj such that f t (x|li ) < f t (x|lj ) after the iterations from
+Definition 3.
+If f t (x|li ) > f t (x|lj ) holds ∀lj , the label of data point x is
+determined as li by the optimal solution from Lemma 9. In
+addition, since f t (x|lj ) ≤ f t (x|lj ) < f t (x|li ) holds from
+
+Proof For each label, our approach iteratively computes
+the propagation scores to obtain the lower/upper bounds.
+This process needs O(nt) time since the number of edges
+in the graph is O(n) as described in Section 2. The
+lower/upper bounds of data points in the iterations are obtained at O(nt) time since it needs O(1) time to compute
+the lower/upper bounds from the propagation scores as described in Lemma 7. As a result, it requires O(cnt) time to
+obtain the lower/upper bounds from the propagation scores
+
+Efficient Label Propagation
+
+103
+
+102
+
+101
+
+Reuters-21578
+
+COIL-100
+
+(1) k-NN graph
+
+104
+
+Proposed
+Power
+Optimal
+Wall clock time [s]
+
+104
+
+Proposed
+Power
+Optimal
+Wall clock time [s]
+
+Wall clock time [s]
+
+104
+
+103
+
+102
+
+101
+
+Reuters-21578
+
+COIL-100
+
+(2) linear neighborhood graph
+Figure 1. Labeling time of each approach.
+
+3.6. Extension
+
+A linear neighborhood graph is constructed so that each
+node is represented as a linear combination of its local
+neighbor nodes, just like locally linear embedding (LLE)
+(Roweis & Saul, 2000). In a sparse L1 graph, nearest
+neighbors of each data points and corresponding edge
+weights are obtained by solving an L1 -norm sparse optimization problem. Note that these graphs can have a negative edge weight. The major change of our approach is to
+compute the lower/upper bounds for these graph structures.
+More specifically, the bounds are computed as follows:
+
+103
+
+102
+
+101
+
+100
+
+Reuters-21578
+
+COIL-100
+
+(3) sparse L graph
+1
+
+Table 2. Number of average iterations in each approach.
+Graph
+Dataset
+Approach
+k-NN linear
+L1
+Proposed
+435.3 427.5
+62.9
+Reuters-21578
+Power
+990.2 633.6 143.7
+Proposed
+588.1 646.3 112.7
+COIL-100
+Power
+879.3 913.5 247.1
+
+in the iteration since the number of labels is c. In addition,
+our approach computes the label set from Definition 3 by
+using the lower/upper bounds, which needs O(cnt) time.
+Consequently, our approach requires O(cnt) time.
+□
+
+In Section 3.1 to 3.5, we assume the use of k-NN graphs
+since it is the most popular graph structure for label propagation. In this section, we briefly describe the extension of
+our approach to handle other popular graph structures such
+as linear neighborhood graph (Wang & Zhang, 2008) and
+sparse L1 graph (Elhamifar & Vidal, 2011).
+
+Proposed
+Power
+Optimal
+
+terms of efficiency and effectiveness. The experiments
+used the following standard datasets.
+• Reuters-21578 1 : This dataset contains documents released by the Reuters newswire. Documents with multiple category labels were discarded. As a result, it
+contained 8, 293 documents of 65 categories. tf-idf
+was used as the document feature; it has 18, 933 dimensions.
+• COIL-100 2 : This dataset contains images of 100 objects; the number of object labels is 100. Images of
+the objects were taken at pose intervals of 5 degrees;
+72 poses per object resulting in 7, 200 images. We resized all images to 32 × 32 and used RGB pixel values
+as the feature vector, resulting in 3, 048 dimensions.
+
+In this section, “Proposed”, “Power”, and “Optimal” represent the results of the proposed approach, the power
+Definition 4 (Lower/upper bounds) The following equamethod, and the optimal solution, respectively. The retions give the lower bound f t (xi |l) and the upper bound
+sults of the optimal solution are obtained by computing the
+f t (xi |l) for linear neighborhood graph and sparse L1
+inverse matrices. Following previous papers (Zhou et al.,
+graph:
+2003; Xu et al., 2011), we set α = 0.99 and stop iterating the power method when the residual drops below 10−4 .
+∑t
+f t (xi |l) = (1−α) τ =0 {ατ pτ (xi |l)}+αt+1 pt (l)
+We conducted the experiments for the linear neighborhood
+1
+{
+∑t
+δt S(xi ) } graph and sparse L graph as well as k-NN graph, where
+τ
+t+1
+f t (xi |l) = (1−α) τ=0 {α pτ (xi |l)}+α
+pt (xi |l)+ 1−α
+100 nearest neighbors were used to construct each graph 3 .
+In the experiments, 10 data points in each category/object
+While we omit the details of the above definition, it can
+were initially labeled. All experiments were conducted on
+be derived
+from the property of these graph structures such
+a Linux 2.70 GHz Intel Xeon sever.
+∑
+that xj ∈X Sij = 1. The next section evaluates the labeling speed of our approach for linear neighborhood graphs
+4.1. Efficiency
+and sparse L1 graphs as well as k-NN graphs.
+We evaluated the labeling time of each approach. Figure 1
+shows the results. In addition, Table 2 details the number of
+
+4. Experimental evaluation
+
+1
+
+We performed experiments to compare the proposed approach to the optimal solution and the power method in
+
+http://www.daviddlewis.com/resources/testcollections/reuters21578/
+http://www.cs.columbia.edu/CAVE/software/softlib/coil-100.php
+3
+We set the parameter λ = 10 on sparse L1 graph.
+2
+
+Efficient Label Propagation
+
+Table 3. Precision against the optimal solution.
+Graph
+Dataset
+Approach
+k-NN linear
+L1
+Proposed
+1.000 1.000 1.000
+Reuters-21578
+Power
+0.725 0.723 0.812
+Proposed
+1.000 1.000 1.000
+COIL-100
+Power
+0.899 0.982 0.980
+
+average iterations needed by the proposed approach and the
+power method. In this table, “k-NN”, “linear”, and “L1 ”
+represent the results of each approach for k-NN graph, linear neighborhood graph, and sparse L1 graph, respectively.
+Figure 1 shows that our approach is much faster than the
+previous approaches for all the types of graphs. Our approach is up to 410 and 2.3 times faster than the optimal solution and the power method, respectively. Since the optimal solution requires matrix inversion to obtain the labeling
+scores, it needs O(n3 +cn2 ) time as described in Section 2.
+On the other hand, our approach avoids computing the
+matrix inversion; it iteratively computes the lower/upper
+bounds to determine the labels in O(cnt) time (Theorem 2).
+The power method also exploits iterative computation in a
+similar way to our approach. However, the power method
+computes the labeling scores for all the labels while our
+approach updates the lower/upper bounds only for selected
+labels. Furthermore, we terminate the iterations without
+waiting for convergence if no label remains to be updated
+(Algorithm 1). Therefore, as shown in Table 2, our approach needs fewer iterations than the power method. As a
+result, our approach has better labeling speed than the previous approaches.
+4.2. Effectiveness
+One major advantage of our approach is that it outputs the
+same labeling results as the optimal solution. The power
+method can obtain the exact labeling scores if it performs
+iterations until convergence. However, in practice, iterations are terminated to enhance the labeling speed, i.e., it
+approximately computes the labeling scores.
+We evaluated the precision of the labeling results by our
+approach and the power method against the optimal solution. In this experiment, precision is the fraction of labeling
+results of an approach that match the labeling results of the
+optimal solution. Precision takes a value between 0 and
+1, and, precision is 1 if the labeling results are identical to
+those of the optimal solution. Table 3 indicates the precision of each approach. In addition, Table 4 shows classification accuracy of each approach for ground-truth labels.
+Table 3 shows that, as expected, the precision of our approach is 1 under all conditions examined. This is because
+our approach has the theoretical property that the labeling
+
+Table 4. Classification accuracy.
+Graph
+Dataset
+Approach
+k-NN linear
+Optimal
+0.744 0.597
+Reuters-21578
+Proposed
+0.744 0.597
+Power
+0.595 0.538
+Optimal
+0.533 0.891
+COIL-100
+Proposed
+0.533 0.891
+Power
+0.531 0.889
+
+L1
+0.603
+0.603
+0.547
+0.902
+0.902
+0.900
+
+results of our approach are same as those of the optimal
+solution as shown in Theorem 1. In contrast, the power
+method has precision under 1; the power methods and the
+optimal solutions output different labeling results. This is
+because the power method terminates its iterative computation if the residual is less than the predetermined threshold.
+Precision is expected to improve if the threshold is set to
+a smaller score, however, this obviously reduces labeling
+speed. It is clear that setting the threshold forces a tradeoff between precision and labeling speed.
+As shown in Table 4, classification results of our approach
+is same as those of the optimal solution since our approach
+output the same labeling results as the optimal solution as
+shown in Table 3. Table 4 also indicates that the power
+method has lower classification accuracy than the optimal
+solution. As described in Section 2, the optimal solution
+gives the scores that minimize the cost function. Since the
+cost function is designed to improve classification accuracy, the optimal solution has high classification accuracy.
+However, the power method outputs different labeling results from the optimal solution as shown in Table 3. As a
+result, the power method has lower classification accuracy.
+Table 4 along with Figure 1 indicates that the power method
+enhances labeling speed at the sacrifice of classification accuracy even though it is currently the standard approach
+to computing labeling scores. On the other hand, our approach achieves higher labeling speed than the previous approaches while its labeling results replicate those of the optimal solution. Furthermore, our approach does not require
+any inner-parameters to be set unlike the power method.
+This indicates that our approach is an attractive option for
+the research community in use in label propagation.
+
+5. Conclusions
+This paper proposed an efficient label propagation algorithm that gives the same labeling results as the optimal solution. Our approach computes lower and upper
+bounds of the labeling scores to prune unnecessary score
+computations. Experiments show that our approach can
+achieve high efficiency without sacrificing accuracy unlike
+the power method. Our approach can improve the effectiveness of future label-propagation-based applications.
+
+Efficient Label Propagation
+
+References
+Alexandrescu, Andrei and Kirchhoff, Katrin. Graph-based
+Learning for Phonetic Classification. In ASRU, pp. 359–
+364, 2007.
+Belkin, Mikhail, Niyogi, Partha, and Sindhwani, Vikas.
+Manifold Regularization: A Geometric Framework for
+Learning from Labeled and Unlabeled Examples. Journal of Machine Learning Research, 7:2399–2434, 2006.
+Bishop, Christopher M. Pattern Recognition and Machine
+Learning. Springer, 2007.
+Chapelle, Olivier, Scholkopf, Bernhard, and Zien, Alexander. Semi-Supervised Learning. The MIT Press, 2010.
+Chen, Jie, ren Fang, Haw, and Saad, Yousef. Fast Approximate kNN Graph Construction for High Dimensional
+Data via Recursive Lanczos Bisection. Journal of Machine Learning Research, 10:1989–2012, 2009.
+Connor, Michael and Kumar, Piyush. Fast Construction
+of k-Nearest Neighbor Graphs for Point Clouds. IEEE
+Trans. Vis. Comput. Graph., 16(4):599–608, 2010.
+Dong, Wei, Charikar, Moses, and Li, Kai. Efficient kNearest Neighbor Graph Construction for Generic Similarity Measures. In WWW, pp. 577–586, 2011.
+Elhamifar, Ehsan and Vidal, René. Sparse Manifold Clustering and Embedding. In NIPS, pp. 55–63, 2011.
+Fergus, Rob, Weiss, Yair, and Torralba, Antonio. Semisupervised Searning in Gigantic Image Collections. In
+NIPS, pp. 522–530, 2009.
+Golub, Gene H. and Loan, Charles F. Van. Matrix Computations. Johns Hopkins University Press, 2012.
+Gunderson, David S. Handbook of Mathematical Induction: Theory and Applications. Chapman and Hall/CRC,
+2010.
+Kumar, Sanjiv, Mohri, Mehryar, and Talwalkar, Ameet.
+Sampling Techniques for the Nystrom Method. In AISTATS, pp. 304–311, 2009.
+Roweis, Sam T. and Saul, Lawrence K. Nonlinear Dimensionality Reduction by Locally Linear Embedding. Science, 290:2323–2326, 2000.
+Subramanya, Amarnag and Bilmes, Jeff A.
+Entropic Graph Regularization in Non-parametric Semisupervised Classification. In NIPS, pp. 1803–1811,
+2009.
+Talwalkar, Ameet, Kumar, Sanjiv, and Rowley, Henry A.
+Large-scale Manifold Learning. In CVPR, 2008.
+
+von Luxburg, Ulrike. A Tutorial on Spectral Clustering.
+Statistics and Computing, 17(4):395–416, 2007.
+Wang, Fei and Zhang, Changshui. Label Propagation
+through Linear Neighborhoods. IEEE Trans. Knowl.
+Data Eng., 20(1):55–67, 2008.
+Xu, Bin, Bu, Jiajun, Chen, Chun, Cai, Deng, He, Xiaofei,
+Liu, Wei, and Luo, Jiebo. Efficient Manifold Ranking
+for Image Retrieval. In SIGIR, pp. 525–534, 2011.
+Yu, Kai and Yu, Shipeng. Blockwise Supervised Inference
+on Large Graphs. In Proc. of the 22nd ICML Workshop
+on Learning, 2005.
+Zhou, Dengyong, Bousquet, Olivier, Lal, Thomas Navin,
+Weston, Jason, and Schölkopf, Bernhard. Learning with
+Local and Global Consistency. In NIPS, 2003.
+Zhu, Xiaojin, Ghahramani, Zoubin, and Lafferty, John D.
+Semi-supervised Learning Using Gaussian Fields and
+Harmonic Functions. In ICML, pp. 912–919, 2003.
+
+

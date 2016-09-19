@@ -1,0 +1,1241 @@
+B LITZ: A Principled Meta-Algorithm for Scaling Sparse Optimization
+
+Tyler B. Johnson
+Carlos Guestrin
+University of Washington, Seattle, WA 98195, USA
+
+Abstract
+By reducing optimization to a sequence of small
+subproblems, working set methods achieve fast
+convergence times for many challenging problems. Despite excellent performance, theoretical understanding of working sets is limited,
+and implementations often resort to heuristics to
+determine subproblem size, makeup, and stopping criteria. We propose B LITZ, a fast working set algorithm accompanied by useful guarantees. Making no assumptions on data, our theory
+relates subproblem size to progress toward convergence. This result motivates methods for optimizing algorithmic parameters and discarding
+irrelevant variables as iterations progress. Applied to `1 -regularized learning, B LITZ convincingly outperforms existing solvers in sequential,
+limited-memory, and distributed settings. B LITZ
+is not specific to `1 -regularized learning, making
+the algorithm relevant to many applications involving sparsity or constraints.
+
+1. Introduction
+With user-specific features for recommendation, n-gram
+phrases in text, or high-order transformations for feature
+engineering, many learning problems involve large numbers of features. In these cases, `1 regularization is a popular tool, as it biases learning toward sparse solutions. Sparsity offers many advantages, including reduced resources
+needed at test time, more interpretable models, and statistical efficiency, as the feature space may increase exponentially with sample size (Ng, 2004; Wainwright, 2009).
+Unfortunately, convergence times for `1 -regularized loss
+minimization tend to grow linearly with the number of features. For faster solutions, recent works have considered
+parallel algorithms (Boyd et al., 2011; Bradley et al., 2011;
+Proceedings of the 32 nd International Conference on Machine
+Learning, Lille, France, 2015. JMLR: W&CP volume 37. Copyright 2015 by the author(s).
+
+TBJOHNS @ WASHINGTON . EDU
+GUESTRIN @ CS . WASHINGTON . EDU
+
+Fercoq & Richtárik, 2013). Despite parallel speedups,
+these algorithms in their basic form share a significant inefficiency: equal priority is assigned to all features. Due to
+sparsity, most features are instead irrelevant to the solution!
+We propose B LITZ, a general optimization algorithm that
+prioritizes resources on important parts of the problem. For
+`1 -regularized learning, B LITZ solves a sequence of subproblems restricted to small subsets of features using an existing solver, converging quickly to the original problem’s
+solution. Known as a working set method, this concept is
+not new. GLMNET (Friedman et al., 2010) and LIBLINEAR (Yuan et al., 2012), two libraries for `1 -regularized
+learning, prioritize computation with working set heuristics. More broadly, working sets have been applied successfully to a diverse set of optimization problems involving sparsity or constraints; see Fan et al. (2005), Tsochantaridis et al. (2005), and Kim & Park (2008) as examples.
+Given the practical success of working set methods, theoretical understanding of these algorithms is surprisingly
+limited. How to choose a subproblem, how large it should
+be, and when it should terminate are questions inadequately
+answered by existing theory. We present novel analysis to
+offer such perspective. Without assumptions on data, our
+theory explains how to choose working sets to guarantee a
+desired amount of progress toward convergence. This motivates methods for eliminating irrelevant variables and optimizing algorithmic parameters, making B LITZ’s choices
+of subproblem size, variables, and stopping criteria more
+principled and robust than previous approaches allow.
+In practice, our theoretical insights lead to very fast convergence times for `1 -regularized learning. In the sequential
+setting, B LITZ outperforms solvers such as GLMNET and
+LIBLINEAR, making B LITZ one of the fastest algorithms
+for high dimensional lasso and sparse logistic regression on
+a single machine. We then show additional gains for B LITZ
+in limited-memory and distributed regimes. By considering
+data in subsets, B LITZ prioritizes not only computation but
+also memory and bandwidth usage, directly targeting I/O
+and communication bottlenecks for problems at scale.
+Importantly, B LITZ directly extends to objectives other
+
+B LITZ
+
+Algorithm 1 Common Working Set Algorithm
+initialize x0 ∈ Rn
+for t = 1, 2, . . . until converged do
+Choose τt ∈ R
+Ct ← {hj : hj (xt−1 ) ≥ τt ∨ hj (xt−1 ) = 0}
+xt ← argmin f (x) s.t. hj (x) ≤ 0 for all hj ∈ Ct
+end for
+return x
+than `1 -regularized loss minimization. Given the performance of B LITZ for this well-studied application, an intriguing open question is whether similar performance is
+achievable for additional objectives.
+
+Algorithm 2 B LITZ
+initialize x0 ← argmin f (x) and y0 ∈ D
+for t = 1, 2, . . . until converged do
+# Compute extreme feasible point on segment [x, y]:
+αt ← max {α ∈ [0, 1] : αxt−1 + (1 − α)yt−1 ∈ D}
+yt ← αt xt−1 + (1 − αt )yt−1
+# Select constraints with boundaries close to y:
+Choose τt > 0
+Ct ← {hj : dist(hj , yt ) ≤ τt ∨ hj (xt−1 ) = 0}
+# Solve subproblem subject to selected constraints:
+xt ← argmin f (x) s.t. hj (x) ≤ 0 for all hj ∈ Ct
+end for
+return x
+
+In summary of our contributions, we propose B LITZ, a
+working set algorithm that:
+• Selects theoretically justified subproblems to maximize guaranteed progress toward convergence.
+• Applies theoretical analysis to automatically tune
+algorithmic parameters and discard irrelevant constraints as the algorithm runs.
+• Achieves very fast convergence times when applied to
+`1 -regularized learning in a variety of settings.
+• Provides a novel proof path for analyzing working set
+methods for sparse or constrained optimization.
+
+2. The B LITZ Algorithm
+In this section, we introduce B LITZ, including convergence
+analysis and numerical experiments examining our bounds.
+2.1. Problem Formulation
+
+In other words, constraints hj for which hj ∈
+/ C ? have no
+?
+?
+effect on x . Often when m is large, |C |  m. Given C ? ,
+(P1) could be solved extremely efficiently by solving (P2).
+
+We consider the convex problem
+minimize
+s.t.
+
+f (x)
+hj (x) ≤ 0
+
+j = 1, . . . , m ,
+
+(P1)
+
+where x ∈ Rn , and hj is convex for all j. We assume f
+is γ-strongly convex, and we denote (P1)’s solution by x? .
+We define the feasible region
+D = {x : hj (x) ≤ 0 for all j = 1, . . . , m} .
+
+Figure 1. B LITZ Illustration. At iteration 1, C = {h1 }. At iteration 2, C will include both h1 and h2 . y ← αx + (1 − α)y
+updates y to be the extreme feasible point on segment [x, y].
+
+(1)
+
+We focus on instances of (P1) with large m. While not obvious, many unconstrained problems involving sparsity are
+instances of (P1), as sparsity often appears as constraints in
+a problem’s dual (see Section 3 or Bach et al. (2012)).
+
+Since C ? is unknown, algorithms known as working set algorithms instead solve (P1) by minimizing f subject to a
+sequence of small constraint sets C1 , C2 , . . . until CT ⊇ C ?
+at which point the algorithm converges. Algorithm 1 is a
+simple working set method. At each iteration, C includes
+constraints active or most violated at the previous subproblem solution x. (Note constraints may later exit C.) While
+effective in practice, except for guaranteed convergence,
+we know of no theoretical guarantees for Algorithm 1. Improving upon Algorithm 1 in both theory and practice is an
+important problem this work begins to address.
+
+Define the set of active constraints at x? :
+C ? = {hj : hj (x? ) = 0} .
+
+(2)
+
+In addition to (P1), x? solves the modified problem
+minimize
+s.t.
+
+f (x)
+hj (x) ≤ 0
+
+for all hj ∈ C ? .
+
+(P2)
+
+2.2. B LITZ Algorithm Overview
+B LITZ is defined in Algorithm 2. x is initialized as
+the unconstrained minimizer of f (unique due to strong
+convexity), while y is a point in D. We update y via
+y ← αx + (1 − α)y, where α is the largest coefficient in
+
+B LITZ
+
+inf
+
+z : hj (z)=0
+
+kz − yk2 ,
+
+(3)
+
+where constraints with boundaries closest to y receive
+highest priority. Often (3) can be computed in closed
+form (and often lower bounded for more complex hj ), and
+we include examples for doing so in supplementary material. A constraint hj is included in the working set C if
+(i.) dist(hj , y) is less than a threshold τ , or (ii.) hj (x) = 0,
+meaning hj is active at x. τ controls the size of each subproblem. Upon determining C, x is set to the minimizer of
+f subject only to constraints in C. B LITZ reaches optimality when x no longer violates any constraints.
+Before considering analysis, we can observe two intuitive
+advantages Algorithm 2 has over Algorithm 1:
+P
+• Scale invariance: Consider hj (x) = i xi . In this
+case, hj and hk = 100hj are effectively the same constraint. However, in Algorithm 1, hk may be included
+in C when hj is not. B LITZ is invariant to this scaling.
+• Feasibility regularization: B LITZ chooses constraints
+C that are close to a feasible point y or tight at x. This
+ensures both f (y) decreases and f (x) increases during an iteration. Algorithm 1 chooses constraints that
+are active or most violated by x, which only ensures
+f (x) increases. By using y to choose C, B LITZ compensates for constraints that are greatly violated by x.
+2.3. Convergence Analysis
+We now analyze the convergence of B LITZ. For now, we
+assume each iteration’s subproblem is solved exactly. All
+proofs are provided in supplementary material.
+For all iterations t, since yt ∈ D and xt minimizes f subject to a subset of constraints, we have
+(4)
+
+f (xt ) ≤ f (x? ) ≤ f (yt ) .
+Thus, we may define an optimality gap
+∆t = f (yt ) − f (xt ) ≥ f (yt ) − f (x? ) .
+
+(5)
+
+A strength of B LITZ is that both f (yt ) and f (xt ) converge
+monotonically to f (x? ). At each iteration, substantial improvement must be made in f (yt ), f (xt ), or both. This is
+the intuition of our first theorem:
+Theorem 2.1 (Convergence Progress at Iteration t). Let ∆t
+and ∆t+1 be the optimality gaps after iterations t and t + 1
+of Algorithm 2. Then for all t ≥ 1 if the algorithm does not
+converge at iteration t + 1, we have
+∆t+1 ≤ ∆t −
+
+
+γ 2 2 1/3
+2 τt ∆t
+
+.
+
+(6)
+
+0
+
+0
+
+10
+
+1
+
+10
+
+2
+
+t/
+
+dist(hj , y) =
+
+100
+
+100
+
+t/
+
+[0, 1] such that y remains in D. Constraints are prioritized
+according to the Euclidean distance
+
+2
+
+4
+
+6
+
+8 10 12 14
+
+10
+
+1
+
+10
+
+2
+
+0.8
+
+0.85
+
+Iteration t
+
+0.9
+
+0.95 1.0
+
+r
+
+(a) Fixed r
+
+(b) Fixed # Iterations
+
+Figure 2. Theory vs. Practice. (a) For r = 0.95, 15 trials of
+observed optimality gap and bound (Corollary 2.2) vs. iteration.
+(b) After 2 iterations, optimality gap and bound (Corollary 2.2)
+vs. decrease ratio r. Convergence is faster than theory guarantees, but theory and experiments agree on the scaling of τ and ∆
+(plotted appropriately, trends are approximately linear).
+
+If τ is held constant for all t, Algorithm 2 converges in
+a fixed number of subproblems. In practice, τ should decrease over time to ensure |C| remains small. The following
+corollary suggests a scaling of τ for fast convergence:
+Corollary 2.2 (Linear Convergence). For t ≥ 1, define
+∆0t = f (yt ) − f (xt−1 ) ,
+
+(7)
+
+and suppose we run Algorithm 2 choosing τt as
+q
+τt = γ2 (1 − r)3 ∆0t
+
+(8)
+
+for some r ∈ [0, 1). Then for t ≥ 1, we have
+
+(9)
+
+f (yt ) − f (x? ) ≤ rt−1 ∆0 .
+
+Another consequence of Theorem 2.1 is a method for identifying constraints guaranteed to be inactive at x? . This
+is similar to prescreening, a useful preprocessing step that
+eliminates irrelevant constraints for particular instances of
+(P1) (Ghaoui et al., 2012; Liu et al., 2014). Finding τt such
+that ∆t ≤ 0 in (6), we arrive at the following corollary:
+Corollary 2.3 (Constraint Elimination). For t ≥ 1, define
+∆0t as in (7). If
+q
+dist(hj , yt ) > γ2 ∆0t ,
+(10)
+then hj (x? ) < 0, and hj may be eliminated from (P1).
+Compared to prescreening, Corollary 2.3 is more general
+and can be applied at any iteration of B LITZ; however,
+fewer constraints may be discarded initially. Elaboration
+on this topic is included in supplementary material.
+2.4. Experiments with Bounds
+To examine our bounds numerically, we instantiate (P1) as
+minimize
+n
+x∈R
+
+s.t.
+
+2
+
+kx − bk2
+ T 
+A x ≤ λ
+j
+
+j = 1, . . . , m .
+
+(P3)
+
+B LITZ
+Table 1. Summary of Quantities for `1 -Regularized Learning. Table includes loss φi , convex conjugate φ∗i , primal-dual mapping p,
+and smoothness constant L for lasso and logistic regression.
+
+1
+(aTi w
+2
+
+S QUARED
+L OGISTIC
+
+φ∗i (xi )
+
+φi (aTi w)
+
+L OSS
+
+log 1 +
+
+− b i )2
+
+exp(−bi aTi w)
+
+
+
+− xbii
+
+1
+(b
+2 i
+log(− xbii )
+
+(Later we will see (P3) is dual to the lasso.) We let
+m = 10,000 and n = 100. Elements of b and
+ Aj are
+3
+max ATj b, redrawn i.i.d. from N (0, 1). We set λ = 10
+j
+
+sulting in approximately 30 active constraints at x? .
+
++ xi )2 − 12 b2i
++ (1 +
+
+xi
+) log(1
+bi
+
++
+
+xi
+)
+bi
+
+[p(Aw? , b)]i
+
+L
+
+aTi w? − bi
+?
+−bi exp(−bi aT
+i w )
+?)
+1+exp(−bi aT
+w
+i
+
+1
+1
+4
+
+B = [−1, 1] and
+g(w) = −
+
+n
+X
+i=1
+
+
+log 1 + exp(−bi aTi w) − λ kwk1 . (12)
+
+In Figure 2, we compare results solving (P3) with B LITZ
+to our worst-case bounds. Figure 2(a) plots convergence
+vs. iteration choosing τ with (8) and r = 0.95. Figure 2(b)
+plots optimality gaps after 2 iterations using a range of r
+values. Each plot aggregates 15 problem instances. The
+solid green line is our analytical bound. Axes are scaled so
+that the bound displays as a line.
+
+For arbitrary loss φi , we require a single assumption:
+
+From Figure 2, we see that while convergence is faster
+in practice than our bounds guarantee, theory and practice
+agree well on the scaling of τ and ∆.
+
+To solve (P4) with B LITZ, we transform (P4) into its dual:
+Pn
+∗
+minimize
+i=1 φi (xi )
+x∈Rn
+ T 
+(P5)
+A x  ≤ λ
+j = 1, . . . , m .
+s.t.
+
+Assumption 3.1 (Smooth Loss). The derivative φ0i exists
+and is Lipschitz continuous with constant L:
+|φ0i (x) − φ0i (y)| ≤ L|x − y| for all x, y ∈ R .
+
+(13)
+
+3.2. `1 Duality
+
+j
+
+3. Application: `1 -Regularized Learning
+We now apply B LITZ to `1 -regularized optimization. This
+class of problems is widely used for supervised learning, compressed sensing, and algorithms for more complex
+problems in which `1 penalties appear in subproblems.
+3.1. `1 -Regularized Loss Minimization
+We consider problems for which a feature vector ai ∈ Rm
+is used to predict a label bi ∈ B. Our prediction function
+is parameterized by a vector w? ∈ Rm , which is computed
+by maximizing an `1 -regularized likelihood function over
+a set of n training examples {(a1 , b1 ), . . . , (an , bn )}:
+maximize
+g(w) = −
+m
+w∈R
+
+n
+X
+
+φi (aTi w)
+
+i=1
+
+− λ kwk1 .
+
+(P4)
+
+Above φi : R → R≥0 is a convex loss function parameterized by bi . λ > 0 is a tuning parameter. For large enough
+λ, many values of w? are exactly zero. We let A ∈ Rn×m
+denote the design matrix, its ith row ai and jth column Aj ,
+while b ∈ B n denotes a labels vector with ith element bi .
+
+We focus on two popular forms of (P4): the lasso (Tibshirani, 1996), for which B = R and
+2
+
+g(w) = − 12 kAw − bk2 − λ kwk1 ,
+
+(11)
+
+as well as sparse logistic regression (Ng, 2004), for which
+
+P
+Here φ∗i is the convex conjugate of φi . f (x) = i φ∗ (xi )
+is strongly convex due to the following proposition:
+Proposition 3.2 (Strong Convexity of `1 Dual). Given Assumption 3.1, f (x) is strongly convex with parameter L1 .
+Strong duality holds for this problem (f (x? ) = g(w? )),
+and there exists a mapping p between optimal variables:
+x? = p(Aw? , b) .
+
+(14)
+
+Table 1 summarizes relevant quantities for (P4) and (P5).
+Derivations are included in supplementary material.
+3.3. Partial Subproblem Convergence
+(P5) can be solved naturally with B LITZ. Minimizing (P5)
+subject to a subset of constraints corresponds to maximizing (P4) over a subset of variables, prioritizing resources on
+important features. However, Algorithm 2 requires exact
+subproblem solutions, which is impractical. To accommodate partial solutions in our analysis, we require the subproblem solver returns a primal-dual pair (xt , wt ), where
+(15)
+ T 
+and ξt is the largest scaler in (0, 1] such that Aj xt  ≤ λ
+for all constraints in Ct . Here we must redefine ∆t as
+xt = ξt · p(Awt , b) ,
+
+∆t = f (yt ) − g(wt ) ,
+
+(16)
+
+so that ∆t upper bounds f (yt )−f (x? ) and g(w? ) − g(wt )
+for all t. We avoid spending excessive time on subproblem
+t by monitoring its duality gap, terminating when
+(17)
+
+for a tolerance t ∈ [0, 1). This enables our next theorem:
+Theorem 3.3 (Progress for `1 with Approximate Solver).
+For (P5), define ∆t as in (16), and assume xt and wt satisfy (17). If αt+1 = 1, assume g(wt+1 ) ≥ g(wt ). If
+αt+1 < 1, let hj be the (possibly non-unique) constraint
+such that hj (xt ) > 0 and hj (yt+1 ) = 0 and assume
+g(wt+1 ) ≥ max g(wt + δej ). Then for t ≥ 1, we have
+1
+2L (1
+
+− t )2 τt2 ∆2t
+
+1/3
+
+, t ∆t
+
+100
+
+100
+2
+
+10
+
+10
+e
+
+1
+
+100
+
+10
+
+3
+
+10 2
+1 r
+
+10
+
+1
+
+10
+
+1
+
+102
+100
+10 2
+2
+
+10
+e
+
+Auto-adjust
+
+o
+
+.
+(18)
+
+102
+
+102
+100
+10 2
+
+δ
+
+n
+∆t+1 ≤ max ∆t −
+
+102
+
+10
+
+Dt
+
+f (xt ) − g(wt ) ≤ t (f (yt ) − g(wt ))
+
+Dt
+
+B LITZ
+
+1
+
+100
+
+10
+
+3
+
+Best-case r
+
+10 2
+1 r
+
+Best-case e
+
+3.4. Optimizing Algorithmic Parameters
+
+Figure 3. Optimizing Parameters. (above) Squared loss. (below) Logistic loss. For synthetic problem, B LITZ is run multiple
+times for 15 seconds using different  and r which are fixed as
+Blitz runs. Plotted is resulting optimality gap. Green curve fixes
+best-case r and varies . Purple curve fixes best-case  and varies
+r. Blue line is result of automatically tuning via (21). In these
+cases, parameter adaption is better than any fixed (r, ) pair.
+
+The performance of working set algorithms is sensitive to
+subproblem size and stopping criteria. We apply Theorem 3.3 to optimize τ and  at runtime. This procedure
+is not meant to be exact, rather to provide B LITZ with a basic mechanism for adjusting these parameters. We model
+the duration of iteration t as Tα + Tsolve-t (τ, ), where
+
+Figure 4). We set CTC to the ratio of elapsed time to
+log (∆0 /∆0t ). Since Cα , Csolve , CP , and CTC cannot be
+computed before the first iteration, we initialize B LITZ with
+a relatively small, easy subproblem (100 features in sequential setting and 1 = 0.5).
+
+Note that when t = 0, we recover Theorem 2.1. The technical condition g(wt+1 ) ≥ max g(wt + δej ) can easily be
+δ
+
+satisfied with one coordinate descent update of wj .
+
+Tα = Cα ,
+
+Tsolve-t (τ, ) = Csolve
+
+NNZ(τ, t)
+.
+
+
+(19)
+
+Above Tα is the time to compute α. Tsolve-t (τ, ) estimates
+the time to solve the subproblem, increasing proportional to
+the number of nonzero elements in columns Aj for which
+hj ∈ Ct and inversely proportional to . Cα and Csolve are
+constants, which are computed using runtime data by solving for Cα and Csolve in (19) after each iteration and taking
+median values over this history. Applying Theorem 3.3, we
+model convergence progress as
+n
+o
+ˆ t+1 (τ, ) = max ∆0 − CP ((1 − )τ ∆0 )2/3 , ∆0 .
+∆
+t
+t
+t
+(20)
+Above, ∆0t = f (yt )−g(wt−1 ), which is used as an approximation to ∆t since ∆t cannot be computed before choosing τt . The constant CP accounts for bound looseness (see
+Figure 2), estimated using an analogous procedure to that
+for Cα and Csolve . Finally, we choose τt and t by solving
+τt , t = argmin
+τ,
+
+ˆ t+1 (τ, )
+∆
+exp {−CTC [Tα + Tsolve-t (τ, )]}
+
+(21)
+
+approximately with grid search. The time constant CTC accounts for empirical evidence that B LITZ’s overall convergence rate should be closer to linear than sublinear (see
+
+We experiment with this approach using two synthetic
+datasets, each containing 5×103 examples, 1×105 features
+and elements drawn i.i.d. from N (0, 1). We solve lasso on
+the first dataset using labels drawn from N (0, 1), and we
+solve logistic regression on the second dataset assigning
+labels ±1 with equal probability. We solve for 15 seconds
+using regularization λ = 0.05λMAX 1 and a variety of fixed
+r (from (8)) and  values, comparing to the proposed autoadjustment method. As Figure 3 illustrates, performance
+varies for choice of r and , but our tuning method makes
+B LITZ robust to this effect and improves upon any single
+choice of parameters by an order of magnitude in this case.
+3.5. Sequential Comparisons
+We now demonstrate the performance of B LITZ in practice.
+Our comparisons begin with the case that the dataset (A, b)
+fits in memory of a single machine. For this setting, we
+implement B LITZ in C++ using a coordinate descent-based
+proximal Newton method to solve each subproblem.
+In this setting, we compare B LITZ to seven alternatives:
+• P ROX N EWT: Our subproblem solver for B LITZ (no
+1
+
+λMAX is the smallest λ for which w? = 0.
+
+101
+
+102
+Time (s)
+
+1021
+100
+10
+10 12
+10 3
+10 4
+10 5
+10 6
+10 7
+10
+
+100
+
+101
+Time (s)
+B LITZ
+
+Recall
+101
+
+P ROX N EWT
+
+Precision
+
+Relative Suboptimality
+
+B LITZ
+
+1.0
+0.8
+0.6
+0.4
+0.2
+0.0
+
+102
+P ROX N EWT
+
+1.0
+0.8
+0.6
+0.4
+0.2
+0.0
+
+102
+Time (s)
+GLMNET
+
+100
+
+101
+Time (s)
+
+GLMNET
+
+1.0
+0.8
+0.6
+0.4
+0.2
+0.0
+
+101
+
+L1 LS
+
+Recall
+
+1021
+100
+10
+10 12
+10 3
+10 4
+10 5
+10 6
+10 7
+10
+
+Precision
+
+Relative Suboptimality
+
+B LITZ
+
+102
+L1 LR
+
+102
+Time (s)
+
+APPROX
+
+1.0
+0.8
+0.6
+0.4
+0.2
+0.0
+
+100
+
+101
+Time (s)
+
+LIBLINEAR
+
+102
+
+CD
+
+Figure 4. Sequential Comparisons. (above) Results from lasso problem on finance dataset. (below) Results from logistic regression
+problem on RCV1 dataset. B LITZ quickly determines the sparsity pattern of w? , converging faster than alternative solvers.
+
+prioritization of features).
+• GLMNET 1.9-8 (Friedman et al., 2010): Popular R
+package for lasso and sparse logistic regression; implemented in Fortran; uses working set heuristics2 .
+• LIBLINEAR 1.94 (Yuan et al., 2012): Widely-used
+C++ solver for sparse logistic regression (lasso not implemented); uses working set heuristics3 .
+• L1_LS (Kim et al., 2007): Interior point method for
+lasso implemented in MATLABr .
+• L1_L OG R EG 0.8.2 (Koh et al., 2007): Interior point
+method for sparse logistic regression written in C.
+• APPROX (Fercoq & Richtárik, 2013): Parallel, accelerated coordinate descent for lasso; pre-computed
+step sizes ensure convergence; C++ implementation.
+• CD: C++ implementation of coordinate descent for
+sparse logistic regression.
+With the exception of L1_LS, each solver is compiled with
+version 4.8.2 of the applicable GNU C/C++/Fortran compiler and -O3 optimization flag. Our hardware is a 64-bit
+machine with 2.0 GHz Intel i7-2630QM processors, 8 GB
+memory, and 6 MB cache. Solvers that utilize parallelism
+(APPROX, L1_LS, and L1_LR) use up to 8 threads.
+2
+We found the performance of GLMNET depends significantly on its termination threshold—even during early iterations.
+We run GLMNET using only its default stopping condition.
+3
+To achieve consistent solutions, we slightly modify this im-
+
+Table 2. Problem Instances for Sequential Comparisons. We
+choose λ = 0.05λMAX to select a desirable number of features
+(kw? k0 significantly smaller than min(n, m) while still resulting
+in a difficult problem).
+DATASET
+
+L OSS
+
+n
+
+m
+
+NNZ
+
+F INANCE S QUARED 1.6×104 1.6×106 9.2×107
+RCV1
+L OGISTIC 2.0×104 2.4×106 6.2×107
+
+kw? k0
+1419
+537
+
+We include results for two problem instances listed in Table 2. Datasets are publicly available from LIBSVM4 . To
+emphasize the high dimensional setting, we expand RCV1,
+including features formed by taking the element-wise product of each pair of original features, disregarding new features that contain five or fewer nonzeros. Since L1_LS and
+APPROX do not support an unregularized intercept term,
+we include this variable for logistic regression but not lasso.
+We standardize columns to have unit `2 -norm for lasso and
+unit variance for logistic regression. For lasso, we standardize b to have zero mean and unit variance.
+We quantify the performance of each solver using three
+metrics. The first metric measures convergence progress
+plementation to use an unregularized bias term.
+4
+URL:
+http://www.csie.ntu.edu.tw/~cjlin/
+libsvmtools/datasets/.
+
+102
+Time (min)
+
+B LITZ
+
+1.0
+0.8
+0.6
+0.4
+0.2
+0.0
+101
+
+Recall
+
+1021
+100
+10
+10 12
+10 3
+10 4
+10 5
+10 6
+10 7
+10
+101
+
+Precision
+
+Relative Suboptimality
+
+B LITZ
+
+102
+
+1.0
+0.8
+0.6
+0.4
+0.2
+0.0
+101
+
+Time (min)
+
+A DA RDA 100.0
+
+A DA RDA 10.0
+
+102
+Time (min)
+
+A DA RDA 1.0
+
+S TRONG
+
+CD
+
+Figure 5. Limited Memory Comparison. Results for Webspam dataset and logistic loss. A DA RDA’s numeral suffix refers to the value
+of its step-size parameter. By efficiently prioritizing available memory, B LITZ quickly obtains an accurate solution.
+
+vs. time in terms of relative suboptimality:
+|g(w? ) − g(wt )| / |g(w? )| .
+
+(22)
+
+w? is approximated as the solution returned by B LITZ
+after solving to machine precision. We also plot precision and recall for nonzero weight variables wj . Define
+S ? = {j : wj? 6= 0} and St as the analogous support set
+for wt . (For solvers that do not set values wj to exactly 0,
+we take wj to be nonzero i.f.f. |wj | ≥ 10−3 .) We measure
+|St ∩ S ? |
+,
+|St |
+
+|St ∩ S ? |
+.
+|S ? |
+(23)
+Precision and recall are suitable metrics for `1 -regularized
+learning, since `1 regularization is most prominently used
+for feature selection, while generalization performance can
+be suppressed by coefficients overly biased toward zero.
+Precision =
+
+and
+
+Recall =
+
+Results of our comparison are included in Figure 4. Comparing B LITZ to its subproblem solver, P ROX N EWT, as
+well as other methods without working sets, we see prioritizing computation provides extreme gains. With 8 threads,
+APPROX requires at least 6 minutes to solve a lasso problem that our sequential implementation of B LITZ completes in fewer than 30 seconds. Compared to other working set algorithms (GLMNET and LIBLINEAR), we see
+B LITZ still can be faster. While GLMNET and LIBLINEAR are highly optimized implementations, we see precision and recall results are superior for B LITZ, suggesting
+computation is better-focused on relevant features.
+3.6. Limited Memory Comparison
+Often datasets are too large to fit in the memory of a single
+machine. To solve (P4), one option is to load data multiple times from disk. While disk I/O becomes a bottleneck,
+B LITZ can be used to prioritize memory usage.
+Applying B LITZ is straightforward in this setting if the set
+{Aj : wj? 6= 0} fits comfortably in memory. At each it-
+
+eration, τ is chosen such that the resulting subproblem includes as many features as memory limitations allow. Computing this τ requires a single pass over the data. Each subproblem is then solved with (in-memory) B LITZ.
+We compare this approach to three alternatives:
+• A DA RDA (Duchi et al., 2011): Stochastic gradient
+descent method with adaptive step-sizes. RDA is wellsuited for `1 -regularized learning (Xiao, 2010).
+• S TRONG (Tibshirani et al., 2012): Like B LITZ but features are prioritized according to the “Strong Rule.”
+Regularization is initialized to λMAX and decreased at
+each iteration until reaching the target λ. S TRONG
+uses (in-memory) B LITZ to solve subproblems.
+• CD: A memory-limited coordinate descent implementation. Aj is loaded, (P4) is maximized with respect to wj , then memory for Aj is deallocated.
+We implement each method in C++. To enable sequential
+loads, training data is stored on disk in compressed row
+format for A DA RDA and compressed column format for
+all other methods. Data is stored in binary format and compressed with gzip. Our hardware is a 64-bit machine with
+2.60 GHz Intel i5-4278U processors and a SATA HDD that
+achieves read rates of 100 MB/s.
+We compare algorithms using the Webspam dataset from
+LIBSVM and logistic loss. This dataset contains 3.5 × 105
+examples, 6.8×105 features, and 1.3×109 nonzero entries.
+We set λ = 0.01λMAX , resulting in 762 selected features.
+We normalize features to have unit variance. Under default
+compression, the dataset occupies approximately 12 GB.
+To emphasize the limited memory setting, we allow each
+algorithm use of just 1 GB memory.
+Results of this experiment are included in Figure 5. B LITZ
+and S TRONG greatly outperform alternative solvers that do
+not use more of the available memory. Clearly for some
+large problems, one need not settle for approximate solutions when the solution is sparse.
+
+2
+
+10
+
+3
+
+10
+
+4
+
+10
+
+5
+
+10
+
+6
+
+101
+
+102
+
+1.0
+0.8
+0.6
+0.4
+0.2
+0.0
+
+101
+
+Time (min)
+
+102
+
+Communication (min)
+
+10
+
+F1 Score
+
+Relative Suboptimality
+
+B LITZ
+102
+
+101
+
+Time (min)
+B LITZ
+
+KKT F ILTER
+
+101
+
+102
+Time (min)
+
+N O P RIORITIZATION
+
+Figure 6. Distributed Comparison. Results for CTR dataset with logistic loss. B LITZ and the KKT filter approach prioritize communication, greatly improving convergence times. F1 = 2 · Precision · Recall / (Precision + Recall) for selected features.
+
+3.7. Distributed Comparison
+For the largest problems, it is necessary to distribute data
+among many machines. Often distributed solvers for (P4)
+partition data by training examples and communicate gradient vectors of length m, the number of features, at each
+iteration. With m exceeding one billion in some industrial
+applications (Chen et al., 2014), communication becomes
+a bottleneck to optimization. In this setting, B LITZ can be
+used to drastically decrease the communication needed.
+As a concrete example, consider a bulk synchronous proximal gradient descent implementation with data partitioned
+by examples. During an iteration, each node computes the
+gradient contribution of its local partition, and an O(m)
+reduce operation aggregates these contributions to determine the global gradient. By solving subproblems with
+only |C| features, B LITZ reduces the time complexity of
+this reduce operation to O(|C|) per subproblem iteration. A
+“KKT filter” heuristic with similar motivation was recently
+proposed by Li et al. (2014). Communication of gradient
+values that are small in magnitude is prolonged until later
+iterations, which greatly improves convergence times.
+We compare B LITZ with the KKT filter approach and a
+proximal gradient method with no prioritization of communication. The underlying solver for each method is an
+identical proximal gradient descent implementation which
+uses backtracking as detailed by Beck & Teboulle (2009)
+to ensure convergence. We implement this method in C++
+using Rabit5 , a reliable all-reduce communication library.
+The KKT filtering step is directly translated from the implementation of Li et al. (2014).
+We compare methods using sparse logistic regression
+and the Criteo click-through rate dataset6 . This dataset
+has 4.6×107 examples, 3.3×107 features, and 1.5×109
+nonzero entries. We normalize features to have unit vari5
+6
+
+URL: https://github.com/tqchen/rabit.
+URL: http://labs.criteo.com/downloads.
+
+ance. Using λ = 0.01λMAX , the solution contains 5717
+nonzero elements. We use 64 workers on 16 servers connected with 1 Gb/s networking. We approximate the optimal solution by running B LITZ for 200 minutes.
+Results of this experiment are provided in Figure 6. By
+prioritizing communication, B LITZ and the KTT filtering
+method converge an order of magnitude faster than the
+naïve proximal gradient algorithm.
+
+4. Discussion
+`1 -regularized learning owes its popularity to the practical
+and statistical benefits of sparsity. In this work, we propose
+B LITZ, a method for exploiting sparsity during optimization. Unlike previous working set heuristics, B LITZ enables theoretically justified methods for choosing the contents, size, and stopping criteria of subproblems.
+In several settings, B LITZ converges extremely quickly for
+`1 -regularized learning. Given such performance, it is important to consider additional problems for which B LITZ
+can work well. As a beginning, the analogy between constraint elimination (Corollary 2.3) and screening methods
+suggest B LITZ may work well for other applications for
+which screening has found traction (for example Wang
+et al. (2014)). It would also be interesting to consider more
+challenging objectives, including graphical lasso and problems with trace or total variation norms.
+Another remaining challenge is to apply B LITZ to problems for which the constraint space is intractably large and
+cannot be enumerated. This includes structured prediction
+(Tsochantaridis et al., 2005) and submodular minimization
+(Fujishige & Isotani, 2011). We view B LITZ as a very
+promising starting point for future work on these problems
+and large-scale machine learning in general.
+
+B LITZ
+
+Acknowledgments
+The authors would like to thank the reviewers for their
+thoughtful suggestions as well as Joseph Bradley for his
+feedback on early versions of B LITZ. This work is supported in part by PECASE N00014-13-1-0023, NSF IIS1258741, and the TerraSwarm Research Center 00008169.
+
+Kim, H. and Park, H. Nonnegative matrix factorization based on alternating nonnegativity constrained least
+squares and active set method. SIAM Journal on Matrix
+Analysis and Applications, 30(2):713–730, 2008.
+
+References
+
+Kim, S. J., Koh, K., Lustig, M., Boyd, S., and Gorinevsky,
+D.
+An interior-point method for large-scale `1 regularized least squares. IEEE Journal on Selected Topics in Signal Processing, 1(4):606–617, 2007.
+
+Bach, F., Jenatton, R., Mairal, J., and Obozinski, G. Optimization with sparsity-inducing penalties. Foundations
+and Trends in Machine Learning, 4(1):1–106, 2012.
+
+Koh, K., Kim, S. J., and Boyd, S. An interior-point method
+for large-scale `1 -regularized logistic regression. Journal of Machine Learning Research, 8:519–1555, 2007.
+
+Beck, A. and Teboulle, M. A fast iterative shrinkagethresholding algorithm for linear inverse problems.
+SIAM Journal on Imaging Sciences, 2(1):183–202, 2009.
+
+Li, M., Smola, A., and Andersen, D. G. Communication
+efficient distributed machine learning with the parameter
+server. In Advances in Neural Information Processing
+Systems 27, 2014.
+
+Boyd, S., Parikh, N., Chu, E., Peleato, B., and Eckstein, J.
+Distributed optimization and statistical learning via the
+alternating direction method of multipliers. Foundations
+and Trends in Machine Learning, 3(1):1–122, 2011.
+Bradley, J. K., Kyrola, A., Bickson, D., and Guestrin,
+C. Parallel coordinate descent for L1 -regularized loss
+minimization. In International Conference on Machine
+Learning, 2011.
+Chen, W., Wang, Z., and Zhou, J. Large-scale L-BFGS
+using MapReduce. In Advances in Neural Information
+Processing Systems 27, 2014.
+Duchi, J., Hazan, E., and Singer, Y. Adaptive subgradient
+methods for online learning and stochastic optimization.
+Journal of Machine Learning Research, 12:2121–2159,
+2011.
+Fan, R. E., Chen, P. H., and Lin, C. J. Working set selection
+using second order information for training support vector machines. Journal of Machine Learning Research, 6:
+1889–1918, 2005.
+
+Liu, J., Zhao, Z., Wang, J., and Ye, J. Safe screening with
+variational inequalities and its application to lasso. In
+International Conference on Machine Learning, 2014.
+Ng, A. Y. Feature selection, L1 vs. L2 regularization, and
+rotational invariance. In International Conference on
+Machine Learning, 2004.
+Tibshirani, R. Regression shrinkage and selection via the
+lasso. Journal of the Royal Statistical Society, Series B,
+58(1):267–288, 1996.
+Tibshirani, R., Bien, J., Friedman, J., Hastie, T., Simon,
+N., Taylor, J., and Tibshirani, R. J. Strong rules for discarding predictors in lasso-type problems. Journal of the
+Royal Statistical Society, Series B, 74(2):245–266, 2012.
+Tsochantaridis, I., Joachims, T., Hofmann, T., and Altun,
+Y. Large margin methods for structured and interdependent output variables. Journal of Machine Learning Research, 6:1453–1484, 2005.
+
+Fercoq, O. and Richtárik, P.
+Accelerated, parallel
+and proximal coordinate descent. Technical Report
+arXiv:1312.5799, 2013.
+
+Wainwright, M. J. Sharp thresholds for high-dimensional
+and noisy sparsity recovery using `1 -constrained
+quadratic programming (Lasso). IEEE Transactions on
+Information Theory, 55(5):2183–2202, 2009.
+
+Friedman, J., Hastie, T., and Tibshirani, R. Regularization
+paths for generalized linear models via coordinate descent. Journal of Statistical Software, 33(1):1–22, 2010.
+
+Wang, J., Wonka, P., and Ye, J. Scaling SVM and least
+absolute deviations via exact data reduction. In International Conference on Machine Learning, 2014.
+
+Fujishige, S. and Isotani, S. A submodular function minimization algorithm based on the minimum-norm base.
+Pacific Journal of Optimization, 7:3–17, 2011.
+
+Xiao, L. Dual averaging methods for regularized stochastic
+learning and online optimization. Journal of Machine
+Learning Research, 11:2543–2596, 2010.
+
+Ghaoui, L. E., Viallon, V., and Rabbani, T. Safe feature
+elimination for the lasso and sparse supervised learning
+problems. Pacific Journal of Optimization, 8(4):667–
+698, 2012.
+
+Yuan, G. X., Ho, C. H., and Lin, C. J. An improved GLMNET for L1-regularized logistic regression. Journal of
+Machine Learning Research, 13:1999–2030, 2012.
+
+

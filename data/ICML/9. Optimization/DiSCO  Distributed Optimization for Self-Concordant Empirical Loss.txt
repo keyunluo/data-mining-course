@@ -1,0 +1,1310 @@
+DiSCO: Distributed Optimization for Self-Concordant Empirical Loss
+
+Yuchen Zhang
+University of California Berkeley, Berkeley, CA 94720, USA
+
+YUCZHANG @ EECS . BERKELEY. EDU
+
+Lin Xiao
+Microsoft Research, Redmond, WA 98053, USA
+
+Abstract
+We propose a new distributed algorithm for empirical risk minimization in machine learning.
+The algorithm is based on an inexact damped
+Newton method, where the inexact Newton steps
+are computed by a distributed preconditioned
+conjugate gradient method. We analyze its iteration complexity and communication efficiency
+for minimizing self-concordant empirical loss
+functions, and discuss the results for distributed
+ridge regression, logistic regression and binary
+classification with a smoothed hinge loss. In a
+standard setting for supervised learning, where
+the n data points are i.i.d. sampled and
+√ when
+the regularization parameter scales as 1/ n, we
+show that the proposed algorithm is communication efficient: the required round of communication does not increase with the sample size n, and
+only grows slowly with the number of machines.
+
+1. Introduction
+Many optimization problems in machine learning are formulated with a large amount of data as input. With the
+amount of data we collect and process growing at a fast
+pace, it happens more often that the dataset involved in an
+optimization problem cannot fit into the memory or storage of a single computer (machine). To solve such “big
+data” optimization problems, we need to use distributed algorithms that rely on inter-machine communication.
+In this paper, we focus on distributed algorithms for regularized empirical risk minimization (ERM). Suppose that
+our distributed computing system consists of m machines,
+and each machine has access to n samples zi,1 , . . . , zi,n ,
+for i = 1, . . . , m. Then each machine can evaluate a local
+Proceedings of the 32 nd International Conference on Machine
+Learning, Lille, France, 2015. JMLR: W&CP volume 37. Copyright 2015 by the author(s).
+
+LIN . XIAO @ MICROSOFT. COM
+
+empirical loss function
+n
+
+def
+
+fi (w) =
+
+1X
+λ
+φ(w, zi,j ) + kwk22 ,
+n j=1
+2
+
+(1)
+
+where zi,j are random vectors whose probability distribution is supported on a set Z ⊂ Rp , and the cost function
+φ : Rd × Z → R is convex in w for every z ∈ Z. Here
+the quadratic term λ2 kwk22 is a regularizer, which helps to
+prevent overfitting. Our goal is to minimize the overall empirical loss defined with all mn samples:
+m
+
+1 X
+f (w) =
+fi (w).
+m i=1
+def
+
+(2)
+
+Since the functions fi (w) can be accessed only locally, we
+consider distributed algorithms that alternate between a local computation procedure at each machine, and a round of
+inter-machine communication. Compared with local computation at each machine, the cost of inter-machine communication is much higher in terms of both speed/delay
+and energy consumption (e.g., Bekkerman et al., 2011;
+Shalf et al., 2011), thus it is often considered as the bottleneck for distributed computing. Our goal is to develop
+communication-efficient distributed algorithms, which try
+to use a minimal number of communication rounds to reach
+certain precision in minimizing f (w).
+1.1. Communication Efficiency of Distributed
+Algorithms
+We assume that each communication round requires only
+simple map-reduce type of operations, such as broadcasting
+a vector in Rd to the m machines and computing the sum
+or average of m vectors in Rd (Dean & Ghemawat, 2008).
+Typically, if a distributed iterative algorithm takes T iterations to converge, then it communicates at least T rounds.
+Therefore, we can measure the communication efficiency
+of a distributed algorithm by its iteration complexity T (),
+which is the number of iterations required by the algorithm
+to find a solution wT such that f (wT ) − f (w? ) ≤ , where
+w? = arg min f (w) is the optimal solution.
+
+DiSCO: Distributed Optimization for Self-Concordant Empirical Loss
+
+For a concrete discussion, we make the following assumption:
+Assumption A. The function f : Rd → R is twice continuously differentiable, and there exist constants L ≥ λ > 0
+such that
+λI  f 00 (w)  LI,
+
+∀ w ∈ Rd ,
+
+where f 00 (w) denotes the Hessian of f at w, and I is the
+d × d identity matrix.
+Functions that satisfy Assumption A are often called Lsmooth and λ-strongly convex. The value κ = L/λ ≥ 1 is
+called the condition number of f , which is a key quantity
+in characterizing the complexity of iterative algorithms. We
+focus on ill-conditioned cases where κ  1.
+A straightforward approach for minimizing f (w) is distributed implementation of the gradient descent method.
+More specifically, at each iteration k, each machine computes the local gradient fi0 (wk ) ∈ Rd andP
+sends it to a
+m
+master node to compute f 0 (wk ) = (1/m) i=1 fi0 (wk ).
+The master node takes a gradient step to compute wk+1 ,
+and broadcasts it to each machine for the next iteration.
+The iteration complexity of the classical gradient method is
+O(κ log(1/)), which is linear in the condition number κ.
+If we use accelerated gradient methods (Nesterov, 2004,
+Section
+√ 2.2), then the iteration complexity can be improved
+to O( κ log(1/)).
+Another popular technique for distributed optimization
+is to use the alternating direction method of multipliers
+(ADMM); see, e.g., Boyd et al. (2010). Under Assumption A, the ADMM approach can achieve linear
+conver√
+gence, and the best known complexity is O( κ log(1/))
+(Deng & Yin, 2012). This turns out to be the same order as
+for accelerated gradient methods.
+The polynomial dependence of the iteration complexity
+on κ is unsatifactory. For machine learning applications,
+both the precision  and the regularization parameter λ
+should decrease while the overall sample
+size mn in√
+creases, typically on the order of Θ(1/ mn) (Bousquet &
+Elisseeff, 2002; Shalev-Shwartz et al., 2009).
+√ This translates into the condition number κ being Θ( mn). Consequently, the number of communication rounds scales
+as (mn)1/4 for both accelerated gradient methods and
+ADMM. This suggests that the number of communication
+rounds grows with the total sample size.
+Despite the rich literature on distributed optimization (e.g.
+Bertsekas & Tsitsiklis, 1989; Boyd et al., 2010; Agarwal &
+Duchi, 2011; Recht et al., 2011; Duchi et al., 2012; Dekel
+et al., 2012; Jaggi et al., 2014), most algorithms involve
+high communication cost. In particular, their iteration complexity have similar or worse dependency on the condition
+number as the methods discussed above. This suggests
+
+researchers to look into further structures of the problem.
+Zhang et al. (2012) make use of the fact that the data zi,j are
+i.i.d. sampled. Under this assumption, they studied a oneshot averaging scheme that approximates the minimizer of
+function f by simply averaging the minimizers of fi . For a
+fixed condition number, the one-shot approach achieves the
+optimal statistical accuracy. But their conclusion doesn’t
+allow the regularization parameter λ to decrease to zero
+as n goes to infinity.
+Recently, Shamir et al. (2014) proposed a distributed approximate Newton-type (DANE) method, which also uses
+the stochastic
+assumption. For quadratic loss functions, if
+√
+λ ∼ 1/ mn as in machine learning applications, DANE is
+e log(1/)) iterations, where the
+shown to converge in O(m
+e
+notation O(·) hides additional logarithmic factors involving m and d. This iteration complexity scales independent
+of the local sample size n. However, DANE does not guarantee the same convergence rate on non-quadratic problem,
+e.g. logistic regression and suppert vector machines.
+1.2. Outline of Our Approach
+In this paper, we propose a communication-efficient
+method for minimizing the overall empirical loss f (w)
+defined in (2). It contains an outer-loop and an inner
+loop. The outer-loop employs an inexact damped Newton
+method to minimize f (w). It is well-known that Newtontype methods have asymptotic superlinear convergence.
+However, in classical analysis of Newton’s method (e.g.,
+Boyd & Vandenberghe, 2004, Section 9.5.3), the number
+of steps needed to reach the superlinear convergence zone
+still depends on the condition number (scales quadratically
+in κ). To solve this problem, we resort to the machinery of
+self-concordant functions (Nesterov & Nemirovski, 1994;
+Nesterov, 2004). For self-concordant empirical losses, we
+show that the iteration complexity of the inexact damped
+Newton method has a much weaker dependence on the condition number.
+In order to compute the Newton step, a straightforward yet
+naive approach would require all the machines to send their
+gradients fi0 (wk ) and Hessians fi00 (wk ) to a master node
+to form the global gradient and global Hessian, and then
+a damped Newton step is taken to compute the next iterate wk+1 . However, in the distributed setting, the task of
+transmitting the Hessians (which are d × d matrices) can
+be prohibitive for large dimensions d. Instead, we propose
+to use iterative algorithms which requires an inner-loop.
+In particular, we use a preconditioned conjugate gradient
+(PCG) method to compute an inexact Newton step. The
+PCG method only communicates first-order information of
+size O(d). We show that by carefully choosing the preconditioning matrix, the inner-loop’s iteration complexity will
+also have weak dependence on the condition number.
+
+DiSCO: Distributed Optimization for Self-Concordant Empirical Loss
+
+√
+
+Table 1. Communication efficiency of several distributed algorithms for ERM of linear predictors when λ ∼ 1/ mn.
+
+Algorithm
+Accelerated Gradient
+ADMM
+DANE (Shamir et al., 2014)
+DiSCO (this paper)
+
+e
+Number of Communication Rounds O(·)
+Ridge Regression
+Binary Classification
+(quadratic loss)
+(logistic loss, smoothed hinge loss)
+(mn)1/4 log(1/)
+(mn)1/4 log(1/)
+(mn)1/4 log(1/)
+(mn)1/4 log(1/)
+m log(1/)
+(mn)1/2 log(1/)
+1/4
+3/4 1/4
+m log(1/)
+m d + m1/4 d1/4 log(1/)
+
+We call our approach with inner-outer loops Distributed
+Self-Concordant Optimization (DiSCO). Table 1 lists the
+number of communication rounds required by DiSCO and
+several other algorithms to find an -optimal solution for
+linear regression and binary classifiaciton problems. These
+results are obtained when the
+√ regularization parameter λ is
+set to be on the order of 1/ mn. All results are deterministic or high probability upper bounds, except that the last
+one, DiSCO for binary classification, is a bound in expectation (with respect to the randomness in generating the i.i.d.
+samples).
+As shown in Table 1, the communication cost of DiSCO
+weakly depends on the number of machines m and on the
+feature dimension d, and is independent of the local sample size n (excluding logarithmic factors). Comparing to
+DANE (Shamir et al., 2014), DiSCO not only improves the
+communication efficiency on quadratic loss, but also handles non-quadratic classification tasks.
+
+2. Self-concordant Empirical Loss
+The theory of self-concordant functions were developed by
+Nesterov & Nemirovski (1994) for the analysis of interiorpoint methods. Roughly speaking, a function is called selfconcordant if its third derivative can be controlled, in a specific way, by its second derivative. Suppose the function
+f : Rd → R has continuous third derivatives. We use
+f 00 (w) ∈ Rd×d to denote its Hessian at w ∈ Rd , and use
+f 000 (w)[u] ∈ Rd×d to denote the limit
+
+1
+def
+f 000 (w)[u] = lim f 00 (w + tu) − f 00 (w) .
+t→0 t
+Definition 1. A convex function f : Rd → R is selfconcordant with parameter Mf if the inequality
+ T 000
+
+
+u (f (w)[u])u ≤ Mf uT f 00 (w)u 3/2
+holds for any w ∈ dom(f ) and u ∈ Rd . In particular, a
+self-concordant function with parameter 2 is called standard self-concordant.
+Detailed account of self-concordance can be found in the
+
+books by Nesterov & Nemirovski (1994) and Nesterov
+(2004). In this section, we show that several popular regularized empirical loss functions for linear regression and
+binary classification are self-concordant.
+First we consider regularized linear regression (ridge regression) with
+f (w) =
+
+N
+λ
+1 X
+(yi − wT xi )2 + kwk22 ,
+N i=1
+2
+
+(3)
+
+In the setting of distributed optimization, we have N = mn
+where m is the number of machines and n is the number of
+samples on each machine. In terms of the definition in (1)
+and (2), we have zi = (xi , yi ) where xi ∈ Rd and yi ∈ R.
+Since f (w) is a quadratic function, its third derivatives are
+all zero. Therefore, it is self-concordant with parameter 0,
+and by definition it is also standard self-concordant.
+For binary classification, we consider the following regularized empirical loss function
+N
+1 X
+γ
+`(w) =
+ϕ(yi wT xi ) + kwk22 ,
+N i=1
+2
+def
+
+(4)
+
+where xi ∈ X ⊂ Rd , yi ∈ {−1, 1}, and ϕ : R → R is
+a convex surrogate function for the binary 0/1 loss. We
+further assume that the elements of X are bounded, that is,
+we have supx∈X kxk2 ≤ B for some finite B.
+Logistic regression For logistic regression, we minimize
+the objective function (4) where ϕ is the logistic loss:
+ϕ(t) = log(1 + e−t ). The following lemma shows that
+the regularized loss is self-concordant. See Zhang & Xiao
+(2015) for the proof.
+Lemma 1. For logistic regression, the empirical loss `(w)
+√
+is self-concordant with parameter B/ γ, and the scaled
+2
+loss f (w) = (B /(4γ))`(w) is standard self-concordant.
+Smoothed hinge loss In classification tasks, it is sometimes more favorable to use the hinge loss ϕ(t) =
+max{0, 1 − t} than using the logistic loss. We consider
+a family of smoothed hinge loss functions ϕp parametrized
+
+DiSCO: Distributed Optimization for Self-Concordant Empirical Loss
+4
+
+3
+Function Value
+
+Algorithm 1 Inexact damped Newton method
+
+p=3
+p=5
+p=10
+p=20
+
+3.5
+
+input: initial point w0 and specification of a nonnegative
+sequence {k }.
+repeat for k = 0, 1, 2, . . . :
+
+2.5
+
+1. Find vk ∈ Rd such that kf 00 (wk )vk − f 0 (wk )k2 ≤ k .
+q
+2. Compute δk = vkT f 00 (wk )vk and update
+
+2
+1.5
+1
+
+wk+1 = wk −
+
+0.5
+0
+−3
+
+−2
+
+−1
+
+0
+1
+Argument Value
+
+2
+
+1
+1+δk vk .
+
+until a stopping criterion is satisfied.
+
+3
+
+Figure 1. Smoothed hinge loss ϕp with p = 3, 5, 10, 20.
+
+plexity of Algorithm 1 for obtaining an arbitrary accuracy. The theorem is proved in the long version of this
+paper (Zhang & Xiao, 2015).
+
+by a positive number p ≥ 3. The function is defined by
+ϕp (t) =
+3
+− p−2
+−t
+
+2
+p−1
+
+
+
+
+p−2
+3
+
+
+ 2 − p−1 − t +
+
+for t ∈ (−∞, − p−3
+],
+p−1
+
+
+
+
+
+
+
+
+
+
+for t ∈ (1, 2],
+
+p+1
+p(p−1)
+(2−t)p
+p(p−1)
+
+−
+
+(t+(p−3)/(p−1))p
+p(p−1)
+t
++ 12 (1 − t)2
+p−1
+
+for t ∈ (− p−3
+,1 −
+p−1
+for t ∈ (1 −
+
+p−3
+],
+p−1
+p−3
+,
+1],
+p−1
+
+for t ∈ (2, +∞).
+
+0
+
+(5)
+
+We plot the functions ϕp for p = 3, 5, 10, 20 on Figure 1.
+As the plot shows, ϕp (t) is zero for t > 2, and it is a linear
+p−3
+function with unit slope for t < − p−1
+. These two linear
+zones are connected by three smooth non-linear segments
+on the interval [− p−3
+p−1 , 2].
+The following lemma shows that the regularized loss is
+self-concordant. See Zhang & Xiao (2015) for the proof.
+Lemma 2. For the smoothed hinge loss defined in (5), the
+empirical loss `(w) is self-concordant with parameter
+2
+
+Mp =
+
+(p − 2)B 1+ p−2
+1
+
+1
+
+γ 2 + p−2
+
+,
+
+(6)
+
+and the scaled loss function f (w) = (Mp2 /4)`(w) is standard self-concordant.
+
+3. Inexact Damped Newton Method
+In this section, we propose and analyze an inexact damped
+Newton method for minimizing self-concordant functions.
+Without loss of generality, we assume the objective function f : Rd → R is standard self-concordant. In addition,
+we assume that Assumption A holds. Our method is described in Algorithm 1. If we let k = 0 for all k ≥ 0,
+then Algorithm 1 reduces to the exact damped Newton
+method (e.g., Nesterov, 2004, Section 4.1.5). The explicit
+account of approximation errors is essential for distributed
+optimization, because with limited communication budget,
+we can only perform Newton updates approximately.
+The following theorem upper bounds the iteration com-
+
+Theorem 1. Suppose f : Rd → R is a standard selfconcordant function and Assumption A holds. If we choose
+the sequence {k } in Algorithm 1 as
+k = β(λ/L)1/2 kf 0 (wk )k2
+
+with β = 1/20,
+
+(7)
+
+then for any  > 0, we have f (wk ) − f (w? ) ≤  whenever
+k ≥ K where w? = arg min f (w) and
+
+ 
+ 2 ω(1/6) 
+f (w0 ) − f (w? )
+K=
++ log2
+. (8)
+1
+
+2 ω(1/6)
+Here, ω(t) = t − log(1 + t) (which appears often in the
+literature on interior-point methods) and dte denotes the
+smallest nonnegative integer that is larger or equal to t.
+Theorem 1 shows that after a constant number of steps (proportional to the initial gap f (w0 ) − f (w? )), Algorithm 1
+has a linear rate of convergence characterized by the term
+log(1/). This is slower than the quadratic convergence
+rate of the exact damped Newton method, due to the allowed approximation errors in computing the Newton step.
+Actually, if we set the tolerances k to be sufficiently small,
+then superlinear convergence can be established, i.e., the
+second term in (8) can be replaced by log(log(1/)) (Zhang
+& Xiao, 2015). The choice in equation (7) is a reasonable
+trade-off in practice. We note that the self-concordance
+property is essential in the proof of Theorem 1. The inexact
+damped Newton method won’t have convergence rate (8)
+unless the objective function is self-concordance.
+Theorem 1 states that the iteration complexity of the
+damped Newton method is proportional to
+f (w0 ) − f (w? ) + log(1/).
+In many applications, the function f (w) is obtained via
+scaling to be standard self-concordant (see examples of logistic regression and smoothed hinge loss in Section 2).
+When the scaling factor is large, we need to choose the
+initial point w0 judiciously to guarantee that the initial gap
+f (w0 ) − f (w? ) is small.
+
+DiSCO: Distributed Optimization for Self-Concordant Empirical Loss
+
+Algorithm 2 Distributed PCG algorithm
+
+4.2. Distributed Computing of the Inexact Newton Step
+
+input: wk ∈ Rd and µ ≥ 0.
+Let H = f 00 (wk ) and P = f100 (wk ) + µI.
+communication: The master machine broadcasts wk to
+other machines to compute fi0 (wk ), for i = 1, . . . , m; then
+it aggregates fi0 (wk ) to form f 0 (wk ).
+initialization: Compute k given in (7) and set
+v (0) = 0,
+s(0) = P −1 r(0) ,
+(0)
+0
+r = f (wk ),
+u(0) = s(0) .
+
+To simplify notation, we use H to represent f 00 (wk ) and Hi
+to represent fi00 (wk ). We define a preconditioning matrix
+using the local Hessian at the first machine (the master):
+
+repeat for t = 0, 1, 2 . . . ,
+1. communication: The master machine broadcasts u(t)
+to other machines to compute fi00 (wk )u(t) ; then aggregates them to form the vector Hu(t) .
+hr (t) ,s(t) i
+hu(t) ,Hu(t) i
+
+2. Compute αt =
+
+and update:
+
+v (t+1) = v (t) + αt u(t) , Hv (t+1) = Hv (t) + αt Hu(t)
+hr (t+1) ,s(t+1) i
+hr (t) ,s(t) i
+
+and update:
+
+s(t+1) = P −1 r(t+1) ,
+u(t+1) = s(t+1) + βt u(t) .
+until kr(t+1) k2 ≤ k
+(t+1)
+return: vk = vq
+, rk = r(t+1) , and
+T
+δk = vk Hv (t) + α(t) vkT Hu(t) .
+
+4. The DiSCO Algorithm
+In this section, we adapt the inexact damped Newton
+method (Algorithm 1)Pto a distributed system, in order to
+m
+1
+minimize f (w) = m
+i=1 fi (w), where each function fi
+can only be evaluated locally at machine i (see background
+in Section 1). This involves two questions: (1) how to set
+the initial point w0 and (2) how to compute the inexact
+Newton step vk in a distributed manner.
+4.1. Initialization
+In accordance with the averaging structure in the objective
+function, we choose the initial point based on averaging:
+m
+
+1 X
+w
+bi ,
+w0 =
+m i=1
+
+def
+
+P = H1 + µI,
+where µ > 0 is a small regularization parameter. Algorithm 2 describes our distributed PCG method for solving
+the preconditioned linear system
+P −1 Hvk = P −1 f 0 (wk ).
+In Algorithm 2, the master machine carries out the the classical PCG algorithm (e.g., Golub & Van Loan, 1996, Section 10.3), and other machines compute the local gradients and Hessians and perform matrix-vector multiplications. Communication between the master and other ma0
+chines are used to form the overall gradient
+and the
+Pm 00f (wk ) (t)
+1
+(t)
+matrix-vector products Hu = m i=1 fi (wk )u . We
+note that the overall Hessian H = f 00 (wk ) is never formed
+and the master only stores and updates the vector Hu(t) .
+
+and r(t+1) = r(t) − αt Hu(t) .
+3. Compute βt =
+
+In each iteration of Algorithm 1, we need to compute an inexact Newton step vk such that kf 00 (wk )vk − f 0 (wk )k2 ≤
+k . This boils down to solving the Newton system
+f 00 (wk )vk = f 0 (wk ) approximately. We propose to
+use a distributed preconditioned conjugate gradient (PCG)
+method to solve the Newton system.
+
+(9)
+
+where each w
+bi is computed locally at machine i as
+n
+o
+ρ
+w
+bi = arg min fi (w) + kwk22 .
+(10)
+2
+w∈Rd
+Here ρ ≥ 0 is a regularization parameter, which we will
+discuss
+√ in Section 5. Roughly speaking, we can choose√ρ ∼
+1/ n to make E[f (w0 ) − f (w? )] decreasing as O(1/ n).
+
+When H1 is sufficiently close to H and µ is chosen to be
+sufficiently small, then the condition number of P −1 H will
+be close to 1. This makes the PCG method converging
+much faster than the standard conjugate gradient method.
+See Zhang & Xiao (2015) for the proof of the following
+lemma.
+Lemma 3. Suppose Assumption A holds and assume that
+kH1 − Hk2 ≤ µ. Let β be the constant in (7) and define
+r
+ 
+2µ
+2L
+Tµ =
+1+
+log
+.
+(11)
+λ
+βλ
+Then Algorithm 2 terminates in Tµ iterations and the output
+vk satisfies kHvk −f 0 (wk )k2 ≤ k .
+Under Assumption A, we always have kH1 − Hk2 ≤ L. If
+we let µ = L, p
+then Lemma 3 implies that Algorithm 2 tere L/λ) iterations. In practice, however, the
+minates in O(
+matrix norm kH1 − Hk2 is usually much smaller than L
+due to the stochastic nature of fi . Thus, we can choose µ
+to be a tight upper bound onpkH1 − Hk2 , and expect the
+e 1 + µ/λ) iterations.
+algorithm to terminate in O(
+A similar approach was proposed by Zhuang et al. (2014)
+and Lin et al. (2014) for ERM of linear predictors, where
+they use a distributed truncated Newton method and conjugate gradient (CG) method for solving the Newton system.
+However, they did not employ preconditioning in the CG
+
+DiSCO: Distributed Optimization for Self-Concordant Empirical Loss
+
+Algorithm 3 DiSCO
+input: parameters ρ, µ ≥ 0 and number of iterations K.
+initialize: compute w0 according to (9) and (10).
+repeat for k = 0, 1, 2, . . . , K:
+1. Run Algorithm 2: given wk , compute vk and δk .
+2. Update wk+1 = wk −
+
+1
+1+δk vk .
+
+output: w
+b = wK+1 .
+
+method; consequently, the total number of the CG iterations may still be high for ill-conditioned problems.
+4.3. DiSCO and its communication efficiency
+Putting all pieces together, we summarize the DiSCO
+method in Algorithm 3. DiSCO combines the inexact
+damped Newton method (Algorithm 1) and the distributed
+PCG method (Algorithm 2). For each execution of the PCG
+method, if Algorithm 2 runs for T iterations, then there will
+be T + 1 rounds of communication.
+The following theorem provides an upper bound on the
+number of communication rounds required by the DiSCO
+algorithm to find an -optimal solution. It combines the
+theoretical results given in Theorem 1 and Lemma 3.
+Pm
+Theorem 2. Assume that f (w) = (1/m) i=1 fi (w) is
+standard self-concordant and it satisfies Assumptions A.
+Suppose the input parameter µ is chosen such that
+kf100 (wk ) − f 00 (wk )k2 ≤ µ for all k ≥ 0. Then for any
+ > 0, the total number of communication rounds T required by DiSCO to reach f (w)
+b − f (w? ) ≤  is bounded
+by
+
+
+p
+e f (w0 ) − f (w? ) + log(1/) 1 + µ/λ .
+T =O
+e hides logarithmic terms involving L and λ.
+where O(·)
+We wrap up this section by studying the computation complexity of DiSCO. For the initialization step, each machine
+needs to compute (10). For Algorithm 2, the bulk of computation is at computing the vector s(t) = P −1 r(t) in
+Step 3, which is equivalent to minimize the quadratic function (1/2)sT P s − sT r(t) . Both are convex optimization
+problems whose objective functions are the average of a
+finite number of local component functions. They can be
+solved to high accuracy by the stochastic average gradient
+(SAG) method (Le Roux et al., 2012) or SAGA (Defazio
+e
+et al., 2014) in O(dn)
+computation time. This is roughly
+the same time complexity for loading the dataset.
+
+5. Stochastic Analysis
+From Theorem 2 we see that the communication efficiency
+of DiSCO mainly depends on two quantities: the initial
+
+objective gap f (w0 ) − f (w? ) and the upper bound µ on
+the spectral norms kf100 (wk ) − f 00 (wk )k2 . The initial gap
+f (w0 ) − f (w? ) may grow with the number of samples due
+to the scaling used to make the objective function standard
+self-concordant. On the other hand, the upper bound µ may
+decrease as the number of samples increases based on the
+intuition that the local Hessians and the global Hessian become similar to each other.
+In this section, we show how the choice of w0 in Section 4.1
+can mitigate the effect of objective scaling by reducing the
+initial gap, and also quantify the similarity between local
+and global Hessians. Both relies on the assumption that
+the random vectors zi,j in the definition of the empirical
+loss in (1) are i.i.d. samples from a common distribution.
+Throughout this section, we take expectation with respect
+to the randomness in generating the i.i.d. data. All theoretical results of this section are proved in the long version of
+this paper (Zhang & Xiao, 2015).
+To formalize the argument, we need additional assumptions
+on the smoothness of the loss function φ in equation (1).
+Assumption B. There are finite constants (V0 , G, L, M ),
+such that for any z ∈ Z:
+(i) φ(w, z) ≥ 0 for all w ∈ Rd , and φ(0, z) ≤ V0 ;
+p
+(ii) kφ0 (w, z)k2 ≤ G for any kwk2 ≤ 2V0 /λ;
+(iii) kφ00 (w, z)k2 ≤ L − λ for any w ∈ Rd ;
+(iv) kφ00 (u, z) − φ00 (w, z)k2 ≤ M ku − wk2 , ∀ u, w ∈ Rd .
+For the regularized empirical loss defined in (1) and (2),
+condition (iii) in the above assumption implies λI 
+fi00 (w)  LI for i = 1, . . . , m, which in turn implies
+Assumption A. These assumptions are satisfied by popular
+loss functions, including linear regression, logistic regression and the smoothed hinge loss defined in Section 2.
+The following lemma shows that the expected value√
+of the
+initial gap f (w0 ) − f (w? ) decreases with order 1/ n as
+the local sample size n increases.
+Lemma 4. Suppose that Assumption B holds and
+E[kw?√k22 ] ≤ D2 for some constant D > 0. If we choose
+6G
+ρ = √nD
+in equation (10) to compute w
+bi , then the initial
+Pm
+1
+bi satisfies
+point w0 = m i=1 w
+√
+6GD
+E[f (w0 ) − f (w? )] ≤ √ .
+n
+The next lemma quantifies the similarity between the local
+and global Hessians.
+Lemma 5. Suppose Assumption B holds and the sequence
+{wk }k≥0 is generated by Algorithm 1. Let
+r
+ 2V
+2G 2V0 1/2
+0
+r=
++
+.
+λ
+λ
+λ
+
+DiSCO: Distributed Optimization for Self-Concordant Empirical Loss
+
+Then with probability at least 1 − δ, we have for all k ≥ 0,
+kf100 (wk )
+r
+≤
+
+00
+
+− f (wk )k2
+s
+√
+
+rM 2n  log(md/δ)
+32L2 d
++
+· log 1 +
+.
+n
+L
+d
+
+Here the high probability bound is also with respect to the
+randomness in generating the i.i.d. data.
+If φ(w, zi,j ) are quadratic functions in w, then we have
+M = 0 in Assumption B. In this case, Lemma 5 implies
+p
+e L2 /n).
+kfi00 (wk ) − f 00 (wk )k2 ≤ O(
+For general non-quadratic loss, Lemma 5 implies
+p
+e L2 d/n).
+kfi00 (wk ) − f 00 (wk )k2 ≤ O(
+Combining Lemma 4 and Lemma 5 with Theorem 2, we
+obtain the following main result.
+Theorem 3. Assume that Assumptions B holds and the
+function f (w) defined by (1) and (2) is standard selfconcordant. Let ρ be chosen as in Lemma 4, and let µ be
+the upper bound in Lemma 5. Let κ = L/λ be the condition
+number of the problem. Then for any  > 0, the expected
+number of communication rounds T required by DiSCO to
+reach f (w)
+b − f (w? ) ≤  is bounded as
+
+
+κ2 1/4 
+e GD
+√ + log(1/) 1 +
+E[T ] = O
+n
+n
+for the quadratic loss, and
+
+
+κ2 d 1/4 
+e GD
+√ + log(1/) 1 +
+E[T ] = O
+n
+n
+for other convex loss functions.
+To apply the above results to specific loss functions, we assume the standard setting for supervised learning
+√where the
+regularization parameter is on√the order of 1/ mn, thus
+the condition number κ = Θ( mn).
+Linear Regression For linear regression, the loss function f (w) takes the form (3). Since f is a quadratic function, it is standard self-concordant without scaling. This
+means√that G and D are bounded constants, and we have
+GD/ n = o(1). Then Theorem 3 implies
+e 1/4 log(1/)).
+E[T ] = O(m
+In fact, since we do not need to rescale the objective function, we can regard the initial gap f (w0 ) − f (w? ) as a constant. As a consequence, we can directly apply Theorem 2
+e 1/4 log(1/)) holds
+and Lemma 5 to show that T = O(m
+with high probability.
+Logistic Regression For logistic regression, consider
+the
+√
+loss function `(w) defined in (4) with γ = Θ(1/ mn). By
+2
+Lemma 1, the scaled function f (w) = B
+4γ `(w) is standard
+
+Table 2. Summary of three binary classification datasets.
+
+Dataset
+Covtype
+RCV1
+News20
+
+# samples N
+581,012
+20,242
+19,996
+
+# features d
+54
+47,236
+1,355,191
+
+self-concordant. As a result, the constants (V0 , G, L, M ) in
+√
+2
+Assumption B also need to be scaled by B
+4γ = Θ( mn).
+√
+√
+So we have GD/ n = Θ( m). Then Theorem 3 implies
+
+
+e m3/4 d1/4 + m1/4 d1/4 log(1/) .
+E[T ] = O
+(12)
+Smoothed Hinge Loss We consider the function `(w)
+defined in (3) with the smoothed hinge loss ϕp defined
+M2
+
+in (5). By Lemma 2, the function f (w) = 4p `(w) is
+standard self-concordant, where Mp is defined in (6). By
+e
+=
+choosing p = 2 + log(1/γ), we obtain Mp2 /4 = O(1/γ)
+√
+e
+O( mn). This scaling factor is on the same order as for
+logistic regression. Thus, the smoothed hinge loss enjoys
+the same communication efficiency in (12).
+
+6. Numerical Experiments
+In this section, we conduct numerical experiments to
+compare the DiSCO algorithm with several state-of-theart distributed optimization algorithms: the ADMM algorithm (Boyd et al., 2010), the accelerated full gradient method (AFG) (Nesterov, 2004), the L-BFGS quasiNewton method (Nocedal & Wright, 2006, Section 7.2),
+and the DANE algorithm (Shamir et al., 2014).
+For comparison, we solve three binary classification tasks
+using logistic regression. The datasets are obtained from
+the LIBSVM datasets (Chang & Lin, 2011) and summarized in Table 2. These datasets are selected to cover different relations between the sample size N = mn and the
+feature dimensionality d. For each dataset, our goal is to
+minimize the regularized logistic loss (4). The regularization parameter is set to be γ = 10−5 .
+We describe some implementation details. Altough the theoretical analysis suggests that we scale the function `(w)
+by a factor η = B 2 /(4γ). In practice, we find that DiSCO
+converges faster without rescaling. Thus, we use η = 1
+for all experiments. For Algorithm 3, we choose the input parameters µ = m1/2 µ0 , where µ0 is manually chosen
+to be µ0 = 0 for Covtype, µ0 = 4 × 10−4 for RCV1,
+and µ0 = 2 × 10−4 for News20. To monitor the progress
+of DiSCO, after every iteration of the inner loop (Algorithm 2), we take v (t) to compute an intermediate solution
+w
+bkt = wk −
+
+v (t)
+1+
+
+p
+
+(v (t) )T `00 (wk )v (t)
+
+,
+
+DiSCO: Distributed Optimization for Self-Concordant Empirical Loss
+
+m
+
+0
+−2
+
+−4
+
+−4
+
+−4
+
+−6
+
+−10
+−12
+0
+
+ADMM
+AFG
+L−BFGS
+DANE
+DiSCO
+20
+40
+60
+80
+Rounds of Communication
+
+−6
+−8
+−10
+−12
+0
+
+100
+
+0
+
+0
+
+−2
+
+−2
+
+−2
+
+−4
+
+−4
+
+−4
+
+−6
+
+−10
+−12
+0
+
+ADMM
+AFG
+L−BFGS
+DANE
+DiSCO
+20
+40
+60
+80
+100
+Rounds of Communication
+
+Log Loss
+
+0
+
+−8
+
+−6
+−8
+−10
+−12
+0
+
+ADMM
+AFG
+L−BFGS
+DANE
+DiSCO
+20
+40
+60
+80
+Rounds of Communication
+
+−10
+−12
+0
+
+100
+
+0
+
+0
+
+0
+
+−2
+
+−2
+
+−2
+
+−4
+
+−4
+
+−4
+
+−6
+−8
+−10
+−12
+0
+
+ADMM
+AFG
+L−BFGS
+DANE
+DiSCO
+20
+40
+60
+80
+100
+Rounds of Communication
+
+−6
+−8
+−10
+−12
+0
+
+ADMM
+AFG
+L−BFGS
+DANE
+DiSCO
+20
+40
+60
+80
+Rounds of Communication
+
+ADMM
+AFG
+L−BFGS
+DANE
+DiSCO
+20
+40
+60
+80
+100
+Rounds of Communication
+
+−6
+−8
+−10
+
+100
+
+ADMM
+AFG
+L−BFGS
+DANE
+DiSCO
+20
+40
+60
+80
+100
+Rounds of Communication
+
+−6
+−8
+
+Log Loss
+
+Log Loss
+
+−6
+−8
+
+Log Loss
+
+Log Loss
+
+−12
+0
+
+ADMM
+AFG
+L−BFGS
+DANE
+DiSCO
+20
+40
+60
+80
+100
+Rounds of Communication
+
+Log Loss
+
+0
+−2
+Log Loss
+
+0
+
+−10
+
+64
+
+News20
+
+−2
+
+−8
+
+16
+
+RCV1
+
+Log Loss
+
+Log Loss
+
+4
+
+Covtype
+
+−12
+0
+
+ADMM
+AFG
+L−BFGS
+DANE
+DiSCO
+20
+40
+60
+80
+100
+Rounds of Communication
+
+Figure 2. Comparing DiSCO with other distributed optimization algorithms. We splits each dataset evenly to m machines, with m ∈
+{4, 16, 64}. Each plot above shows the reduction of the logarithmic gap log10 (`(w)
+b − `(w? )) (the vertical axis) versus the number of
+communication rounds (the horizontal axis) taken by each algorithm.
+
+and evaluate the associated objective function `(w
+bkt ).
+
+sus the number of communication rounds taken.
+
+For fair comparison, we manually tune the penalty parameter of ADMM and the regularization parameter µ for
+DANE to optimize their performance. For AFG, we used
+an adaptive line search scheme (Nesterov, 2013) to speed
+up its convergence. For L-BFGS, we adopted the memory
+size 30, as suggested in Nocedal & Wright (2006).
+
+According to the plots in Figure 2, DiSCO converges substantially faster than ADMM and AFG. It is also notably
+faster than L-BFGS and DANE. In particular, the convergence speed (and the communication efficiency) of DiSCO
+is more robust to the number of machines in the distributed
+system. For m = 4, the performance of DiSCO is somewhat comparable to that of DANE. As m grows to 16
+and 64, the convergence of DANE becomes significantly
+slower, while the performance of DiSCO only degrades
+slightly. This coincides with the theoretical analysis: the
+iteration complexity of DANE is proportional to m, but the
+iteration complexity of DiSCO is proportional to m1/4 .
+
+It is important to note that different algorithms take different number of communication rounds per iteration.
+ADMM requires one round of communication per iteration. For AFG and L-BFGS, each iteration consists of at
+least two rounds of communications: one for finding the
+descent direction, and another one or more for searching
+the stepsize. For DANE, there are also two rounds of communications per iteration, for computing the gradient and
+for aggregating the local solutions. For DiSCO, each iteration in the inner loop takes one round of communication,
+and there is an additional round of communication at the
+beginning of each inner loop. Since we are interested in
+the communication efficiency of the algorithms, we plot in
+Figure 2 their progress in reducing the objective value ver-
+
+Thus, our experiments on real datasets confirmed the superior communication efficiency of the DiSCO algorithm.
+We note that when comparing to ADMM, AFG, L-BFGS
+and DANE (in the case of large m), the DiSCO algorithm
+is not only communication efficient but also faster in the
+sense of computation, because DiSCO requires much fewer
+iterations to converge to a high-accuracy solution.
+
+DiSCO: Distributed Optimization for Self-Concordant Empirical Loss
+
+References
+Agarwal, A. and Duchi, J. C. Distributed delayed stochastic
+optimization. In Advances in NIPS, pp. 873–881, 2011.
+Bekkerman, R., Bilenko, M., and Langford, J. Scaling
+up Machine Learning: Parallel and Distributed Approaches. Cambridge University Press, 2011.
+Bertsekas, D. P. and Tsitsiklis, J. N. Parallel and Distributed Computation: Numerical Methods. PrenticeHall, 1989.
+Bousquet, O. and Elisseeff, A. Stability and generalization. Journal of Machine Learning Research, 2:499–526,
+2002.
+Boyd, S. and Vandenberghe, L. Convex optimization. Cambridge university press, 2004.
+Boyd, S., Parikh, N., Chu, E., Peleato, B., and Eckstein, J.
+Distributed optimization and statistical learning via the
+alternating direction method of multipliers. Foundations
+and Trends in Machine Learning, 3(1):1–122, 2010.
+Chang, C.-C. and Lin, C.-J. Libsvm: a library for support
+vector machines. ACM Transactions on Intelligent Systems and Technology (TIST), 2(3):27, 2011.
+Dean, J. and Ghemawat, S. MapReduce: Simplfied data
+processing on large clusters. Communications of the
+ACM, 51(1):107–113, 2008.
+Defazio, A., Bach, F., and Lacoste-Julien, S. SAGA: A
+fast incremental gradient method with support for nonstrongly convex composite objectives. In Advances in
+NIPS 27, pp. 1646–1654. 2014.
+Dekel, O., Gilad-Bachrach, R., Shamir, O., and Xiao,
+L. Optimal distributed online prediction using minibatches. The Journal of Machine Learning Research, 13
+(1):165–202, 2012.
+Deng, W. and Yin, W. On the global and linear convergence
+of the generalized alternating direction method of multipliers. CAAM Technical Report 12-14, Rice University,
+2012.
+Duchi, J. C., Agarwal, A., and Wainwright, M. J. Dual averaging for distributed optimization: convergence analysis and network scaling. IEEE Transactions on Automatic Control, 57(3):592–606, 2012.
+Golub, G. H. and Van Loan, C. F. Matrix Computations.
+The John Hopkins University Press, Baltimore, MD,
+third edition, 1996.
+
+Jaggi, M., Smith, V., Takac, M., Terhorst, J., Krishnan, S.,
+Hofmann, T., and Jordan, M. I. Communication-efficient
+distributed dual coordinate ascent. In Advances in NIPS
+27, pp. 3068–3076. 2014.
+Le Roux, N., Schmidt, M., and Bach, F. A stochastic gradient method with an exponential convergence rate for
+finite training sets. In Advances in NIPS 25, pp. 2672–
+2680. 2012.
+Lin, C.-Y., Tsai, C.-H., Lee, C.-P., and Lin, C.-J. Largescale logistic regression and linear support vector machines using Spark. In Proceedings of the IEEE Conference on Big Data, Washington DC, USA, 2014.
+Nesterov, Y. Introductory Lectures on Convex Optimization: A Basic Course. Kluwer, Boston, 2004.
+Nesterov, Y. Gradient methods for minimizing composite
+functions. Mathematical Programming, Ser. B, 140:125–
+161, 2013.
+Nesterov, Y. and Nemirovski, A. Interior Point Polynomial
+Time Methods in Convex Programming. SIAM, Philadelphia, 1994.
+Nocedal, J. and Wright, S. J. Numerical Optimization.
+Springer, New York, 2nd edition, 2006.
+Recht, B., Re, C., Wright, S. J., and Niu, F. Hogwild:
+A lock-free approach to parallelizing stochastic gradient
+descent. In Advances in NIPS, pp. 693–701, 2011.
+Shalev-Shwartz, S., Shamir, O., Srebro, N., and Sridharan,
+K. Stochastic convex optimization. In Proceedings of
+the 22nd Annual Conference on Learning Theory, 2009.
+Shalf, J., Dosanjh, S., and Morrison, J. Exascale computing technology challenges. In Proceedings of the 9th International Conference on High Performance Computing for Computational Science, VECPAR’10, pp. 1–25.
+Springer-Verlag, 2011.
+Shamir, O., Srebro, N., and Zhang, T. Communication
+efficient distributed optimization using an approximate
+Newton-type method. In Proceedings of ICML. JMLR:
+W&CP volume 32, 2014.
+Zhang, Y., Wainwright, M. J., and Duchi, J. C.
+Communication-efficient algorithms for statistical optimization. In Advances in NIPS, pp. 1502–1510, 2012.
+Zhang, Y. and Xiao, L. Communication-efficient distributed optimization of self-concordant empirical loss.
+arXiv preprint arXiv:1501.00263, 2015.
+Zhuang, Y., Chin, W.-S., Juan, Y.-C., and Lin, C.-J. Distributed newton method for regularized logistic regression. Technical report, Department of Computer Science, National Taiwan University, 2014.
+
+

@@ -1,0 +1,1212 @@
+A Fast Variational Approach
+for Learning Markov Random Field Language Models
+
+Yacine Jernite
+CIMS, New York University, 251 Mercer Street, New York, NY 10012, USA
+Alexander M. Rush
+Facebook AI Research, 770 Broadway, New York, NY 10003, USA
+David Sontag
+CIMS, New York University, 251 Mercer Street, New York, NY 10012, USA
+
+Abstract
+Language modelling is a fundamental building
+block of natural language processing. However,
+in practice the size of the vocabulary limits the
+distributions applicable for this task: specifically, one has to either resort to local optimization methods, such as those used in neural language models, or work with heavily constrained
+distributions. In this work, we take a step towards overcoming these difficulties. We present
+a method for global-likelihood optimization of
+a Markov random field language model exploiting long-range contexts in time independent of
+the corpus size. We take a variational approach
+to optimizing the likelihood and exploit underlying symmetries to greatly simplify learning. We
+demonstrate the efficiency of this method both
+for language modelling and for part-of-speech
+tagging.
+
+1. Introduction
+The aim of language modelling is to estimate a distribution
+over words that best represents the text of a corpus. Language models are central to tasks such as speech recognition, machine translation, and text generation, and the parameters of these models are commonly used as features
+or as initialization for other algorithms. Examples include
+the word distributions learned by topic models, or the word
+embeddings learned through neural language models.
+Central to the language modelling problem is the challenge
+Proceedings of the 32 nd International Conference on Machine
+Learning, Lille, France, 2015. JMLR: W&CP volume 37. Copyright 2015 by the author(s).
+
+JERNITE @ CS . NYU . EDU
+
+SRUSH @ SEAS . HARVARD . EDU
+
+DSONTAG @ CS . NYU . EDU
+
+of scale. It is typical for languages to have vocabularies of
+hundreds of thousands of word types, and language models
+themselves are often estimated on corpora with billions of
+tokens (Graff et al., 2003). The scale of the problem inherently limits the types of distributions that can be effectively
+applied.
+In practice, the most commonly used class of language
+models are n-gram models. These represent the probability
+of the next word as a multinomial distribution conditioned
+on the previous context. The parameters of this class of
+models can be very efficiently estimated by simply collecting sufficient statistics and tuning a small set of parameters.
+More recently neural language models (NLMs) have
+gained popularity (Bengio et al., 2006; Mnih & Hinton,
+2007). These models estimate the same distribution as ngram models, but utilize a non-linear neural network parameterization. NLMs have been shown to produce competitive results with n-gram models using many fewer parameters. Additionally the parameters themselves have
+proven to be useful for other language tasks (Collobert
+et al., 2011). Unfortunately training NLMs can be much
+slower than n-gram models, often requiring expensive gradient computations for each token; techniques have been
+developed to speed up training in practice (Mnih & Hinton,
+2009; Mnih & Teh, 2012).
+In this work, we consider a different class of language models. Instead of estimating the local probability of the next
+word given its context, we globally model the entire corpus
+as a Markov random field (MRF) language model. Undirected graphical models like MRFs have been widely applied in natural language processing as a way to flexibly
+model statistical dependencies; however, MRFs are rarely
+used for language modelling since estimating their parameters requires computing a costly partition function.
+
+A Fast Variational Approach for Learning Markov Random Field Language Models
+
+Our contribution is to provide a simple to implement algorithm for very efficiently estimating this class of models.
+We take a variational approach to the optimization problem, and devise a lower bound on the log-likelihood using
+lifted inference. By exploiting the problem’s symmetry, we
+derive an efficient approximation of the partition function.
+Crucially, each step of the final algorithm has time complexity of O(KC 2 ) where K is the size of the n-gram context and C is the size of the vocabulary. Note that besides
+collecting statistics, this algorithm has no time dependence
+on the number of tokens, potentially allowing its estimation
+speed to scale similarly to n-gram models.
+Experimentally, we demonstrate the quality of the models
+learned by our algorithm by applying it to a language modelling task. Additionally we show that this same estimation
+algorithm can be effectively applied to other common sequence modelling tasks such as part-of-speech tagging.
+
+2. Background
+Notation We denote sequences by bold variables: t =
+(t1 , . . . , tn ). A sub-sequence will be defined as either tji =
+(ti , ti+1 , . . . , tj ) or t−i = (t1 , . . . , ti−1 , ti+1 , . . . , tn ).
+Contextual language models Let us first define the class
+of contextual language models as the set of distributions
+over words conditioned on a fixed-length left context. Formally this is an estimate of p(ti |ti−1
+i−K ) where ti is the current word and K is the size of the context window. For a
+basic n-gram language model, this is simply a multinomial
+distribution, and the maximum-likelihood estimate can be
+computed in closed-form from the statistics of the corpus
+(although in practice some smoothing is often employed).
+A neural (probabilistic) language model (NLM) is a contextual language model where the word probability is a
+non-linear function of the context estimated from a neural network. In this work, we will focus specifically on
+the class of NLMs with potentials that are bilinear in the
+context and predicted word, such as the log-bilinear language model of Mnih & Hinton (2007). This model is
+parametrized as:
+
+
+
+PK
+l
+>
+exp
+W ti
+l=1 Uti−l R
+(1)
+p(ti |ti−1
+)
+=
+i−K
+Z(ti−1
+i−K )
+where U ∈ RC×D , W ∈ RC×D , and R ∈ RK×D×D
+are the parameters of the model, and Z(ti−1
+i−K ) is a local
+normalization function (dependent on the context). Specifically, Uti and Wti are the left and right embeddings respectively of token ti , Rl is a distance-dependent transition
+matrix, C is the size of the vocabulary and D  C is the
+size of the low-rank word embeddings. Another form of
+
+bilinear model is the variant used in Word2Vec (Mikolov
+et al., 2013):
+!
+K
+X
+>
+exp
+Uti+l Wti
+i−1
+p(ti |ti−K
+, ti+K
+i+1 ) =
+
+l=−K
+l6=0
+i−1
+Z(ti−K
+, ti+K
+i+1 )
+
+(2)
+
+These models have been shown to give similar results to ngram models while providing useful word representations.
+However, the local normalization means that most optimization methods need to look at one token at a time, and
+scale at least linearly with the size of the corpus.
+Markov random fields To avoid this issue of local normalization, we model the entire corpus as a sequence of
+random variables T1 . . . TN , for which we give a joint,
+globally normalized distribution. We specify this distribution with a Markov random field.
+A Markov random field is defined by a graph structure G =
+(V, E), and a set of potentials (θc )c∈C , where C is defined
+as the set of cliques in graph G.
+Let t denote a specific assignment of T1 . . . TN , and let
+tc = (ti )i∈c . The log-probability of a sequence t is then:
+log(p(t; θ)) =
+
+X
+
+θtcc − A(θ)
+
+c∈C
+
+where A(θ) is called the log-partition function, and can in
+general be computed exactly with a complexity exponential
+in the size of the tree-width of G.
+
+3. MRF Language Models
+Sentence model Building on this formalism, let us now
+define a family of MRF distributions over text. We start
+by considering a sequence x = (x1 , . . . , xn ) of n variables
+with state space X . We define an order K Markov sequence
+model as a Markov Random field where each element of the
+sequence is connected to its K left and right neighbours.
+For simplicity of exposition, we restrict our description in
+the rest of this paper to pairwise Markov sequence models,
+for which only cliques of size 2 (edges) have potentials:
+θ = {θ(i,j) |(i, j) ∈ E}. The lifted inference method, however, can be easily extended to higher-order potentials.
+
+<S>
+
+<S>
+
+The
+
+dog
+
+barked
+
+.
+
+<S>
+
+<S>
+
+Figure 1. The sentence distribution model for M = 4.
+
+Following the notation introduced in Section 2, this gives
+
+A Fast Variational Approach for Learning Markov Random Field Language Models
+
+us the following distribution pnseqK over X n :
+∀x ∈ X n ,
+
+log(pnseqK (x)) =
+
+n−K
+K
+XX
+
+θx(i,i+l)
+− A(θ)
+i ,xi+l
+
+i=1 l=1
+
+Let T denote the vocabulary of our text corpus. In this
+work, we define the context of a word as its K left and right
+neighbouring tokens. By adding K “padding” or “separator” tokens hSi 6∈ T to the left and right of the sentence,
+this notion of context also allows us to bias the distribution
+of tokens at the beginning and end of the sentence.
+Let X = T ∪ {hSi}. A sentence t of length M is
+then implicitly mapped to a sequence x(t) ∈ X M +2K
+by adding the start and end hSi tokens. Now, letting
+S = {x(t)|t ∈ T M }, the order K Markov sequence model
+allows us to define the following distribution over sentences
+of length M , as illustrated in Figure 1:
++2K
+pM (t) = pM
+(x = x(t)|x ∈ S)
+seqK
+
+(3)
+
+This gives rise to the following generative model for a sentence:
+1. Sample the sentence length M ∼ τ (M ),
+2. Sample M tokens: (t1 , . . . , tM ) ∼ pM (t),
+where τ is any distribution over integers and can easily be
+fit to the data. We focus in this work on learning the parameters of pM .
+These graphical models define a large family of loglinear distributions, depending on the value of K and the
+parametrization of the edge log-potentials θ. In the applications that follow θ will either be defined (and optimized
+over) explicitly, or represented as a product of low-rank
+matrices. We will show how to optimize the likelihood of
+the corpus for both these settings.
+Low rank Markov random fields We now consider different low-rank realizations of the log-potentials θ. Suppose that θi,j only depends on |j − i|, that is to say, parameters are shared across edges of the same length (in which
+case we shall simply write θi,j = θ|j−i| ), we can have for
+|j−i|
+example:
+θ
+= U R|j−i| W
+(4)
+ti
+
+ti ,tj
+
+|j−i|
+θti ,tj
+
+=
+
+tj
+
+|j−i|
+Uti Wtj
+
+(5)
+
+One interesting property of these models is that since the
+Markov blanket of a word consists only of its immediate
+neighbours, its conditional likelihood can be expressed as:
+i+K
+p(ti |t−i ) = p(ti |ti−1
+i−K , ti+1 ) ∝ exp(
+
+K
+X
+l=1
+
+θtli−l ,ti + θtli ,ti+l )
+
+This class of probability functions corresponds to those
+defined by a bi-directional log-bilinear neural language
+model. The model in Equation 4 (θ = U RW ) can easily
+be rewritten in terms of the bi-directional version of Mnih’s
+LBL (Mnih & Teh, 2012) and the model in Equation 5,
+which we use in the rest of this work, is a slightly more general (distance-dependent) version of the Word2Vec CBOW
+model from (Mikolov et al., 2013).
+Conversely, log-bilinear NLMs can
+Qnbe seen as optimizing
+the pseudo-likelihood (defined as i=1 p(ti |t−i )) of an order K Markov sequence model as defined above. Since
+the pseudo-likelihood is a consistent estimator of the likelihood (Besag, 1975), we expect our factorization to have
+properties similar to those of the embeddings learned by
+log-bilinear neural language models.
+
+4. Efficient Learning Using Lifted Variational
+Inference
+We now outline our method for optimizing the likelihood
+of a corpus under our class of models. Learning undirected
+graphical models is challenging because of the global normalization constant, or partition function. We derive a
+tractable algorithm by using a variational approximation:
+we define a lower bound on the data likelihood (Wainwright
+et al., 2005; Yanover et al., 2008), and alternate between
+finding the tightest version of that bound and taking a gradient ascent step in the parameters of the model.
+The novelty of our method comes from the fact that for
+the bound we define, both the tightening and gradient step
+only require us to consider K pairwise moments, i.e. the
+running time of learning will be independent of the size
+of the corpus. We achieve this by showing how to reduce
+the learning task to lifted variational inference, allowing us
+to build upon recent work by Bui et al. (2014). We then
+derive an algorithm to efficiently perform lifted variational
+inference using belief propagation and dual decomposition.
+The overall learning algorithm is simple to implement and
+runs very fast.
+4.1. Creating Symmetry using a Cyclic Model
+Given a corpus tc = (t1 , . . . , tnc ) of nc sentences drawn
+independently from our
+to maximize
+Qncmodel,i weQwish
+nc
+its likelihood p(tc ) = i=1
+p(t ) = i=1
+τ (Mi )pMi (ti ).
+We first show Q
+how to obtain a symmetric lower bound on
+nc
+the likelihood i=1
+pMi (ti ).
+Consider the sequence x(tc ) ∈ X N obtained by adding K
+hSi tokens before the first and
+any two adjacent
+Pbetween
+nc
+sentences in tc , where N = i=1
+(Mi + K). Let pcyclK
+be the wrapped around version of pseqK , as illustrated in
+Figure 2. We have the following result (the proof can be
+found in the supplementary materials):
+
+A Fast Variational Approach for Learning Markov Random Field Language Models
+
+<S>
+
+<S>
+
+.
+
+The
+
+loud
+
+away
+
+ran
+
+dog
+
+cats
+
+barked
+
+LC ⊇ M, this gives us an upper bound on the original solution. Second, we replace the entropy H(µ) with the treereweighted (TRW) upper bound (Wainwright et al., 2005):
+!
+N
+K
+X
+X
+ρ
+i
+i,i+l
+H(µ) ≤ H̄ (µ) =
+H(µ ) −
+ρi,i+l I(µ
+)
+i=1
+
+.
+
+scared
+
+the
+
+<S>
+<S>
+
+All
+
+where ρi,j denotes the probability of edge (i, j) appearing
+in a covering set of forests for the MRF. Let:
+!
+N
+K
+X
+X
+i 0
+i,i+l l
+Ā(θ; ρ) = max
+hµ , θ i +
+hµ
+, θ i + H̄ ρ (µ)
+µ∈LC
+
+Figure 2. The cyclic model with N = 16 and a setting s ∈ S
+corresponding to a corpus of two sentences.
+
+Lemma 1. Let S = {x(tc )|tc ∈ T M1 × . . . × T Mnc }.
+Then,
+nc
+Y
+pN
+cyclK (x = x(t))
+pMi (ti ) =
+.
+pN
+cyclK (x ∈ S)
+i=1
+
+i=1
+
+l=1
+
+Using this variational approximation, we now have an upper bound on the log-partition function which can be computed by solving a convex optimization problem. Altogether this then gives us the following tractable lower
+bound on the log-likelihood:
+!
+N
+K
+X
+X
+N
+0
+l
+log(pcyclK (x)) ≥
+θ xi +
+θxi ,tx+l − Ā(θ; ρ)
+i=1
+
+c
+pN
+cyclK (x(t ))
+
+Hence, the cyclic model
+provides a lower
+bound on p(tc ), which happens to be invariant to rotations;
+the rest of the paper makes use of the symmetry to maximize this lower bound. Let θ0 denote single node unary
+potentials, and θl the edge potentials as defined in Section
+3. The objective we want to optimize is:
+!
+N
+K
+X
+X
+c
+log(pN
+θx0i +
+θxl i ,xi+l − A(θ),
+cyclK (x(t ))) =
+i=1
+
+where
+A(θ) = log(
+
+X
+y∈X N
+
+l=1
+
+!
+N
+K
+X
+X
+0
+l
+exp(
+θ yi +
+θyi ,yi+l ))
+i=1
+
+l=1
+
+and ∀l ∈ {1, . . . , K}, xN +l = xl and yN +l = yl .
+4.2. Variational lower bound
+Unfortunately, the partition function A is extremely costly
+to compute for any reasonable vocabulary size, as dynamic
+programming would have running time O(N C 2K+1 ).
+However, it is easy to formulate upper bounds on A, which
+give rise to a family of lower bounds on the log-likelihood.
+We start by using an equivalent variational formulation of
+the partition function as an optimization problem:
+!
+N
+K
+X
+X
+i 0
+i,i+l l
+A(θ) = max
+hµ , θ i +
+hµ
+, θ i + H(µ),
+µ∈M
+
+i=1
+
+l=1
+
+where M denotes the marginal polytope (Wainwright &
+Jordan, 2008). We then make two approximations to make
+solving this optimization problem easier. First, we replace M with the local consistency polytope LC. Since
+
+l=1
+
+= L̄(θ, x; ρ).
+
+l=1
+
+(6)
+
+Learning using gradient ascent then requires that we compute the derivative of Ā(θ; ρ), which we will show is the
+µ that maximizes the variational optimization problem (we
+return to this process in more detail in the next section).
+We can therefore reduce the learning task to that of repeatedly performing approximate inference using TRW.
+Fast combinatorial solvers for TRW exist, including treereweighted belief propagation (Wainwright et al., 2005),
+convergent message-passing based on geometric programming (Globerson & Jaakkola, 2007), and dual decomposition (Jancsary & Matz, 2011), which all have complexity
+linear in the size of the corpus.
+However, we next show that by taking advantage of the
+symmetries present in the optimization problem, it is possible to solve it in time which is independent of N , the
+number of word tokens in the corpus.
+4.3. Lifting the objective
+Our key insight is that because of the parameter sharing in
+our model, each of the random variables in the cyclic model
+are indistinguishable. More precisely, there is an automorphism group of rotation which can be applied to the sufficient statistic vector and to the model parameters which
+does not change the joint distribution (Bui et al., 2013).
+When such symmetry exists, Bui et al. (2014) show that
+without loss of generality one can choose the edge appearance probabilities to be symmetric, which in our setting
+corresponds to choosing a ρ such that ∀i, j, ρi,j = ρ|j−i|
+(i.e., the tightest TRW upper bound on A(θ) can be obtained by a symmetric ρ). When the edge appearance
+
+A Fast Variational Approach for Learning Markov Random Field Language Models
+
+probabilities are chosen accordingly, since the objective is
+strictly concave and the variables are rotationally symmetric, it follows (Bui et al., 2014, Theorem 3) that the optimum must satisfy the following property:
+∀1 ≤ i, j ≤ N, 1 ≤ l ≤ K, µi = µj and µi,i+l = µj,j+l .
+(7)
+We will take advantage of this structural property to dramatically simplify the variational optimization problem. In
+particular, using the notation µ0V to refer to the single-node
+marginal (there is only one) and µlE (x1 , x2 ) to refer to the
+edge marginal corresponding to the potential θl , we have:
+h
+Ā(θ) = max N hµ0V , θ0 i + H(µ0V )
+(8)
+µ
+
++
+
+K 
+X
+
+hµlE , θl i − ρl I(µlE )
+
+i
+,
+
+l=1
+
+where the maximization is subject to the non-negativity
+constraints
+µ0V , µ1E , . . . , µK
+≥ 0, sum-to-one constraints
+E P
+P
+l
+0
+(x
+)
+=
+1
+and
+∀l,
+µ
+v
+x1 ,x2 µE (x1 , x2 ) = 1, and
+xv V
+pairwise consistency constraints:
+X
+µlE (x1 , x2 ) = µ0V (x2 )
+∀l, x2 ,
+(9)
+x1
+
+X
+
+µlE (x1 , x2 ) = µ0V (x1 )
+
+∀l, x1 .
+
+(10)
+
+x2
+
+Figure 3. The set of K + 1 covering forests used for K = 3,
+N = 16. Each edge is represented in exactly one forest.
+
+appearance probabilities, wePdemonstrate a set of K + 1
+forests T such that ρij =
+T :ij∈T ρT , where for all T ,
+1
+ρT = K+1
+. In particular, we take forests which are made
+up of disconnected stars, rotated so that each edge is covered exactly once. Figure 3 illustrates this choice of forests.
+Using this, we can rewrite the objective in Eq. 8 as:
+h
+i
+N
+Ā(θ) =
+max(K + 1) hµ0V , θ0 i + H(µ0V ) (11)
+K +1 µ
+K 
+
+X
++
+hµlE , (K + 1)θl i − I(µlE ) .
+l=1
+
+The optimal µlE is guaranteed to be symmetric, and so we
+could have used a slightly more compact form of the optimization problem (c.f. Bui et al., 2014). However, we
+prefer this form both because it is easier to describe and
+because it is more amenable to solving efficiently.
+The lifted problem, Eq. 8, has only C + KC 2 optimization variables, instead of the N (C + KC 2 ) of the original
+objective. However, it remains to figure out how to solve
+this optimization problem. Bui et al. (2014) solve the lifted
+TRW problem using Frank-Wolfe, which has to repeatedly
+solve a linear program over the same feasible space (i.e.,
+Eqs. 9 and 10). These linear programs would be huge in
+our setting, where C can be as large as 10, 000, leading to
+prohibitive running times.
+4.4. Dual Decomposition
+We now derive an efficient algorithm based on dual decomposition to optimize our lifted TRW objective. We will
+have an upper bound on the log-partition function, and thus
+a lower bound on the likelihood, for any valid edge appearance probabilities. However, our algorithm requires a
+1
+.
+specific choice for all edges: ∀l, ρl = K+1
+We assume that the corpus length N is a multiple of K + 1,
+which can always be achieved by adding “filler” hSi tokens. To prove that our choice of ρ defines valid edge
+
+Finally, rather than optimizing over Eq. 11 explicitly, we
+re-write it in a form in which we can use a belief propagation algorithm to perform part of the maximization. To
+do so, we introduce redundant variables µlV for l ∈ [1, K],
+enforce that they are equal to µ0V and use them instead of
+µ0V for each pairwise consistency constraint. The resulting
+equivalent form of the optimization problem is:
+K
+
+Ā(θ) =
+
+K
+
+X
+X
+N
+max
+hµlV , θ0 i +
+hµlE , (K + 1)θl i
+K +1 µ
+l=0
+
++
+
+l=1
+
+K
+X
+l=0
+
+H(µlV ) −
+
+K
+X
+
+I(µlE ),
+
+(12)
+
+l=1
+
+subject to non-negativity and sum-to-1 constraints, and:
+X
+∀l ∈ [1, K], x2 ,
+µlE (x1 , x2 ) = µlV (x2 )
+x1
+
+∀l ∈ [1, K], x1 ,
+
+X
+
+µlE (x1 , x2 ) = µlV (x1 )
+
+x2
+
+∀l ∈ [1, K], x1 ,
+
+µlV (x1 ) = µ0V (x1 ). (13)
+
+If one ignores the equality constraints (13), we see that
+the constrained optimization problem in (12) exactly corresponds to a Bethe variational problem for the treestructured MRF shown in Figure 4. As a result, it could be
+
+A Fast Variational Approach for Learning Markov Random Field Language Models
+
+3
+
+2
+
+1
+
+0
+
+Figure 4. The tree corresponding to the maximization subproblem in the lifted inference, for K = 3.
+
+maximized in linear time using belief propagation (Wainwright & Jordan, 2008, Theorem 4.2b, pg. 83–84).
+Our next step is to introduce these constraints in a way that
+still allows for efficient optimization. This can be achieved
+through the use of Lagrangian duality: by formulating the
+right dual problem, we obtain a tight bound on our objective which can still be maximized through message passing.
+We introduce Lagrange multipliers δVl (xl ) for each constraint
+the Lagrangian by adding
+PK PinC (13)l and form
+l
+0
+δ
+(x
+)(µ
+(x
+)
+l
+l − µV (xl )) to the objective
+V
+l=1
+xl =1 V
+(12). Re-arranging terms and omitting the constant, we obtain that the dual objective is:
+Oδ (θ,µ) = hµ0V , θ0 −
+
+K
+X
+
+δVl i +
+
+l=1
+
++
+
+K
+X
+
+hµlE , (K + 1)θl i +
+
+l=1
+
+K
+X
+
+Algorithm 2 Gradient ascent
+input: data x(t) = (xi )N
+i=1 , precision , initial U , V
+collect pairwise moments (µ̂u,v )(u,v)∈X 2 from the data
+repeat
+compute θ(U, W )
+compute bound L̄(θ, x; ρ) = maxδ L(θ, x; δ) {Alg.1}
+compute ∇θ L̄(θ, x; ρ) {Eq. (18)}
+compute ∇U L̄ and ∇W L̄ {Eq. (19)}
+take gradient step U new ← U + ∇U L̄
+take gradient step W new ← W + ∇W L̄
+until convergence: |L̄new − L̄old | < 
+output: estimated parameters U new , W new
+
+hµlV , θ0 + δVl i (14)
+
+l=1
+K
+X
+l=0
+
+H(µlV ) −
+
+max
+
+K
+X
+
+I(µlE ).
+
+l=1
+
+Since the primal problem is concave and strictly feasible
+(it is feasible with no inequality constraints), Slater’s conditions are met and we have strong duality. Thus,
+A(θ) ≤ Ā(θ) =
+
+Algorithm 1 Tightening the bound
+input: model parameters θ
+repeat
+compute θ̄(θ, δ) for the lifted MRF { Eq. (17) }
+compute µ(θ̄) {BP on Fig. 4 MRF}
+compute ∇δ(θ̄) { Eq. (16) }
+Take sub-gradient step: δ new = δ − α∇δ
+until µ satisfies primal constraints { Eq. (13) }
+output: L̄(θ, x; ρ), pseudo-marginals µ
+
+N
+min max Oδ (θ, µ).
+K + 1 δ µ∈LC
+
+(15)
+
+One useful property of the above is that we have a valid upper bound on A(θ), the log-partition function of the circular
+model, for any choice of the dual variables δ. For a fixed
+δ, computing the upper bound simply requires one pass of
+belief propagation in the tree MRF shown in Figure 4, for
+a running time of O(KC 2 ).
+
+O δ (θ,µ)
+
+µ∈LC
+where L(θ, x; δ) = hµ̂x , θi −
+. Hence, for
+K+1
+any δ, N × L(θ, x; δ) defines a lower bound over the loglikelihood of x(tc ), which can be made tighter by optimizing over δ. Moreover, L(θ, x; δ) is jointly concave in δ and
+θ. The learning algorithm consists of alternating between
+tightening this bound (Algorithm 1), and taking gradient
+steps in θ (Algorithm 2), in an approach similar to that of
+Meshi et al. (2010) and Hazan & Urtasun (2010).
+
+Tightening the bound: For a fixed value of the
+parameters θ, the tightest bound is obtained for
+δ ∗ = arg minδ maxµ∈LC Oδ (θ, µ). We can find this minimizer through a sub-gradient descent algorithm. In particular, letting µ∗ be a maximizer of Oδ (θ, µ), the following
+is a sub-gradient of Oδ (θ, µ) in δ:
+0∗
+∇δVl = µl∗
+V − µV
+
+∀l ∈ [1, K].
+
+(16)
+
+5. Learning Algorithm
+Recall that our goal is to estimate parameters θ to maximize
+L̄(θ, x; ρ) given in Eq. 6. Letting µ̂x denote the observed
+1
+moments of the corpus x(tc ), we have for ρ = K+1
+that:
+L̄(θ, x; ρ) = N × hµ̂x , θi − Ā(θ)
+
+
+minδ maxµ∈LC Oδ (θ, µ)
+= N × hµ̂x , θi −
+K +1
+
+
+maxµ∈LC Oδ (θ, µ)
+= N × max hµ̂x , θi −
+δ
+K +1
+= N × max L(θ, x; δ),
+δ
+
+The optimal µ∗ corresponds to the single node and edge
+marginals of the tree-structured MRF given in Figure 4,
+which can be computed by running belief propagation with
+the following log-potentials:
+θ̄V0 = θ0 −
+
+K
+X
+
+δVl ,
+
+θ̄Vl = θ0 + δVl ∀l ∈ [1, K],
+
+l=1
+l
+θ̄E
+
+= (K + 1)θl ∀l ∈ [1, K].
+
+(17)
+
+Gradient Ascent: The marginals computed at δ ∗ can
+then be used to compute gradients for our main objective.
+
+A Fast Variational Approach for Learning Markov Random Field Language Models
+
+Recall that our aim is to maximize the objective function
+L̄(θ, x; ρ) = N × L(θ, x; δ ∗ (θ)), where δ ∗ (θ) is the output
+of Algorithm 1. For any value of δ, even before optimality,
+we have:
+∇θ max Oδ (θ, µ) = (K + 1)arg max Oδ (θ, µ).
+µ∈LC
+
+µ∈LC
+
+Hence:
+
+
+∗
+∇θ L̄(θ, x; ρ) = N × µ̂x − arg max Oδ (θ, µ) . (18)
+µ∈LC
+
+For the low-rank MRFs, the gradients in the parameters can
+then be obtained using the chain rule. For the factorization
+of θ presented in Eq. 5, we get for u, v ∈ X , d ∈ [1, D],
+l ∈ [1, K]:
+
+K X 
+X
+l0
+∇Uu,d L̄(θ, x; ρ) =
+∇θu,v0 L̄(θ, x; ρ) × Wv0 ,d
+
+Figure 5. Comparison of a model trained by optimizing exact
+likelihood (green) versus the lifted TRW objective (red). The blue
+line shows the exact log-likelihood of the red model as it is being
+optimized based on the lifted TRW bound.
+
+l0 =1 v 0 ∈X
+
+
+X 
+0
+∇Wv,d
+Uu ,d × ∇θu0 ,v L̄(θ, x; ρ)
+l L̄(θ, x; ρ) =
+u0 ∈X
+
+(19)
+These can be used to perform gradient ascent on the objective function, as outlined in Algorithm 2.
+
+6. Experiments
+We conducted experiments using the lifted algorithm to examine its practical efficiency, effectiveness at estimating
+gradients, and the properties of the tree re-weighted bound.
+We implemented models for two standard natural language
+tasks: language modelling and part-of-speech tagging.
+Setup For language modelling we ran experiments on the
+Penn Treebank (PTB) corpus with the standard language
+modelling setup: sections 0-20 for training (N = 930k),
+sections 21-22 for validation (N = 74k) and sections 2324 (N = 82k) for test. For this dataset the vocabulary size
+is C = 10k, and rare words are replaced with UNK.
+For part-of-speech tagging we use the tagged version of
+the Penn Treebank corpus (Marcus et al., 1993). We use
+section 2-21 for training, section 22 for validation and section 23 for test. For this corpus the tag size is T = 36 and
+we use the full vocabulary size with C ≈ 30k.
+For model parameter optimization (the gradient step in Algorithm 2) we use L-BFGS (Liu & Nocedal, 1989) with
+backtracking line-search. For tightening the bound (Algorithm 1), we used 200 sub-gradient iterations, each requiring a round of belief propagation. Our sub-gradient rate
+parameter α was set as α = 103 /2t where t is the number of preceding iterations where the dual objective did not
+decrease. Our implementation of the algorithm uses the
+Torch numerical framework (http://torch.ch/) and
+runs on the GPU for efficiency.
+
+Figure 6. The red and blue lines give lower bounds on the loglikelihood (lifted objective). The green line shows the fixed value
+of the validation log-likelihood of an LBL model trained on PTB.
+
+Experiments First, to confirm the properties of the algorithm, we ran experiments on a small synthetic data set
+with N = 12, K = 1 and C = 4. The small size of this
+data set allows us to exactly compute the log-partition for
+the original conditional model (Equation 3).
+Figure 5 shows a comparison of a model trained using the
+exact gradients on the conditional likelihood to a model
+trained by gradient ascent with the lifted TRW objective.
+As expected, the latter gives an underestimate of the loglikelihood, but the learned parameters yield an exact loglikelihood close to the model learned with exact gradients.
+Next we applied the lifted algorithm to a language modelling task on PTB. We trained both the explicit full-rank
+model and the model with low-rank log-potentials from
+|j−i|
+|j−i|
+Section 3, θti ,tj = Uti Wtj , for D = 30 and K = 2.
+The results are presented in Figure 6. The lower bound on
+the likelihood given by our algorithm is only slightly lower
+than the exact log-likelihood computed for a left-context
+LBL model with K = 2. We also note that the explicit
+model is prone to over-fitting, and gets to a worse validation objective.
+Another advantage of using low-rank potentials is that they
+produce embedded representations of the vocabulary. Ta-
+
+A Fast Variational Approach for Learning Markov Random Field Language Models
+W ORD
+company
+red
+has
+dollar
+jack
+
+MRF L IFTED
+firm
+industry
+group
+conservative
+freedom
+black
+had
+is
+was
+currency
+economy
+government
+richard
+david
+carl
+
+MRF SGD
+he
+it
+corp.
+vietnamese
+delegation
+judge
+have
+had
+n’t
+intergroup
+market
+uses
+like
+needed
+first
+
+W ORD 2 VEC
+holding
+anacomp
+uniroyal
+cross
+tape
+delicious
+had
+been
+have
+currency
+pound
+stabilized
+kemp
+porter
+timothy
+
+Table 1. Nearest neighbours in different embeddings. MRF
+L IFTED are the embeddings learned by our algorithm. MRF SGD
+are obtained by running stochastic gradient descent for 48 hours
+on the pseudo-likelihood objective: the algorithm did not converge in that time. W ORD 2 VEC are the vectors learned by the
+Word2Vec software of (Mikolov et al., 2013)
+
+ble 1 shows a sample of embeddings learned for the MRF
+compared to those obtained with the Word2Vec algorithm
+(with D = 100 and a window size of 4, training run for 5
+epochs). We also tried training our algorithm by performing stochastic gradient descent on the pseudo-likelihood
+of the corpus under our model. The column MRF SGD
+shows the embeddings obtained after 48 hours of training.
+In comparison, the GPU implementation of our algorithm
+reached its optimal objective value on the validation dataset
+in 45 minutes on the Penn Treebank dataset.
+Finally we ran experiments on part-of-speech tagging. For
+this task we use a different MRF graphical structure. Each
+tag node is connected to its K neighbors as well as the L
+nearest-words. We use a different set of covering forests
+which is shown in Figure 7. As with language modelling
+the partition function for this model would be very inefficient to compute explicitly. However, given a sentence, the
+best tagging can be found efficiently by dynamic programming.
+For this model, we also employ explicit features for pairwise potentials, i.e. θtmi ,wi+m = U m f (ti , wi+m ) and
+θtli ,ti+l = V l g(ti , ti+l ) where U, V are parameter matrices
+and f, g are predefined feature functions. For g we use tagpair indicator features, and for f we use standard features
+on capitalization, punctuation, and prefixes/suffixes (given
+in Appendix ??). This model and features are analogous
+to a standard conditional random field tagger; however, we
+optimize for joint likelihood.
+It is known that joint models are less effective than discriminative conditional models for this task (Liang & Jordan,
+2008), but we can compare performance to a similar joint
+
+PDT
+
+DT
+
+JJ
+
+NNS
+
+PDT
+
+DT
+
+JJ
+
+NNS
+
+All
+
+the
+
+scared
+
+cats
+
+All
+
+the
+
+scared
+
+cats
+
+Figure 7. The POS tagging model for K = 2, L = 3, and a
+decomposition for the lifted inference algorithm
+
+Model
+HMM
+Lifted MRF
+
+Total Acc
+95.8
+96.0
+
+Unk Acc
+65.4
+76.0
+
+Table 2. Comparison of tagging accuracy between the lifted MRF
+and an HMM in total and on unseen words.
+
+model. We compare this model with K = 1 to a standard first-order HMM tagging model using the TnT tagger
+(Brants, 2000) with simple rare word smoothing. Table 2
+shows the results. The lifted model achieves similar total accuracy, but has much better performance on unseen
+words, due to its feature structure.
+
+7. Conclusion
+This work introduces a Markov random field language
+model that extends upon NLMs, and presents a fast lifted
+inference algorithm with complexity independent of the
+length of the corpus. We show experimentally that this
+technique is efficient and estimates useful parameters on
+two common NLP tasks. The use of low-rank MRFs may
+also be useful in other applications where random variables
+have very large state spaces.
+Our paper presents a new application area for lifted inference, and could potentially lead to its broader adoption in machine learning. For example, one could apply our methodology to efficiently learn the parameters of
+grid-structured MRFs commonly used in computer vision,
+where symmetry is obtained using an approximation which
+wraps the grid around left-to-right and top-to-bottom. Our
+dual decomposition algorithm may also be more broadly
+useful for efficiently performing lifted variational inference.
+Our approach opens the door to putting a much broader
+class of word embeddings used for language into a probabilistic framework. One of the most exciting directions
+enabled by our advances is to combine latent variable models together with neural language models. For example,
+one could imagine using our approach to perform semisupervised or fully unsupervised learning of part-of-speech
+tags using vast unlabeled corpora. Our lifted variational inference approach can be easily combined with Expectation
+Maximization or gradient-based likelihood maximization.
+
+A Fast Variational Approach for Learning Markov Random Field Language Models
+
+Acknowledgments
+YJ and DS gratefully acknowledge the support of the Defense Advanced Research Projects Agency (DARPA) Probabilistic Programming for Avanced Machine Learning Program under Air Force Research Laboratory (AFRL) prime
+contract no. FA8750-14-C-0005. Any opinions, findings,
+and conclusions or recommendations expressed in this material are those of the author(s) and do not necessarily reflect the view of DARPA, AFRL, or the US government.
+
+References
+Bengio, Yoshua, Schwenk, Holger, Senécal, JeanSébastien, Morin, Fréderic, and Gauvain, Jean-Luc.
+Neural probabilistic language models. In Innovations in
+Machine Learning, pp. 137–186. Springer, 2006.
+Besag, Julian. Statistical analysis of non-lattice data. The
+statistician, pp. 179–195, 1975.
+Brants, Thorsten. Tnt: a statistical part-of-speech tagger.
+In Proceedings of the sixth conference on Applied natural language processing, pp. 224–231. Association for
+Computational Linguistics, 2000.
+Bui, Hung, Huynh, Tuyen, and Riedel, Sebastian. Automorphism groups of graphical models and lifted variational inference. In Proceedings of the Twenty-Ninth
+Conference Annual Conference on Uncertainty in Artificial Intelligence (UAI-13), pp. 132–141, Corvallis, Oregon, 2013. AUAI Press.
+Bui, Hung Hai, Huynh, Tuyen N., and Sontag, David.
+Lifted tree-reweighted variational inference. In Proceedings of the Thirtieth Conference on Uncertainty in Artificial Intelligence (UAI-14), 2014.
+Collobert, Ronan, Weston, Jason, Bottou, Léon, Karlen,
+Michael, Kavukcuoglu, Koray, and Kuksa, Pavel. Natural language processing (almost) from scratch. The
+Journal of Machine Learning Research, 12:2493–2537,
+2011.
+
+Jancsary, Jeremy and Matz, Gerald. Convergent decomposition solvers for tree-reweighted free energies. In International Conference on Artificial Intelligence and Statistics, pp. 388–398, 2011.
+Liang, Percy and Jordan, Michael I. An asymptotic analysis of generative, discriminative, and pseudolikelihood
+estimators. In Proceedings of the 25th international conference on Machine learning, pp. 584–591. ACM, 2008.
+Liu, Dong C and Nocedal, Jorge. On the limited memory
+bfgs method for large scale optimization. Mathematical
+programming, 45(1-3):503–528, 1989.
+Marcus, Mitchell P, Marcinkiewicz, Mary Ann, and Santorini, Beatrice. Building a large annotated corpus of
+english: The penn treebank. Computational linguistics,
+19(2):313–330, 1993.
+Meshi, Ofer, Sontag, David, Jaakkola, Tommi, and Globerson, Amir. Learning efficiently with approximate inference via dual losses. 2010.
+Mikolov, Tomas, Chen, Kai, Corrado, Greg, and Dean, Jeffrey. Efficient estimation of word representations in vector space. arXiv preprint arXiv:1301.3781, 2013.
+Mnih, Andriy and Hinton, Geoffrey. Three new graphical
+models for statistical language modelling. In Proceedings of the 24th international conference on Machine
+learning, pp. 641–648. ACM, 2007.
+Mnih, Andriy and Hinton, Geoffrey E. A scalable hierarchical distributed language model. In Advances in neural
+information processing systems, pp. 1081–1088, 2009.
+Mnih, Andriy and Teh, Yee Whye. A fast and simple algorithm for training neural probabilistic language models.
+arXiv preprint arXiv:1206.6426, 2012.
+Wainwright, Martin J. and Jordan, Michael I. Graphical
+models, exponential families, and variational inference.
+Foundations and Trends in Machine Learning, 1(12):1–
+305, 2008. ISSN 1935-8237.
+
+Globerson, Amir and Jaakkola, Tommi. Convergent propagation algorithms via oriented trees. In Parr, Ronald
+and van der Gaag, Linda C. (eds.), Proceedings of the
+Twenty-Third Conference on Uncertainty in Artificial Intelligence (UAI), pp. 133–140. AUAI Press, 2007.
+
+Wainwright, Martin J, Jaakkola, Tommi S, and Willsky,
+Alan S. A new class of upper bounds on the log partition function. Information Theory, IEEE Transactions
+on, 51(7):2313–2335, 2005.
+
+Graff, David, Kong, Junbo, Chen, Ke, and Maeda,
+Kazuaki. English gigaword. Linguistic Data Consortium, Philadelphia, 2003.
+
+Yanover, C., Schueler-Furman, O., and Weiss, Y. Minimizing and learning energy functions for side-chain prediction. Journal of Computational Biology, 15(7):899–911,
+2008.
+
+Hazan, Tamir and Urtasun, Raquel.
+A primal-dual
+message-passing algorithm for approximated large scale
+structured prediction. In Advances in Neural Information Processing Systems, pp. 838–846, 2010.
+
+

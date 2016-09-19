@@ -1,0 +1,1767 @@
+Deep Boosting
+Corinna Cortes
+Google Research, 111 8th Avenue, New York, NY 10011
+
+CORINNA @ GOOGLE . COM
+
+Mehryar Mohri
+Courant Institute and Google Research, 251 Mercer Street, New York, NY 10012
+Umar Syed
+Google Research, 111 8th Avenue, New York, NY 10011
+
+Abstract
+We present a new ensemble learning algorithm,
+DeepBoost, which can use as base classifiers a
+hypothesis set containing deep decision trees, or
+members of other rich or complex families, and
+succeed in achieving high accuracy without overfitting the data. The key to the success of the algorithm is a capacity-conscious criterion for the
+selection of the hypotheses. We give new datadependent learning bounds for convex ensembles
+expressed in terms of the Rademacher complexities of the sub-families composing the base classifier set, and the mixture weight assigned to each
+sub-family. Our algorithm directly benefits from
+these guarantees since it seeks to minimize the
+corresponding learning bound. We give a full description of our algorithm, including the details
+of its derivation, and report the results of several
+experiments showing that its performance compares favorably to that of AdaBoost and Logistic
+Regression and their L1 -regularized variants.
+
+1. Introduction
+Ensemble methods are general techniques in machine
+learning for combining several predictors or experts to
+create a more accurate one. In the batch learning setting, techniques such as bagging, boosting, stacking, errorcorrection techniques, Bayesian averaging, or other averaging schemes are prominent instances of these methods (Breiman, 1996; Freund & Schapire, 1997; Smyth &
+Wolpert, 1999; MacKay, 1991; Freund et al., 2004). Ensemble methods often significantly improve performance
+in practice (Quinlan, 1996; Bauer & Kohavi, 1999; Caruana et al., 2004; Dietterich, 2000; Schapire, 2003) and benProceedings of the 31 st International Conference on Machine
+Learning, Beijing, China, 2014. JMLR: W&CP volume 32. Copyright 2014 by the author(s).
+
+MOHRI @ CIMS . NYU . EDU
+
+USYED @ GOOGLE . COM
+
+efit from favorable learning guarantees. In particular, AdaBoost and its variants are based on a rich theoretical analysis, with performance guarantees in terms of the margins
+of the training samples (Schapire et al., 1997; Koltchinskii
+& Panchenko, 2002).
+Standard ensemble algorithms such as AdaBoost combine
+functions selected from a base classifier hypothesis set H.
+In many successful applications of AdaBoost, H is reduced
+to the so-called boosting stumps, that is decision trees of
+depth one. For some difficult tasks in speech or image
+processing, simple boosting stumps are not sufficient to
+achieve a high level of accuracy. It is tempting then to use
+a more complex hypothesis set, for example the set of all
+decision trees with depth bounded by some relatively large
+number. But, existing learning guarantees for AdaBoost
+depend not only on the margin and the number of the
+training examples, but also on the complexity of H measured in terms of its VC-dimension or its Rademacher complexity (Schapire et al., 1997; Koltchinskii & Panchenko,
+2002). These learning bounds become looser when using too complex base classifier sets H. They suggest a
+risk of overfitting which indeed can be observed in some
+experiments with AdaBoost (Grove & Schuurmans, 1998;
+Schapire, 1999; Dietterich, 2000; Rätsch et al., 2001b).
+This paper explores the design of alternative ensemble algorithms using as base classifiers a hypothesis set H that
+may contain very deep decision trees, or members of some
+other very rich or complex families, and that can yet succeed in achieving a higher performance level. Assume that
+the set of base classifiers H can be decomposed as the
+union of p disjoint families H1 , . . . , Hp ordered by increasing complexity, where Hk , k 2 [1, p], could be for example
+the set of decision trees of depth k, or a set of functions
+based on monomials of degree k. Figure 1 shows a pictorial
+illustration. Of course, if we strictly confine ourselves to
+using hypotheses belonging only to families Hk with small
+k, then we are effectively using a smaller base classifier set
+H with favorable guarantees. But, to succeed in some chal-
+
+Deep Boosting
+H2
+H1
+
+H4
+H5
+
+H3
+
+H1
+
+H1 [H2
+
+···
+
+H1 [· · · [Hp
+
+Figure 1. Base classifier set H decomposed in terms of subfamilies H1 , . . . , Hp or their unions.
+
+lenging tasks, the use of a few more complex hypotheses
+could be needed. The main idea behind the design of our
+algorithms is that an ensemble based on hypotheses drawn
+from H1 , . . . , Hp can achieve a higher accuracy by making
+use of hypotheses drawn from Hk s with large k if it allocates more weights to hypotheses drawn from Hk s with a
+small k. But, can we determine quantitatively the amounts
+of mixture weights apportioned to different families? Can
+we provide learning guarantees for such algorithms?
+Note that our objective is somewhat reminiscent of that of
+model selection, in particular Structural Risk Minimization
+(SRM) (Vapnik, 1998), but it differs from that in that we
+do not S
+wish to limit our base classifier set to some optimal
+q
+Hq = k=1 Hk . Rather, we seek the freedom of using as
+base hypotheses even relatively deep trees from rich Hk s,
+with the promise of doing so infrequently, or that of reserving them a somewhat small weight contribution. This
+provides the flexibility of learning with deep hypotheses.
+We present a new algorithm, DeepBoost, whose design is
+precisely guided by the ideas just discussed. Our algorithm
+is grounded in a solid theoretical analysis that we present
+in Section 2. We give new data-dependent learning bounds
+for convex ensembles. These guarantees are expressed in
+terms of the Rademacher complexities of the sub-families
+Hk and the mixture weight assigned to each Hk , in addition to the familiar margin terms and sample size. Our
+capacity-conscious algorithm is derived via the application
+of a coordinate descent technique seeking to minimize such
+learning bounds. We give a full description of our algorithm, including the details of its derivation and its pseudocode (Section 3) and discuss its connection with previous boosting-style algorithms. We also report the results of
+several experiments (Section 4) demonstrating that its performance compares favorably to that of AdaBoost, which
+is known to be one of the most competitive binary classification algorithms.
+
+2. Data-dependent learning guarantees for
+convex ensembles with multiple hypothesis
+sets
+Non-negative linear combination ensembles such as boosting or bagging typically assume that base functions are selected from the same hypothesis set H. Margin-based generalization bounds were given for ensembles of base functions taking values in { 1, +1} by Schapire et al. (1997) in
+
+terms of the VC-dimension of H. Tighter margin bounds
+with simpler proofs were later given by Koltchinskii &
+Panchenko (2002), see also (Bartlett & Mendelson, 2002),
+for the more general case of a family H taking arbitrary
+real values, in terms of the Rademacher complexity of H.
+Here, we also consider base hypotheses taking arbitrary
+real values but assume that they can be selected from several distinct hypothesis sets H1 , . . . , Hp with p
+1 and
+present margin-based learning in terms of the Rademacher
+complexity of these sets. Remarkably, the complexity term
+of these bounds admits an explicit dependency in terms of
+the mixture coefficients defining the ensembles.
+Sp Thus, the
+ensemble family we consider is F = conv( k=1 Hk ), that
+PT
+is the family of functions f of the form f = t=1 ↵t ht ,
+where ↵ = (↵1 , . . . , ↵T ) is in the simplex and where,
+for each t 2 [1, T ], ht is in Hkt for some kt 2 [1, p].
+Let X denote the input space. H1 , . . . , Hp are thus families of functions mapping from X to R. We consider
+the familiar supervised learning scenario and assume that
+training and test points are drawn i.i.d. according to some
+distribution D over X ⇥ { 1, +1} and denote by S =
+((x1 , y1 ), . . . , (xm , ym )) a training sample of size m drawn
+according to Dm .
+Let ⇢ > 0. For a function f taking values in R, we denote by R(f ) its binary classification error, by R⇢ (f ) its
+bS,⇢ (f ) its empirical margin error:
+⇢-margin error, and by R
+R(f ) =
+
+E
+
+(x,y)⇠D
+
+b⇢ (f ) =
+R
+
+E
+
+[1yf (x)0 ],
+
+(x,y)⇠S
+
+R⇢ (f ) =
+
+E
+
+(x,y)⇠D
+
+[1yf (x)⇢ ],
+
+[1yf (x)⇢ ],
+
+where the notation (x, y) ⇠ S indicates that (x, y) is drawn
+according to the empirical distribution defined by S.
+The following theorem gives a margin-based Rademacher
+complexity bound for learning with such functions in the
+binary classification case. As with other Rademacher complexity learning guarantees, our bound is data-dependent,
+which is an important and favorable characteristic of our
+results. For p = 1, that is for the special case of a single
+hypothesis set, the analysis coincides with that of the standard ensemble margin bounds (Koltchinskii & Panchenko,
+2002).
+Theorem 1. Assume p > 1. Fix ⇢ > 0. Then, for any
+> 0, with probability at least 1
+over the choice of
+a sample S of size m drawn i.i.d. according
+to Dm , the
+PT
+following inequality holds for all f = t=1 ↵t ht 2 F:
+T
+
+X
+bS,⇢ (f ) + 4
+R(f )  R
+↵t Rm (Hkt )
+⇢ t=1
+s⇠
+r
+h ⇢2 m i⇡ log p log 2
+2 log p
+4
++
++
+log
++
+.
+⇢
+m
+⇢2
+log p
+m
+2m
+
+Deep Boosting
+
+bS,⇢ (f ) + 4 PT ↵t Rm (Hk ) + C(m, p)
+Thus, R(f )  R
+t
+⇣q ⇢ t=1
+⇥ ⇢2 m ⇤⌘
+log p
+with C(m, p) = O
+.
+⇢2 m log log p
+
+This result is remarkable since the complexity term in the
+right-hand side of the bound admits an explicit dependency on the mixture coefficients ↵t . It is a weighted average of Rademacher complexities with mixture weights ↵t ,
+t 2 [1, T ]. Thus, the second term of the bound suggests
+that, while some hypothesis sets Hk used for learning could
+have a large Rademacher complexity, this may not be detrimental to generalization if the corresponding total mixture
+weight (sum of ↵t s corresponding to that hypothesis set) is
+relatively small. Such complex families offer the potential
+of achieving a better margin on the training sample.
+The theorem cannot be proven via a standard Rademacher
+complexity analysis such as that of Koltchinskii &
+Panchenko (2002) since the complexity term of the bound
+would then be the Rademacher
+Sp complexity of the family
+of hypotheses F = conv( k=1 Hk ) and would not depend on the specific weights ↵t defining a given function f . Furthermore, the complexity term of a standard
+Rademacher complexity analysis is always lower bounded
+by the complexity term appearing in our bound. Indeed,
+since Rm (conv([pk=1 Hk )) = Rm ([pk=1 Hk ), the following lower bound holds for any choice of the non-negative
+mixtures weights ↵t summing to one:
+Rm (F)
+
+m
+
+max Rm (Hk )
+k=1
+
+T
+X
+
+↵t Rm (Hkt ).
+
+(1)
+
+t=1
+
+Thus, Theorem 1 provides a finer learning bound than the
+one obtained via a standard Rademacher complexity analysis. The full proof of the theorem is given in Appendix A.
+Our proof technique exploits standard tools used to derive Rademacher complexity learning bounds (Koltchinskii & Panchenko, 2002) as well as a technique used by
+Schapire, Freund, Bartlett, and Lee (1997) to derive early
+VC-dimension margin bounds. Using other standard techniques as in (Koltchinskii & Panchenko, 2002; Mohri et al.,
+2012), Theorem 1 can be straightforwardly generalized to
+hold uniformly forqall ⇢ > 0 at the price of an additional
+⇣ log log 2 ⌘
+⇢
+term that is in O
+.
+m
+
+ities Rm (Hk ), k 2 [1, p]. We will assume that the hypothesis sets Hk are symmetric, that is, for any h 2 Hk ,
+we also have ( h) 2 Hk , which holds for most hypothesis sets typically considered in practice. This assumption
+is not necessary but it helps simplifying the presentation of
+our algorithm. For any hypothesis h 2 [pk=1 Hk , we denote
+by d(h) the index of the hypothesis set it belongs to, that is
+h 2 Hd(h) . The bound of TheoremS1 holds uniformly for
+p
+all ⇢ > 0 and functions f 2 conv( k=1 Hk ).1 Since the
+last term of the bound does not depend on ↵, it suggests
+selecting ↵ to minimize
+m
+
+where rt = Rm (Hd(ht ) ). Since for any ⇢ > 0, f and f /⇢
+admit the same P
+generalization error, we can instead search
+T
+for ↵ 0 with t=1 ↵t  1/⇢ which leads to
+min
+↵ 0
+
+3.1. Optimization problem
+Let H1 , . . . , Hp be p disjoint families of functions taking
+values in [ 1, +1] with increasing Rademacher complex-
+
+m
+T
+T
+X
+X
+1
+1X P
+1yi T ↵t ht (xi )1 +4
+↵t rt s.t.
+↵t  .
+t=1
+m i=1
+⇢
+t=1
+t=1
+
+The first term of the objective is not a convex function
+of ↵ and its minimization is known to be computationally hard. Thus, we will consider instead a convex upper
+bound. Let u 7! ( u) be a non-increasing convex function upper bounding u 7! 1u0 with differentiable over
+R and 0 (u) 6= 0 for all u.
+may be selected to be for
+example the exponential function as in AdaBoost (Freund
+& Schapire, 1997) or the logistic function. Using such an
+upper bound, we obtain the following convex optimization
+problem:
+min
+↵ 0
+
+s.t.
+
+m
+1 X ⇣
+1
+m i=1
+T
+X
+t=1
+
+↵t 
+
+yi
+
+T
+X
+t=1
+
+1
+,
+⇢
+
+T
+⌘
+X
+↵t ht (xi ) +
+↵t rt
+
+(2)
+
+t=1
+
+where we introduced a parameter
+0 controlling the balance between the magnitude of the values taken by function
+and the second term. Introducing a Lagrange variable
+0 associated to the constraint in (2), the problem can
+be equivalently written as
+
+3. Algorithm
+In this section, we will use the learning guarantees of Section 2 to derive a capacity-conscious ensemble algorithm
+for binary classification.
+
+T
+
+4X
+1 X
+1yi PT ↵t ht (xi )⇢ +
+G(↵) =
+↵t rt ,
+t=1
+m i=1
+⇢ t=1
+
+min
+↵ 0
+
+m
+1 X ⇣
+1
+m i=1
+
+yi
+
+T
+X
+t=1
+
+T
+⌘ X
+↵t ht (xi ) +
+( rt + )↵t .
+t=1
+
+Here, is a parameter that can be freely selected by the
+algorithm since any choice of its value is equivalent to a
+P
+1
+The condition Tt=1 ↵t = 1 of Theorem 1 can be relaxed
+PT
+to t=1 ↵t  1. To see this, use for example a null hypothesis
+(ht = 0 for some t).
+
+Deep Boosting
+
+choice of ⇢ in (2). Let {h1 , . . . , hN } be the set of distinct
+base functions, and let G be the objective function based
+on that collection:
+G(↵) =
+
+m
+N
+N
+⌘ X
+X
+1X ⇣
+1 yi
+↵j hj (xi ) + ( rj + )↵j ,
+m i=1
+t=1
+j=1
+
+with ↵ = (↵1 , . . . , ↵N ) 2 RN . Note that we can drop the
+requirement ↵ 0 since the hypothesis sets are symmetric
+and ↵t ht = ( ↵t )( ht ). For each hypothesis h, we keep
+either h or h in {h1 , . . . , hN }. Using the notation
+⇤j = rj + ,
+
+(3)
+
+for all j 2 [1, N ], our optimization problem can then be
+rewritten as min↵ F (↵) with
+F (↵) =
+
+m
+N
+N
+⌘ X
+X
+1 X ⇣
+1 yi
+↵j hj (xi ) +
+⇤j |↵j |, (4)
+m i=1
+t=1
+j=1
+
+with no non-negativity constraint on ↵. The function F
+is convex as a sum of convex functions and admits a subdifferential at all ↵ 2 R. We can design a boosting-style
+algorithm by applying coordinate descent to F (↵).
+Let ↵t = (↵t,1 , . . . , ↵t,N )> denote the vector obtained after t
+1 iterations and let ↵0 = 0. Let ek denote the
+kth unit vector in RN , k 2 [1, N ]. The direction ek and
+the step ⌘ selected at the tth round are those minimizing
+F (↵t 1 + ⌘ek ), that is
+m
+⌘
+1 X ⇣
+F (↵t 1 + ⌘ek ) =
+1 yi ft 1 (xi ) ⌘yi hk (xi )
+m i=1
+X
++
+⇤j |↵t 1,j | + ⇤k |↵t 1,k + ⌘|,
+j6=k
+
+PN
+
+where ft 1 =
+j=1 ↵t 1,j hj . For any t 2 [1, T ], we
+denote by Dt the distribution defined by
+Dt (i) =
+
+0
+
+1
+
+yi ft
+St
+
+1 (xi )
+
+,
+
+(5)
+
+Pm
+0
+where St is a normalization factor, St =
+(1
+i=1
+yi ft 1 (xi )). For any s 2 [1, T ] and j 2 [1, N ], we denote
+by ✏s,j the weighted error of hypothesis hj for the distribution Ds , for s 2 [1, T ]:
+i
+1h
+E [yi hj (xi )] .
+(6)
+✏s,j = 1
+i⇠Ds
+2
+3.2. DeepBoost
+Figure 2 shows the pseudocode of the algorithm DeepBoost
+derived by applying coordinate descent to the objective
+function (4). The details of the derivation of the expression are given in Appendix B. In the special cases of the
+
+D EEP B OOST(S = ((x1 , y1 ), . . . , (xm , ym )))
+1 for i
+1 to m do
+1
+2
+D1 (i)
+m
+3 for t
+1 to T do
+4
+for j
+1 to N do
+5
+if (↵t 1,j 6= 0) then
+⇤j m
+6
+dj
+✏t,j 12 + sgn(↵t 1,j ) 2S
+t
+⇤
+m
+j
+7
+elseif ✏t,j 12  2S
+then
+t
+8
+dj
+0
+⇤j m
+9
+else dj
+✏t,j 12
+sgn(✏t,j 12 ) 2S
+t
+10
+k
+argmax |dj |
+j2[1,N ]
+
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+
+✏t
+✏t,k
+if |(1 ✏t )e↵t 1,k ✏t e ↵t 1,k |  ⇤Sktm then
+⌘t
+↵t 1,k
+elseif (1 ✏t )e↵t 1,k ✏t e ↵t 1,k > ⇤Sktm then
+q⇥
+h
+⇤ 1 ✏ i
+⇤k m
+⇤k m 2
+⌘t
+log
++
++ ✏t t
+i
+h 2✏t St q⇥ 2✏t St ⇤
+⇤k m 2
+⇤k m
+1 ✏t
+else ⌘t
+log + 2✏
++
++
+2✏t St
+✏t
+t St
+↵t 1 + ⌘t ek
+↵t
+Pm
+PN
+0
+St+1
+1 yi j=1 ↵t,j hj (xi )
+i=1
+for i
+1 to m do
+Dt+1 (i)
+
+PN
+f
+j=1 ↵T,j hj
+return f
+
+0
+
+1 yi
+
+PN
+
+j=1 ↵t,j hj (xi )
+St+1
+
+Figure 2. Pseudocode of the DeepBoost algorithm for both the
+exponential loss and the logistic loss. The expression of the
+weighted error ✏t,j is given in (6). In the generic case of a surrogate loss different from the exponential or logistic losses, ⌘t
+is found instead via a line search or other numerical methods from
+⌘t = argmax⌘ F (↵t 1 + ⌘ek ).
+
+exponential loss ( ( u) = exp( u)) or the logistic loss
+( ( u) = log2 (1 + exp( u))), a closed-form expression
+is given for the step size (lines 12-16), which is the same in
+both cases (see Sections B.4 and B.5). In the generic case,
+the step size ⌘t can be found using a line search or other
+numerical methods. Note that when the condition of line
+12 is satisfied, the step taken by the algorithm cancels out
+the coordinate along the direction k, thereby leading to a
+sparser result. This is consistent with the fact that the objective function contains a second term based on (weighted)
+L1 -norm, which is favoring sparsity.
+Our algorithm is related to several other boosting-type algorithms devised in the past. For = 0 and = 0 and
+using the exponential surrogate loss, it coincides with Ada1997) with
+the same
+Boost (Freund & Schapire,hq
+i precisely S
+p
+1 ✏t
+direction and same step log
+using H = k=1 Hk
+✏t
+as the hypothesis set for base learners. This corresponds to
+
+Deep Boosting
+
+ignoring the complexity term of our bound as well as the
+control of the sum of the mixture weights via . For = 0
+and = 0 and using the logistic surrogate loss, our algorithm also coincides with additive logistic loss (Friedman
+et al., 1998).
+In the special case where
+= 0 and
+6= 0 and for
+the exponential surrogate loss, our algorithm matches the
+L1 -norm regularized AdaBoost (e.g., see (Rätsch et al.,
+2001a)). For the same choice of the parameters and for
+the logistic surrogate loss, our algorithm matches the L1 norm regularized additive Logistic Regression studied by
+Duchi &SSinger (2009) using the base learner hypothesis
+p
+set H = k=1 Hk . H may in general be very rich. The key
+foundation of our algorithm and analysis is instead to take
+into account the relative complexity of the sub-families Hk .
+Also, note that L1 -norm regularized AdaBoost and Logistic Regression can be viewed as algorithms minimizing the
+learning bound obtained via the standard Rademacher complexity analysis (Koltchinskii & Panchenko, 2002), using
+the exponential or logistic surrogate losses. Instead, the
+objective function minimized by our algorithm is based on
+the generalization bound of Theorem 1, which as discussed
+earlier is a finer bound (see (1)). For = 0 but 6= 0, our
+algorithm is also close to the so-called unnormalized Arcing (Breiman, 1999) or AdaBoost⇢ (Rätsch & Warmuth,
+2002) using H as a hypothesis set. AdaBoost⇢ coincides
+with AdaBoost modulo the step size, which is more conservative than that of AdaBoost and depends on ⇢. Rätsch
+& Warmuth (2005) give another variant of the algorithm
+that does not require knowing the best ⇢, see also the related work of Kivinen & Warmuth (1999); Warmuth et al.
+(2006).
+Our algorithm directly benefits from the learning guarantees given in Section 2 since it seeks to minimize the bound
+of Theorem 1. In the next section, we report the results of
+our experiments with DeepBoost. Let us mention that we
+have also designed an alternative deep boosting algorithm
+that we briefly describe and discuss in Appendix C.
+
+4. Experiments
+An additional benefit of the learning bounds presented in
+Section 2 is that they are data-dependent. They are based
+on the Rademacher complexity of the base hypothesis sets
+Hk , which in some cases can be well estimated from the
+training sample. The algorithm DeepBoost directly inherits this advantage. For example, if the hypothesis set Hk
+is based on a positive definite kernel with sample matrix
+Kk , it is known that its empirical
+Rademacher complexity
+p
+Tr[K ]
+
+k
+can be upper bounded by
+and lower bounded by
+m
+p
+Tr[K
+]
+k
+p1
+. In other cases, when Hk is a family of funcm
+2
+tions taking binary values, we can use an upper bound on
+
+the Rademacher complexity in terms
+qof the growth func2 log ⇧Hk (m)
+tion of Hk , ⇧Hk (m): Rm (Hk ) 
+. Thus,
+m
+stumps
+for the family H1
+of boosting stumps in dimension d,
+⇧H stumps (m)  2md, since there are 2m distinct threshold
+1
+functions for each dimension with m points. Thus, the following inequality holds:
+r
+2 log(2md)
+stumps
+Rm (H1
+)
+.
+(7)
+m
+Similarly, we consider the family of decision trees H2stumps
+of depth 2 with the same question at the internal nodes of
+depth 1. We have ⇧H stumps (m)  (2m)2 d(d2 1) since there
+2
+are d(d 1)/2 distinct trees of this type and since each
+induces at most (2m)2 labelings. Thus, we can write
+r
+2 log(2m2 d(d 1))
+stumps
+Rm (H2
+)
+.
+(8)
+m
+More generally, we also consider the family of all binary
+decision trees Hktrees of depth k. For this family it is known
+that VC-dim(Hktrees )  (2k + 1) log2 (d + 1) (Mansour,
+1997). More generally, the VC-dimension of Tn , the family of decision trees with n nodes in dimension d can be
+bounded by (2n + 1) log2 (d + 2) (see
+q for example (Mohri
+2 VC-dim(H) log(m+1)
+et al., 2012)). Since Rm (H) 
+,
+m
+for any hypothesis class H we have
+r
+(4n + 2) log2 (d + 2) log(m + 1)
+. (9)
+Rm (Tn ) 
+m
+
+The experiments with DeepBoost described below
+SK use eitrees
+ther Hstumps = H1stumps [ H2stumps or HK
+= k=1 Hktrees ,
+for some K > 0, as the base hypothesis sets. For any hypothesis in these sets, DeepBoost will use the upper bounds
+given above as a proxy for the Rademacher complexity
+of the set to which it belongs. We leave it to the future
+to experiment with finer data-dependent estimates or upper bounds on the Rademacher complexity, which could
+further improve the performance of our algorithm. Recall that each iteration of DeepBoost searches for the base
+hypothesis that is optimal with respect to a certain criterion (see lines 5-10 of Figure 2). While an exhaustive
+search is feasible for H1stumps , it would be far too expentrees
+sive to visit all trees in HK
+when K is large. Theretrees
+fore, when using HK and also H2stumps as the base hypotheses we use the following heuristic search procedure
+in each iteration t: First, the optimal tree h⇤1 2 H1trees is
+found via exhaustive search. Next, for all 1 < k  K,
+a locally optimal tree h⇤k 2 Hktrees is found by considering only trees that can be obtained by adding a single layer
+of leaves to h⇤k 1 . Finally, we select the best hypotheses
+in the set {h⇤1 , . . . , h⇤K , h1 , . . . , ht 1 }, where h1 , . . . , ht 1
+are the hypotheses selected in previous iterations.
+
+Deep Boosting
+Table 1. Results for boosted decision stumps and the exponential loss function.
+breastcancer
+Error
+(std dev)
+Avg tree size
+Avg no. of trees
+
+AdaBoost
+H1stumps
+0.0429
+(0.0248)
+1
+100
+
+AdaBoost
+H2stumps
+0.0437
+(0.0214)
+2
+100
+
+AdaBoost-L1
+0.0408
+(0.0223)
+1.436
+43.6
+
+DeepBoost
+0.0373
+(0.0225)
+1.215
+21.6
+
+ocr17
+Error
+(std dev)
+Avg tree size
+Avg no. of trees
+
+AdaBoost
+H1stumps
+0.0085
+0.0072
+1
+100
+
+AdaBoost
+H2stumps
+0.008
+0.0054
+2
+100
+
+AdaBoost-L1
+0.0075
+0.0068
+1.086
+37.8
+
+DeepBoost
+0.0070
+(0.0048)
+1.369
+36.9
+
+ionosphere
+Error
+(std dev)
+Avg tree size
+Avg no. of trees
+
+AdaBoost
+H1stumps
+0.1014
+(0.0414)
+1
+100
+
+AdaBoost
+H2stumps
+0.075
+(0.0413)
+2
+100
+
+AdaBoost-L1
+0.0708
+(0.0331)
+1.392
+39.35
+
+DeepBoost
+0.0638
+(0.0394)
+1.168
+17.45
+
+ocr49
+Error
+(std dev)
+Avg tree size
+Avg no. of trees
+
+AdaBoost
+H1stumps
+0.0555
+0.0167
+1
+100
+
+AdaBoost
+H2stumps
+0.032
+0.0114
+2
+100
+
+AdaBoost-L1
+0.03
+0.0122
+1.99
+99.3
+
+DeepBoost
+0.0275
+(0.0095)
+1.96
+96
+
+german
+Error
+(std dev)
+Avg tree size
+Avg no. of trees
+
+AdaBoost
+H1stumps
+0.243
+(0.0445)
+1
+100
+
+AdaBoost
+H2stumps
+0.2505
+(0.0487)
+2
+100
+
+AdaBoost-L1
+0.2455
+(0.0438)
+1.54
+54.1
+
+DeepBoost
+0.2395
+(0.0462)
+1.76
+76.5
+
+ocr17-mnist
+Error
+(std dev)
+Avg tree size
+Avg no. of trees
+
+AdaBoost
+H1stumps
+0.0056
+0.0017
+1
+100
+
+AdaBoost
+H2stumps
+0.0048
+0.0014
+2
+100
+
+AdaBoost-L1
+0.0046
+0.0013
+2
+100
+
+DeepBoost
+0.0040
+(0.0014)
+1.99
+100
+
+diabetes
+Error
+(std dev)
+Avg tree size
+Avg no. of trees
+
+AdaBoost
+H1stumps
+0.253
+(0.0330)
+1
+100
+
+AdaBoost
+H2stumps
+0.260
+(0.0518)
+2
+100
+
+AdaBoost-L1
+0.254
+(0.04868)
+1.9975
+100
+
+DeepBoost
+0.253
+(0.0510)
+1.9975
+100
+
+ocr49-mnist
+Error
+(std dev)
+Avg tree size
+Avg no. of trees
+
+AdaBoost
+H1stumps
+0.0414
+0.00539
+1
+100
+
+AdaBoost
+H2stumps
+0.0209
+0.00521
+2
+100
+
+AdaBoost-L1
+0.0200
+0.00408
+1.9975
+100
+
+DeepBoost
+0.0177
+(0.00438)
+1.9975
+100
+
+Breiman (1999) and Reyzin & Schapire (2006) extensively
+investigated the relationship between the complexity of decision trees in an ensemble learned by AdaBoost and the
+generalization error of the ensemble. We tested DeepBoost
+on the same UCI datasets used by these authors, http://
+archive.ics.uci.edu/ml/datasets.html, specifically breastcancer, ionosphere, german(numeric)
+and diabetes. We also experimented with two optical
+character recognition datasets used by Reyzin & Schapire
+(2006), ocr17 and ocr49, which contain the handwritten
+digits 1 and 7, and 4 and 9 (respectively). Finally, because
+these OCR datasets are fairly small, we also constructed
+the analogous datasets from all of MNIST, http://yann.
+lecun.com/exdb/mnist/, which we call ocr17-mnist
+and ocr49-mnist. More details on all the datasets are
+given in Table 4, Appendix D.1.
+
+timized over
+2 {2 i : i = 6, . . . , 0} and for DeepBoost, we optimized over in the same range and 2
+{0.0001, 0.005, 0.01, 0.05, 0.1, 0.5}. The exact parameter
+optimization procedure is described below.
+
+As we discussed in Section 3.2, by fixing the parameters
+and to certain values, we recover some known algorithms
+as special cases of DeepBoost. Our experiments compared
+DeepBoost to AdaBoost ( =
+= 0 with exponential
+loss), to Logistic Regression ( =
+= 0 with logistic
+loss), which we abbreviate as LogReg, to L1 -norm regularized AdaBoost (e.g., see (Rätsch et al., 2001a)) abbreviated
+as AdaBoost-L1, and also to the L1 -norm regularized additive Logistic Regression algorithm studied by (Duchi &
+Singer, 2009) ( > 0, = 0) abbreviated as LogReg-L1.
+
+We used the following parameter optimization procedure
+in all experiments: Each dataset was randomly partitioned
+into 10 folds, and each algorithm was run 10 times, with a
+different assignment of folds to the training set, validation
+set and test set for each run. Specifically, for each run i 2
+{0, . . . , 9}, fold i was used for testing, fold i + 1 (mod 10)
+was used for validation, and the remaining folds were used
+for training. For each run, we selected the parameters that
+had the lowest error on the validation set and then measured
+the error of those parameters on the test set. The average
+error and the standard deviation of the error over all 10 runs
+is reported in Tables 1, 2 and 3, as is the average number of
+trees and the average size of the trees in the ensembles.
+
+In the first set of experiments reported in Table 1, we compared AdaBoost, AdaBoost-L1, and DeepBoost with the
+exponential loss ( ( u) = exp( u)) and base hypotheses Hstumps . We tested standard AdaBoost with base hypotheses H1stumps and H2stumps . For AdaBoost-L1, we op-
+
+In the second set of experiments reported in Table 2, we
+trees
+used base hypotheses HK
+instead of Hstumps , where the
+maximum tree depth K was an additional parameter to be
+optimized. Specifically, for AdaBoost we optimized over
+K 2 {1, . . . , 6}, for AdaBoost-L1 we optimized over those
+same values for K and 2 {10 i : i = 3, . . . , 7}, and for
+DeepBoost we optimized over those same values for K,
+and 2 {10 i : i = 3, . . . , 7}.
+The last set of experiments, reported in Table 3, are identical to the experiments reported in Table 2, except we used
+the logistic loss ( u) = log2 (1 + exp( u)).
+
+In all of our experiments, the number of iterations was set
+to 100. We also experimented with running each algorithm
+
+Deep Boosting
+Table 2. Results for boosted decision trees and the exponential loss function.
+breastcancer
+Error
+(std dev)
+Avg tree size
+Avg no. of trees
+
+AdaBoost
+0.0267
+(0.00841)
+29.1
+67.1
+
+AdaBoost-L1
+0.0264
+(0.0098)
+28.9
+51.7
+
+DeepBoost
+0.0243
+(0.00797)
+20.9
+55.9
+
+ocr17
+Error
+(std dev)
+Avg tree size
+Avg no. of trees
+
+AdaBoost
+0.004
+(0.00316)
+15.0
+88.3
+
+AdaBoost-L1
+0.003
+(0.00100)
+30.4
+65.3
+
+DeepBoost
+0.002
+(0.00100)
+26.0
+61.8
+
+ionosphere
+Error
+(std dev)
+Avg tree size
+Avg no. of trees
+
+AdaBoost
+0.0661
+(0.0315)
+29.8
+75.0
+
+AdaBoost-L1
+0.0657
+(0.0257)
+31.4
+69.4
+
+DeepBoost
+0.0501
+(0.0316)
+26.1
+50.0
+
+ocr49
+Error
+(std dev)
+Avg tree size
+Avg no. of trees
+
+AdaBoost
+0.0180
+(0.00555)
+30.9
+92.4
+
+AdaBoost-L1
+0.0175
+(0.00357)
+62.1
+89.0
+
+DeepBoost
+0.0175
+(0.00510)
+30.2
+83.0
+
+german
+Error
+(std dev)
+Avg tree size
+Avg no. of trees
+
+AdaBoost
+0.239
+(0.0165)
+3
+91.3
+
+AdaBoost-L1
+0.239
+(0.0201)
+7
+87.5
+
+DeepBoost
+0.234
+(0.0148)
+16.0
+14.1
+
+ocr17-mnist
+Error
+(std dev)
+Avg tree size
+Avg no. of trees
+
+AdaBoost
+0.00471
+(0.0022)
+15
+88.7
+
+AdaBoost-L1
+0.00471
+(0.0021)
+33.4
+66.8
+
+DeepBoost
+0.00409
+(0.0021)
+22.1
+59.2
+
+diabetes
+Error
+(std dev)
+Avg tree size
+Avg no. of trees
+
+AdaBoost
+0.249
+(0.0272)
+3
+45.2
+
+AdaBoost-L1
+0.240
+(0.0313)
+3
+28.0
+
+DeepBoost
+0.230
+(0.0399)
+5.37
+19.0
+
+ocr49-mnist
+Error
+(std dev)
+Avg tree size
+Avg no. of trees
+
+AdaBoost
+0.0198
+(0.00500)
+29.9
+82.4
+
+AdaBoost-L1
+0.0197
+(0.00512)
+66.3
+81.1
+
+DeepBoost
+0.0182
+(0.00551)
+30.1
+80.9
+
+Table 3. Results for boosted decision trees and the logistic loss function.
+breastcancer
+Error
+(std dev)
+Avg tree size
+Avg no. of trees
+
+LogReg
+0.0351
+(0.0101)
+15
+65.3
+
+LogReg-L1
+0.0264
+(0.0120)
+59.9
+16.0
+
+DeepBoost
+0.0264
+(0.00876)
+14.0
+23.8
+
+ocr17
+Error
+(std dev)
+Avg tree size
+Avg no. of trees
+
+LogReg
+0.00300
+(0.00100)
+15.0
+75.3
+
+LogReg-L1
+0.00400
+(0.00141)
+7
+53.8
+
+DeepBoost
+0.00250
+(0.000866)
+22.1
+25.8
+
+ionosphere
+Error
+(std dev)
+Avg tree size
+Avg no. of trees
+
+LogReg
+0.074
+(0.0236)
+7
+44.7
+
+LogReg-L1
+0.060
+(0.0219)
+30.0
+25.3
+
+DeepBoost
+0.043
+(0.0188)
+18.4
+29.5
+
+ocr49
+Error
+(std dev)
+Avg tree size
+Avg no. of trees
+
+LogReg
+0.0205
+(0.00654)
+31.0
+63.5
+
+LogReg-L1
+0.0200
+(0.00245)
+31.0
+54.0
+
+DeepBoost
+0.0170
+(0.00361)
+63.2
+37.0
+
+german
+Error
+(std dev)
+Avg tree size
+Avg no. of trees
+
+LogReg
+0.233
+(0.0114)
+7
+72.8
+
+LogReg-L1
+0.232
+(0.0123)
+7
+66.8
+
+DeepBoost
+0.225
+(0.0103)
+14.4
+67.8
+
+ocr17-mnist
+Error
+(std dev)
+Avg tree size
+Avg no. of trees
+
+LogReg
+0.00422
+(0.00191)
+15
+71.4
+
+LogReg-L1
+0.00417
+(0.00188)
+15
+55.6
+
+DeepBoost
+0.00399
+(0.00211)
+25.9
+27.6
+
+diabetes
+Error
+(std dev)
+Avg tree size
+Avg no. of trees
+
+LogReg
+0.250
+(0.0374)
+3
+46.0
+
+LogReg-L1
+0.246
+(0.0356)
+3
+45.5
+
+DeepBoost
+0.246
+(0.0356)
+3
+45.5
+
+ocr49-mnist
+Error
+(std dev)
+Avg tree size
+Avg no. of trees
+
+LogReg
+0.0211
+(0.00412)
+28.7
+79.3
+
+LogReg-L1
+0.0201
+(0.00433)
+33.5
+61.7
+
+DeepBoost
+0.0201
+(0.00411)
+72.8
+41.9
+
+for up to 1,000 iterations, but observed that the test errors
+did not change significantly, and more importantly the ordering of the algorithms by their test errors was unchanged
+from 100 iterations to 1,000 iterations.
+Observe that with the exponential loss, DeepBoost has a
+smaller test error than AdaBoost and AdaBoost-L1 on every dataset and for every set of base hypotheses, except for
+the ocr49-mnist dataset with decision trees where its performance matches that of AdaBoost-L1. Similarly, with the
+logistic loss, DeepBoost performs always at least as well as
+LogReg or LogReg-L1. For the small-sized UCI datasets it
+is difficult to obtain statistically significant results, but, for
+the larger ocrXX-mnist datasets, our results with DeepBoost are statistically significantly better at the 2% level
+using one-sided paired t-tests in all three sets of experiments (three tables), except for ocr49-mnist in Table 3,
+
+where this holds only for the comparison with LogReg.
+This across-the-board improvement is the result of DeepBoost’s complexity-conscious ability to dynamically tune
+the sizes of the decision trees selected in each boosting
+round, trading off between training error and hypothesis
+class complexity. The selected tree sizes should depend on
+properties of the training set, and this is borne out by our
+experiments: For some datasets, such as breastcancer,
+DeepBoost selects trees that are smaller on average than
+the trees selected by AdaBoost-L1 or LogReg-L1, while,
+for other datasets, such as german, the average tree size
+is larger. Note that AdaBoost and AdaBoost-L1 produce
+ensembles of trees that have a constant depth since neither
+algorithm penalizes tree size except for imposing a maximum tree depth K, while for DeepBoost the trees in one
+ensemble typically vary in size. Figure 3 plots the distri-
+
+Deep Boosting
+Ion: Histogram of tree sizes
+
+Ion: AdaBoost−L1, fold = 6
+
+8
+
+Frequency
+
+Frequency
+
+10
+6
+4
+2
+
+Ion: AdaBoost, fold = 6
+
+50
+
+50
+
+40
+
+40
+
+Frequency
+
+12
+
+30
+20
+10
+
+0
+20
+
+30
+
+40
+
+0
+0.1
+
+Tree sizes
+
+Figure 3. Distribution of tree sizes when DeepBoost is run on the
+ionosphere dataset.
+
+Theorem 1 is a margin-based generalization guarantee, and
+is also the basis for the derivation of DeepBoost, so we
+should expect DeepBoost to induce large margins on the
+training set. Figure 4 shows the margin distributions for
+AdaBoost, AdaBoost-L1 and DeepBoost on the same subset of the ionosphere dataset.
+
+5. Conclusion
+We presented a theoretical analysis of learning with a
+base hypothesis set composed of increasingly complex subfamilies, including very deep or complex ones, and derived an algorithm, DeepBoost, which is precisely based
+on those guarantees. We also reported the results of experiments with this algorithm and compared its performance
+with that of AdaBoost and additive Logistic Regression,
+and their L1 -norm regularized counterparts in several tasks.
+We have derived similar theoretical guarantees in the multiclass setting and used them to derive a family of new multiclass deep boosting algorithms that we will present and discuss elsewhere. Our theoretical analysis and algorithmic
+design could also be extended to ranking and to a broad
+class of loss functions. This should also lead to the generalization of several existing algorithms and their use with a
+richer hypothesis set structured as a union of families with
+different Rademacher complexity. In particular, the broad
+family of maximum entropy models and conditional maximum entropy models and their many variants, which includes the already discussed logistic regression, could all
+be extended in a similar way. The resulting DeepMaxent
+models (or their conditional versions) may admit an alternative theoretical justification that we will discuss elsewhere. Our algorithm can also be extended by considering non-differentiable convex surrogate losses such as the
+hinge loss. When used with kernel base classifiers, this
+leads to an algorithm we have named DeepSVM. The theory we developed could perhaps be further generalized to
+
+0.3
+
+0.5
+
+0.7
+
+0.1
+
+0.3
+
+0.5
+
+0.7
+
+Normalized Margin
+
+Normalized Margin
+
+Ion: DeepBoost, fold = 6
+
+Cumulative Distribution of Margins
+1.0
+Cumulative Dist.
+
+50
+Frequency
+
+bution of tree sizes for one run of DeepBoost. It should
+be noted that the columns for AdaBoost in Table 1 simply
+list the number of stumps to be the same as the number of
+boosting rounds; a careful examination of the ensembles
+for 100 rounds of boosting typically reveals a 5% duplication of stumps in the ensembles.
+
+20
+10
+
+0
+
+10
+
+30
+
+40
+30
+20
+10
+0
+
+0.8
+0.6
+0.4
+0.2
+0.0
+
+0.1
+
+0.3
+
+0.5
+
+0.7
+
+Normalized Margin
+
+0.1
+
+0.3
+
+0.5
+
+0.7
+
+Normalized Margin
+
+Figure 4. Distribution of normalized margins for AdaBoost (upper right), AdaBoost-L1 (upper left) and DeepBoost (lower left)
+on the same subset of ionosphere. The cumulative margin
+distributions (lower right) illustrate that DeepBoost (red) induces
+larger margins on the training set than either AdaBoost (black) or
+AdaBoost-L1 (blue).
+
+encompass the analysis of other learning techniques such
+as multi-layer neural networks.
+Our analysis and algorithm also shed some new light on
+some remaining questions left about the theory underlying AdaBoost. The primary theoretical justification for
+AdaBoost is a margin guarantee (Schapire et al., 1997;
+Koltchinskii & Panchenko, 2002). However, AdaBoost
+does not precisely maximize the minimum margin, while
+other algorithms such as arc-gv (Breiman, 1996) that are
+designed to do so tend not to outperform AdaBoost (Reyzin
+& Schapire, 2006). Two main reasons are suspected for this
+observation: (1) in order to achieve a better margin, algorithms such as arc-gv may tend to select deeper decision
+trees or in general more complex hypotheses, which may
+then affect their generalization; (2) while those algorithms
+achieve a better margin, they do not achieve a better margin distribution. Our theory may help better understand and
+evaluate the effect of factor (1) since our learning bounds
+explicitly depend on the mixture weights and the contribution of each hypothesis set Hk to the definition of the
+ensemble function. However, our guarantees also suggest a
+better algorithm, DeepBoost.
+
+Acknowledgments
+We thank Vitaly Kuznetsov for his comments on an earlier draft of this paper. The work of M. Mohri was partly
+funded by the NSF award IIS-1117591.
+
+Deep Boosting
+
+References
+Bartlett, Peter L. and Mendelson, Shahar. Rademacher and
+Gaussian complexities: Risk bounds and structural results. JMLR, 3, 2002.
+Bauer, Eric and Kohavi, Ron. An empirical comparison of
+voting classification algorithms: Bagging, boosting, and
+variants. Machine Learning, 36(1-2):105–139, 1999.
+Breiman, Leo. Bagging predictors. Machine Learning, 24
+(2):123–140, 1996.
+Breiman, Leo. Prediction games and arcing algorithms.
+Neural Computation, 11(7):1493–1517, 1999.
+Caruana, Rich, Niculescu-Mizil, Alexandru, Crew, Geoff,
+and Ksikes, Alex. Ensemble selection from libraries of
+models. In ICML, 2004.
+Dietterich, Thomas G. An experimental comparison of
+three methods for constructing ensembles of decision
+trees: Bagging, boosting, and randomization. Machine
+Learning, 40(2):139–157, 2000.
+Duchi, John C. and Singer, Yoram. Boosting with structural
+sparsity. In ICML, pp. 38, 2009.
+Freund, Yoav and Schapire, Robert E. A decision-theoretic
+generalization of on-line learning and an application to
+boosting. Journal of Computer System Sciences, 55(1):
+119–139, 1997.
+Freund, Yoav, Mansour, Yishay, and Schapire, Robert E.
+Generalization bounds for averaged classifiers. The Annals of Statistics, 32:1698–1722, 2004.
+Friedman, Jerome, Hastie, Trevor, and Tibshirani, Robert.
+Additive logistic regression: a statistical view of boosting. Annals of Statistics, 28:2000, 1998.
+Grove, Adam J and Schuurmans, Dale. Boosting in the
+limit: Maximizing the margin of learned ensembles. In
+AAAI/IAAI, pp. 692–699, 1998.
+Kivinen, Jyrki and Warmuth, Manfred K. Boosting as entropy projection. In COLT, pp. 134–144, 1999.
+Koltchinskii, Vladmir and Panchenko, Dmitry. Empirical margin distributions and bounding the generalization
+error of combined classifiers. Annals of Statistics, 30,
+2002.
+MacKay, David J. C. Bayesian methods for adaptive models. PhD thesis, California Institute of Technology, 1991.
+Mansour, Yishay. Pessimistic decision tree pruning based
+on tree size. In Proceedings of ICML, pp. 195–201,
+1997.
+
+Mohri, Mehryar, Rostamizadeh, Afshin, and Talwalkar,
+Ameet. Foundations of Machine Learning. The MIT
+Press, 2012.
+Quinlan, J. Ross. Bagging, boosting, and C4.5.
+AAAI/IAAI, Vol. 1, pp. 725–730, 1996.
+
+In
+
+Rätsch, Gunnar and Warmuth, Manfred K. Maximizing the
+margin with boosting. In COLT, pp. 334–350, 2002.
+Rätsch, Gunnar and Warmuth, Manfred K. Efficient margin
+maximizing with boosting. Journal of Machine Learning
+Research, 6:2131–2152, 2005.
+Rätsch, Gunnar, Mika, Sebastian, and Warmuth, Manfred K. On the convergence of leveraging. In NIPS, pp.
+487–494, 2001a.
+Rätsch, Gunnar, Onoda, Takashi, and Müller, KlausRobert. Soft margins for AdaBoost. Machine Learning,
+42(3):287–320, 2001b.
+Reyzin, Lev and Schapire, Robert E. How boosting the
+margin can also boost classifier complexity. In ICML,
+pp. 753–760, 2006.
+Schapire, Robert E. Theoretical views of boosting and applications. In Proceedings of ALT 1999, volume 1720 of
+Lecture Notes in Computer Science, pp. 13–25. Springer,
+1999.
+Schapire, Robert E. The boosting approach to machine
+learning: An overview. In Nonlinear Estimation and
+Classification, pp. 149–172. Springer, 2003.
+Schapire, Robert E., Freund, Yoav, Bartlett, Peter, and Lee,
+Wee Sun. Boosting the margin: A new explanation for
+the effectiveness of voting methods. In ICML, pp. 322–
+330, 1997.
+Smyth, Padhraic and Wolpert, David. Linearly combining
+density estimators via stacking. Machine Learning, 36:
+59–83, July 1999.
+Vapnik, Vladimir N. Statistical Learning Theory. WileyInterscience, 1998.
+Warmuth, Manfred K., Liao, Jun, and Rätsch, Gunnar. Totally corrective boosting algorithms that maximize the
+margin. In ICML, pp. 1001–1008, 2006.
+
+

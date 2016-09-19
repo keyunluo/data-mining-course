@@ -1,0 +1,1384 @@
+Stochastic Inference for Scalable
+Probabilistic Modeling of Binary Matrices
+
+José Miguel Hernández-Lobato1
+Neil Houlsby1
+Zoubin Ghahramani
+University of Cambridge, Department of Engineering, Cambridge CB2 1PZ, UK
+
+Abstract
+Fully observed large binary matrices appear in a
+wide variety of contexts. To model them, probabilistic matrix factorization (PMF) methods are
+an attractive solution. However, current batch
+algorithms for PMF can be inefficient because
+they need to analyze the entire data matrix before producing any parameter updates. We derive an efficient stochastic inference algorithm
+for PMF models of fully observed binary matrices. Our method exhibits faster convergence
+rates than more expensive batch approaches and
+has better predictive performance than scalable
+alternatives. The proposed method includes new
+data subsampling strategies which produce large
+gains over standard uniform subsampling. We
+also address the task of automatically selecting
+the size of the minibatches of data used by our
+method. For this, we derive an algorithm that adjusts this hyper-parameter online.
+
+1. Introduction
+Many machine learning methods have been developed for
+modeling matrices with a large number of missing entries.
+Amongst these, matrix factorization (MF) approaches (Srebro et al., 2005; Koren, 2008) are probably the most successful because of their simplicity and often superior predictive performance. These methods assume that the partially observed data matrix X is well approximated by a
+low rank matrix UVT . The objective is then to find the
+two matrices U and V given X. There is extensive literature on MF methods, so in this paper we focus on probabilistic approaches. Probabilistic methods are an attractive solution to the MF problem because i) they are robust
+Proceedings of the 31 st International Conference on Machine
+Learning, Beijing, China, 2014. JMLR: W&CP volume 32. Copyright 2014 by the author(s).
+
+JMH 233@ CAM . AC . UK
+NMTH 2@ CAM . AC . UK
+ZOUBIN @ ENG . CAM . AC . UK
+
+to overfitting (Salakhutdinov & Mnih, 2008), ii) they can
+account for non-continuous matrix entries such as ordinal
+values (Stern et al., 2009; Paquet et al., 2012) and iii) they
+can produce estimates of uncertainty in their predictions.
+Fast approximate inference is usually implemented using
+variational Bayes (Lim & Teh, 2007; Raiko et al., 2007;
+Nakajima et al., 2010). These variational algorithms are
+computationally efficient because their cost depends only
+on the number of entries observed in X, which is usually
+low, and not on the size of X which can be large.
+Many real-world datasets are binary, that is, the entries of
+X take values in {0, 1}. Some examples include market
+basket data, click-stream data, network data or file data in
+complex software systems. In these cases X is fully observed and the aforementioned probabilistic approaches for
+solving the MF problem are infeasible in practice. This is
+because these methods are based on batch variational algorithms that require processing all the entries in X before
+producing even a single update to the variational parameters. An alternative is to use a likelihood function for continuous data instead of one for binary data (Nakajima et al.,
+2010). In this case, an analytic solution exists which scales
+with the number of ones in X. However, this solution is
+restricted to zero-mean spherical priors on U and V and
+homoscedatic Gaussian likelihood functions for X. These
+restrictions lead to poor predictions when X is binary.
+We address the problem of scalable learning with probabilistic MF models that are accurate enough to produce
+state-of-the-art predictions on large binary matrices. To
+meet this challenge we propose a novel stochastic inference algorithm. Stochastic methods have the advantage
+that, with large datasets, they can make reasonably good
+predictions before a batch algorithm has generated a single parameter update. Our approach is based on stochastic
+variational inference (SVI) (Hoffman et al., 2013). Exist1
+Equal contributors. NMTH and JMH are grateful for support from the Google European Doctoral Fellowship scheme and
+Infosys Labs, Infosys Limited, respectively.
+
+Stochastic Inference for Scalable Probabilistic Modeling of Binary Matrices
+
+ing implementations of SVI do not directly extend to MF
+models, which present specific challenges that are not encountered in models currently addressed by this inference
+algorithm, such as topic models. This is because in MF
+models we subsample individual matrix entries instead of
+complete data instances, e.g. an entire document in a topic
+model. In standard SVI all the variational parameters are
+updated each time a data instance is subsampled. With
+matrices, we have different parameters for each row and
+column in X and each time we subsample a matrix entry, we update only the variational parameters associated
+with the corresponding row and column. This makes the
+data sub-sampling strategy important because it determines
+which parameters are updated and how often. Therefore
+we develop novel data subsampling strategies with different sampling probabilities across the rows and columns of
+X. These methods outperform standard uniform subsampling. Furthermore, parameter estimates in MF models often exhibit heavy-tailed empirical distributions (Lakshminarayanan et al., 2011). These heavy-tails can significantly
+reduce the convergence rate of stochastic algorithms. A
+solution is to use minibatches to reduce the effect of outliers in the noisy estimates of the gradients. However, the
+best minibatch size S can be dataset-dependent. To avoid
+having to hand-tune S to each dataset, which is common
+practice (Orr & Müller, 1998), we propose a method that
+adjusts the value of S online.
+We scale probabilistic MF methods to large binary matrices whilst maintaining strong empirical performance. We
+validate our method experimentally, demonstrating faster
+convergence than batch alternatives (Raiko et al., 2007)
+and yielding more accurate solutions than existing scalable variational methods (Nakajima et al., 2010; Seeger
+& Bouchard, 2012; Paquet & Koenigstein, 2013). While
+we focus on improving the state-of-the-art in probabilistic MF methods, we also compare to one of the best nonprobabilistic techniques for MF (Rendle et al., 2009). Although we do not attempt to beat every possible solution,
+our method also performs favorably. In summary, our algorithm has the following advantages:
+1. We handle fully observed matrices and learn by subsampling individual matrix entries.
+2. We use likelihood functions for binary data and not
+for continuous data.
+3. Flexible priors and additional bias parameters can be
+easily incorporated with our method.
+4. We use improved subsampling strategies and propose
+a rule to automatically select the minibatch size.
+
+is to assume a matrix factorization model (Salakhutdinov
+& Mnih, 2008). Let U ∈ RL×D and V ∈ RM ×D be two
+low-rank matrices, where D  min(L, M ). Then X =
+Θ[UVT + z + E] , where Θ[·] applies the Heaviside step
+function to each entry of a matrix, z ∈ R is a global bias
+parameter and E is an L × M additive noise matrix whose
+entries eij are i.i.d. with c.d.f. given by the logistic function
+σ(x) = 1/[1 + exp(−x)]. The likelihood function is then
+p(X|U, V, z) =
+
+We describe a probabilistic model for an L × M sparse
+binary matrix X. A common approach in matrix modeling
+
+p(xi,j |ui , vj , z)
+
+i=1 j=1
+
+=
+
+L Y
+M h
+Y
+
+i
+σ(ui vjT + z)xi,j · σ(−ui vjT − z)1−xi,j ,
+
+(1)
+
+i=1 j=1
+
+where ui and vj are the i-th and j-th rows of U and V. We
+use fully factorized Gaussian priors for U, V and z:
+p(U) =
+
+L Y
+D
+Y
+
+N (ui,d |ū0i,d , ũ0i,d ) ,
+
+i=1 d=1
+
+p(V) =
+
+M Y
+D
+Y
+
+0
+0
+N (vj,d |v̄j,d
+, ṽj,d
+)
+
+j=1 d=1
+
+and p(z) = N (z|z̄ 0 , z̃ 0 ). N (·|m, v) denotes a Gaussian
+density with mean m and variance v. In our experiments
+we used priors with zero-mean and unit variance. We also
+incorporate a local bias to each row and column by fixing
+one column in each of U and V to a vector of ones. The
+posterior distribution for U, V and z is
+p(U, V, z|X) =
+
+p(X|U, V, z)p(U)p(V)p(z)
+.
+p(X)
+
+(2)
+
+We can make predictions about the possible value x?i,j that
+an entry xi,j in X could have taken during the generation
+of X from U, Z
+V, b and E. For this, we use
+i
+h
+?
+?
+σ(ui vjT + z)xi,j · σ(−ui vjT − z)1−xi,j
+
+p(x?i,j |X) =
+
+p(U, V, z|X) dUdVdz .
+
+(3)
+
+Equations (2) and (3) are intractable and approximations
+must be used. We now show how to use variational Bayes
+(Jordan et al., 1998) for computing approximations to (2)
+and (3).
+2.1. Variational Bayes for Binary Matrices
+Variational Bayes approximates the exact posterior (2) with
+a simpler, tractable distribution q(U, V, z). We choose
+q(U, V, z) to be a fully factorized Gaussian,
+"
+q(U, V, z) =
+
+L Y
+D
+Y
+
+#
+N (ui,d |ūi,d , ũi,d )
+
+i=1 d=1
+
+×
+
+2. A Probabilistic Model for Binary Matrices
+
+L Y
+M
+Y
+
+"M D
+YY
+
+#
+N (vj,d |v̄j,d , ṽj,d ) N (z|z̄, z̃) ,
+
+(4)
+
+j=1 d=1
+
+M
+D
+where Φ = {{{ūi,d , ũi,d , }L
+i=1 , {v̄j,d , ṽj,d }j=1 }d=1 , z̄, z̃}
+are variational parameters that are adjusted so that
+
+Stochastic Inference for Scalable Probabilistic Modeling of Binary Matrices
+
+q(U, V, z) is as similar as possible to p(U, V, z|X) by
+minimizing the KL divergence between (4) and (2). Once
+q(U, V, z) has been optimized, we approximate (3) by first
+approximating the posterior distribution
+of ui vjT + z with
+P
+a Gaussian with
+P mean µi,j = 2d ūi,d v̄2j,d + z̄, and variance s2i,j = d ū2i,d ṽj,d + ũi,d v̄j,d
++ ũi,d ṽj,d + z̃. Then
+we approximate the logistic function with a rescaled probit
+function that has the same slope at the origin as the logistic
+function σ(·) (MacKay, 1992). This yields
+p(x?i,j |X) ≈
+
+Z
+
+σ[(2x?i,j − 1)a]N (a|µi,j , s2i,j ) da
+
+≈ σ[ϕ(s2i,j )µi,j (2x?i,j − 1)] ,
+
+(5)
+
+state-of-the-art batch algorithm for the optimization of the
+ELBO in MF models with Gaussian likelihood. Although
+effective with small datasets, the resulting batch algorithm
+is infeasible when X is very large because each iteration requires the examination of all of the entries in X before updating any parameters. For massive matrices, we propose
+to use stochastic optimization (Robbins & Monro, 1951).
+These techniques can produce parameter updates after examining only a reduced fraction of the data. The following
+section describes a stochastic method for optimizing L0 in
+(7) based on stochastic variational inference (SVI) (Hoffman et al., 2013).
+
+where ϕ(x) = (1 + πx/8)−1/2 .
+
+2.2. SVI for Binary Matrices
+
+Equivalently, in variational Bayes q(U, V, z) is optimized by maximizing the evidence lower bound or ELBO,
+L(Φ) = Eq [log p(U, V, z, X)] − Eq [log q(U, V, z)].
+However, Eq [log p(U, V, z, X)] is analytically intractable.
+To address this we use the Gaussian lower bound on the logistic function described in (Jaakkola & Jordan, 1997). We
+choose this approximation because it yields Gaussian complete conditional distributions. A complete conditional is
+the conditional distribution of a variable given all of the
+other variables and observations. Exponential family complete conditionals will allow us to use stochastic inference
+methods based on natural gradients, which improves convergence rates (Hoffman et al., 2013). We lower bound
+σ(a)xi,j · σ(−a)1−xi,j in (1) with
+
+Stochastic optimization methods follow noisy estimates of
+the gradient of the target function. This function is often constructed by summing over a large number of terms.
+Noise in the gradient arises because the target function is
+approximated by a cheaper, noisy estimate which is obtained by summing over a reduced set of randomly subsampled terms. To optimize the correct objective function
+the subsampled terms must be re-scaled so that the expectation of the gradient of the noisy estimate is equal to the
+gradient of the original target function.
+
+τ (a, ξ) = eaxi,j σ(ξ)e−
+
+a+ξ
++λ(ξ)(a2 −ξ2 )
+2
+
+,
+
+(6)
+
+where λ(ξ) = (0.5 − σ(ξ))/(2ξ) and ξ is adjusted to make
+the lower bound tight at a = ±ξ. When we replace each
+p(xi,j |ui , vj , z) in (1) with an instantiation of (6) that includes its own parameter ξi,j , we obtain a new lower bound
+L0 (Φ, Ξ) =
+
+L X
+M
+X
+
+αi,j +
+
+i=1 j=1
+
+L X
+D
+X
+
+βi,d +
+
+i=1 d=1
+
+M X
+D
+X
+
+γj,d +κ , (7)
+
+j=1 d=1
+
+M
+where Ξ = {{{ξi,j }L
+i=1 }j=1 },
+
+µi,j (1 − 2xi,j ) + ξi,j
++
+2
+2
+2
++ si,j − ξi,j ) ,
+
+αi,j = log σ(ξi,j ) −
+λ(ξi,j )(µ2i,j
+
+βi,d =ρ(ũi,d , ũ0i,d , ūi,d , ū0i,d ),
+0
+0
+γj,d =ρ(ṽj,d , ṽj,d
+, v̄j,d , v̄j,d
+),
+
+κ =ρ(z̃, z̃, z̄ 0 , z̄ 0 ) .
+
+and ρ(a, b, c, d) = −0.5−0.5 log a/b+[(c−d)2 +a][2b]−1 .
+One could tune q by the alternative maximization of L0 with
+respect to Φ and Ξ. Given Φ, Ξ is optimized by setting
+ξi,j = [µ2i,j + s2i,j ]0.5 .
+
+(8)
+
+Given Ξ, Φ can be optimized by doing an iteration of gradient descent (Raiko et al., 2007). This work contains a
+
+We apply stochastic optimization to L0 (Φ)
+=
+maxΞ L0 (Φ, Ξ). For this, we iterate over the following
+steps. Firstly, we randomly select indexes i ∈ {1, . . . , L}
+and j ∈ {1, . . . , M } with probability p(i, j). Secondly,
+we optimize ξi,j by setting ξi,j = [µ2i,j + s2i,j ]0.5 as in (8).
+Thirdly, we compute a noisy estimate of L0 (Φ):
+−1
+L0noisy (Φi,j ) = [cα
+αi,j +
+i,j ]
+
+D
+X
+d=1
+
+βi,d +
+
+D
+X
+
+γj,d + κ ,
+
+(9)
+
+d=1
+
+where cα
+i,j is a re-scaling constant. Finally, we update
+Φi,j = {{ūi,d , ũi,d , v̄j,d , ṽj,d }D
+d=1 , {z̄, z̃}} by making a
+small step in the direction of the gradient of (9). Intuitively,
+(9) is an appropriately re-scaled version of (7) that includes
+only those terms which have the same indexes i and j as the
+subsampled matrix entry xi,j . Importantly, the constant cα
+i,j
+is chosen to guarantee that the expectation under the datasampling strategy p(i, j) of the gradient of (9) with respect
+to the elements of Φi,j is the same as the gradient of L0 (Φ).
+That is, when we update ūi,d or ũi,d we set cα
+i,j = p(j|i).
+For v̄j,d or ṽj,d we set cα
+=
+p(i|j)
+and
+for
+z̄
+or z̃ we set
+i,j
+cα
+=
+p(i,
+j).
+i,j
+Instead of standard gradients, one can achieve much faster
+convergence using natural gradients (Amari, 1998). For
+this, we work with the natural parameters of (4):
+u̇i,d = ūi,d /ũi,d ,
+
+üi,d = 1/ũi,d ,
+
+and similarly for v̇j,d , v̈j,d , ż and z̈. Let ůi,d = (u̇i,d , üi,d )
+and let ∇L0 (ůi,d ) denote the natural gradient of (9) with
+
+Stochastic Inference for Scalable Probabilistic Modeling of Binary Matrices
+
+S-Uniform), p(i, j) = 1/(LM ), most of the sampled entries xi,j will take value zero. As a result, SIBM may take
+many iterations to converge to a good solution. We propose
+smarter strategies that subsample the more useful entries of
+X so that the model converges rapidly. This resembles ‘active learning’ (Settles, 2010). However, unlike in active
+learning, we must eliminate the bias introduced by our specific choice of p(i, j), that is, we must select cα
+i,j in (9) so
+that the expected gradient of (9) is the same as the gradient of (7). Therefore, we propose two simple strategies for
+which we can compute the appropriate rescaling cα
+i,j .
+Figure 1. Binary matrix obtained by selecting randomly 250 rows
+with at least 10 ones and the 500 columns with the most ones
+from the BMS-POS dataset. This matrix is very sparse and has
+different frequencies of ones across rows and columns.
+
+respect to ůi,d . When the model has exponential family
+complete conditionals (as provided by the Gaussian approximation in (6)) then ∇L0 (ůi,d ) = ů?i,d − ůi,d , where
+ů?i,d = (u̇?i,d , ü?i,d ) is the value of ůi,d that maximizes (9)
+when all the other natural parameters are fixed at their current values. Note that ů?i,d is a noisy estimate of the maximizer of the exact ELBO (7) with respect to ůi,d . The
+resulting stochastic update for ůi,d is
+old
+u
+0
+ůnew
+i,d = ůi,d + ρi ∇L (ůi,d )
+u ?
+= (1 − ρui )ůold
+i,d + ρi ůi,d ,
+
+(10)
+
+where ρui is the size of the step taken in the direction of the
+natural gradient. The corresponding updates for v̊j,d and z̊
+are similar, see the supplementary material for details.
+The resulting Stochastic Inference method for Binary Matrices (SIBM) iterates over the following two steps: i) randomly subsample an entry xi,j from X with probability
+p(i, j) and ii) make a small update to the variational parameters that approximate the posterior distribution of the
+i-th row of U, the j-th row of V and the global bias z. In
+practice, each time we sample the indices i and j, we first
+update z̊, then all the v̊j,d and finally all the ůi,d . Each
+of these operations is performed using the updated parameter values produced by the previous operations. We also
+recompute the optimal value for ξi,j whenever any of the
+natural parameters change.
+2.3. The Sampling Distribution
+We investigate the performance of different choices of
+p(i, j), the probability distribution used to subsample the
+entries of X. A common objective for binary matrix factorization is to predict the location of entries in X that
+would have taken value one but were flipped to value zero
+by the additive noise matrix E. Real-world binary matrices
+are usually sparse, as illustrated in Figure 1. This means
+that when the sampling strategy p(i, j) is uniform (denoted
+
+To ensure that we see enough ones, a better alternative (SBalanced) is to sample zeros and ones with equal probability, regardless of the empirical frequencies in X,
+p(i, j) = 1/(2
+
+L X
+M
+X
+
+I[xi,j = xa,b ]),
+
+a=1 b=1
+
+where I[·] is the indicator function. Now, each time that an
+entry is sampled we obtain a zero or a one with equal probability. However, another characteristic of real-world binary
+matrices is that the frequency of ones and zeros can vary
+considerably across the rows and columns. For example,
+the matrix in Figure 1 presents a few columns with a large
+number of ones and many with very few ones. A similar
+pattern is observed in the rows, although in this matrix the
+effect is smaller. In practice, it takes SIBM longer to model
+accurately the ones located in rows or columns with many
+zeros. Any entry sampled from these rows/columns will
+usually take value zero which is unlikely to be useful because SIBM can learn quickly that these rows/columns are
+very sparse. Therefore, we propose a strategy (S-Biased)
+to account for this by biasing S-Balanced so that the probability of sampling a one at location (i, j) is proportional
+to i) the number of zeros found in the i-th row and ii) the
+number of zeros found in the j-th column. An equivalent
+bias is introduced for the zeros. The result is the sampling
+distribution
+
+2
+(0)
+
+(1−xi,j ) (1−xi,j )
+cj
+(1−xa,b ) (1−xa,b )
+cb
+b=1 I[xi,j = xa,b ]ra
+
+ri
+
+p(i, j) =
+
+PL
+
+a=1
+
+PM
+
+,
+
+(1)
+
+where ri and ri are the number of zeros and ones in the
+(0)
+(1)
+i-th row of X and cj and cj are the number of zeros and
+ones in the j-th column. These counts are thresholded to
+take a minimum value of 1 so that p(i, j) 6= 0.
+2.4. Minibatches, Learning Rates and Minibatch Size
+Stochastic methods often use minibatches to reduce the
+variance of the noisy estimates of the gradient and help the
+algorithm converge faster. Instead of updating the variational parameters after subsampling a single matrix entry,
+the updates are averaged over a minibatch of data. When
+
+Stochastic Inference for Scalable Probabilistic Modeling of Binary Matrices
+
+using a minibatch of size S, we first subsample S entries
+from X. Then for each subsampled entry xi,j , we store the
+?
+parameter values ů?i,d and v̊j,d
+that would have been produced during the execution of SIBM without minibatches.
+After subsampling S entries, we update each ůi,d if at least
+one of the entries in the minibatch belongs to the i-th row
+of X. The minibatch update rule follows from (10),
+u
+old
+u ?,avg
+ůnew
+i,d = (1 − ρi )ůi,d + ρi ůi,d ,
+
+(11)
+
+n(i)
+
+where ů?,avg
+i,d =
+
+1 X ?,s
+ů .
+n(i) s=1 i,d
+
+(12)
+
+n(i) is the number of entries in the i-th row found in the
+?
+minibatch and ů?,s
+i,d is the value of ůi,d produced when the
+s-th of those entries appearing in the i-th row is subsampled. The minibatch update rule for v̊j,d is similar.
+An important question is how to choose the minibatch size
+S. The value of S is particularly important when working with matrix factorization models where parameter distributions are often heavy tailed (Lakshminarayanan et al.,
+2011). In our stochastic method this results in heavy tailed
+noisy estimates of the natural gradients. The choice of S
+governs a trade-off between reducing these heavy tails and
+slow convergence due to excessively large minibatches. To
+avoid having to hand-tune S to each dataset or run expensive cross validation searches, we propose an algorithm that
+selects S appropriately to the statistics of the data during
+learning. In particular, we choose S so that we bound the
+magnitude of the error in the noisy estimate of the optimum
+of the ELBO. Let ů?,?
+i,d be the value of ůi,d that maximizes
+the exact ELBO (7). We obtain a probabilistic bound on
+the relative error of ů?,avg
+i,d in (11) with respect to the global
+maximizer of the ELBO, ů?,?
+i,d , using Markov’s inequality,
+#
+?,? 2
+?,? 2
+E[ků?,avg
+ků?,avg
+i,d − ůi,d k2 ]
+i,d − ůi,d k2
+≥
+θ
+≤
+=
+δ=p
+2
+2
+ků?,?
+θků?,?
+i,d k2
+i,d k2
+
+
+kVar[ů?i,d ]k1
+kVar[ů?i,d ]k1
+1
+E
+≈
+,
+?
+2
+θkE[ůi,d ]k2
+n(i)
+θSp(i)kE[ů?i,d ]k22
+"
+
+where Var[ů?i,d ] is a vector with the variances of the entries
+in ů?i,d , p(i) is the probability of sampling
+an element from
+P
+the i-th row of X, that is, p(i) = j p(i, j). We have approximated E [1/n(i)] by 1/[p(i)S] and we have used the
+?,avg
+fact that ů?,?
+i,d = E[ůi,d ]. We now solve for S and obtain
+a minibatch size that approximately limits the probability
+that the relative error of ů?,avg
+i,d is larger than θ:
+
+−1
+S = kVar[ů?i,d ]k1 θδp(i)kE[ů?i,d ]k22
+.
+
+(13)
+
+Intuitively, the minibatch size increases with the inverse of
+the signal to noise ratio (SNR) in the estimate ů?i,d of the
+global maximizer of the exact ELBO in (7). If the SNR
+decreases, (13) chooses large minibatches to mitigate the
+large relative errors.
+
+This approach requires choosing a single datasetindependent parameter, the product of θ and δ, as opposed
+to hand-tuning S to each dataset. By making θδ small we
+?,?
+limit the expected deviation of ů?,avg
+i,d from ůi,d . Note that
+?
+?
+(13) requires knowing E[ůi,d ] and Var[ůi,d ]. We estimate
+these quantities online using exponentially weighted moving averages. Equation (13) provides a different minibatch
+size for each of the ůi,d and the rule for each of the v̊j,d
+is similar. Therefore we select S to be the mean minibatch
+size selected for each ůi,d and v̊i,d , details are in the supplementary material. The contribution ofz̊ to the minibatch
+size S is very small and so is ignored in practice.
+The step sizes ρui , ρvj and ρz should be reduced each time
+ůi,d , v̊j,d and z̊ are updated. For this, we use a simple
+Robbins-Monro schedule (Robbins & Monro, 1951). The
+full SIBM routine is summarized in Algorithm 1.
+Algorithm 1 Stochastic Inference for Binary Matrices
+Input: matrix X, initial parameters Φ, # samples T
+for t = 1 to T do
+select minibatch size S (see Section 2.4)
+for s = 1 to S do
+sample row and column indices (i, j) ∼ p(i, j)
+save ůi,1 , . . . , ůi,D , v̊j,1 , . . . , v̊j,D and z̊
+update ξi,j using (8)
+compute z̊? and update z̊ using (10)
+update z̊?,avg using (12)
+for d = 1 to D do
+update ξi,j using (8)
+?
+compute v̊j,d
+and update v̊j,d using (10)
+?,avg
+update v̊j,d using (12)
+end for
+similarly, update ů?i,1 , . . . , ů?i,D
+restore ůi,1 , . . . , ůi,D , v̊j,1 , . . . , v̊j,D and z̊
+end for
+for any row i sampled in the last minibatch do
+compute step size ρui using Robbins-Monro
+update ůi,1 , . . . , ůi,D using (11)
+end for
+similarly, update v̊j,1 , . . . , v̊j,D
+compute step size ρz using Robbins-Monro
+update z̊ using (11)
+end for
+M
+Output: {ůi,1 , . . . , ůi,D }L
+i=1 , {v̊j,1 , . . . , v̊j,D }j=1 and z̊
+
+3. Related Work
+SVI has been applied to other probabilistic models (Hoffman et al., 2010; Wang et al., 2011; Bryant & Sudderth,
+2012). In these cases there is a clear distinction between
+local and global variational parameters. Local parameters
+are updated only when a particular data point is subsampled. Global parameters are updated whenever any data
+point is subsampled. In MF models, we have variational
+parameters that are partially global, that is, they are only
+updated when elements in the corresponding row or column are subsampled. This makes the data sub-sampling
+
+Stochastic Inference for Scalable Probabilistic Modeling of Binary Matrices
+
+strategy more important because it determines which parameters are updated and how often. Other non-uniform
+sampling strategies have been proposed for networks, an
+instance of binary matrices, (Gopalan & Blei, 2013). The
+stochastic blockmodel for networks used here differs to our
+general binary MF model.
+An alternative stochastic MF algorithm just subsamples
+the zeros (Paquet & Koenigstein, 2013). However, unlike
+SIBM, this method does not correct for the bias introduced
+by the subsampling process and hence yields poorer solutions. Instead of stochastic schemes one could use the analytic solution described in (Nakajima et al., 2010). However, this is only applicable when i) the likelihood (1) is
+Gaussian with equal variance across matrix entries, ii) U
+and V have zero-mean isotropic priors, and iii) there are
+no bias parameters. These constraints have a large negative effect in predictive performance. An iterative scheme
+has been proposed to extend this approach to logistic likelihoods (Seeger & Bouchard, 2012) at the cost of making
+crude approximations to the logistic likelihood function.
+In practice, this method tends to produce only small gains
+with respect to (Nakajima et al., 2010) with binary matrices. Very recently, an MF model with a Poisson likelihood
+has been proposed (Gopalan et al., 2014). This algorithm is
+applicable to binary matrices and scales with the number of
+ones, although the Poisson likelihood is less specific than
+the logistic function for binary data.
+A large number of alternative non-probabilistic algorithms
+have been proposed for MF. One of the best performing
+is Bayesian Personalized Ranking (BPR) which optimizes
+a ranking loss function. BPR has shown state-of-the-art
+results on item recommendation tasks (Rendle et al., 2009;
+Dror et al., 2012).
+Our minibatch size S selection algorithm is similar to one
+in (Byrd et al., 2012). However, their method selects S to
+be inversely proportional to the SNR of the noisy estimate
+of the gradient. Since the gradient tends to zero at convergence, the value of S selected by their method quickly
+diverges. We do not have this problem because we use the
+SNR of the noisy estimate of the global maximizer of (7),
+which does not converge to zero.
+
+4. Experiments
+SIBM is evaluated in experiments with synthetic and realworld binary matrices. All the code and data used is publicly available1 . We consider six datasets that include a synthetic dataset generated by sampling X from the generative
+model assumed by SIBM. We fix D = 10 and generate
+U and V by sampling all the ui,d and vj,d independently
+from N (0, 1). The global bias is fixed to z = −7.5, yield1
+
+http://jmhl.org
+
+ing binary matrices with about 98% sparsity. We consider
+two real-world datasets from the FIMI repository: purchase
+data from a retail store (retail) (Brijs et al., 1999) and click
+data from an online news portal (Kosarak). We include
+two datasets from the 2000 KDD Cup (Kohavi et al., 2000;
+Zheng et al., 2001), point of sale data from a retailer (POS,
+originally BMS-POS) and click data from an e-commerce
+website (WebView, originally BMS-WebView-2). Finally,
+we include the Netflix data, treating 4-5 star ratings as ones.
+We pre-process the original datasets so that we can compare to the computationally expensive batch approach. We
+keep the 1000 columns with the highest number of ones and
+discard rows with fewer than 10 ones. We consider small
+and large versions of each dataset. We subsample 2000
+rows for the small and 40,000 rows for the large datasets,
+except in retail and WebView, where we use approximately
+the maximum number of rows for the large datasets, 10,000
+and 5000, respectively.
+Each matrix is randomly split into a training matrix and a
+set of test entries with value one. The training matrix is
+generated by randomly removing an entry with value one
+from each row in the original matrix and adding it to the
+test set. Predictive performance is evaluated using recall at
+N , a popular metric for recommendation tasks (Gunawardana & Shani, 2009) (equivalent to precision when a single
+one is held out from each row). For this, we iterate over
+the rows, using (3) to compute the probability of each zero
+entry actually taking value one. We select the top N zero
+entries with highest probability in that row. Recall is computed as the average number of times that the test entry
+appears in this list. We use N = 10 and repeat the experiment 25 times on each small dataset, and 10 times on each
+large one.
+4.1. Sampling Strategies and Automatic Minibatch
+The top of Figure 2 shows results for SIBM when using the
+sampling strategies S-Uniform, S-Balanced and S-Biased
+on the small Netflix dataset. To eliminate the dependence
+of these strategies on the minibatch size, we select the value
+of S for each strategy using cross-validation. We find that
+S-Biased performs best, and both S-Biased and S-Balanced
+improve over S-Uniform. Similar results are obtained on
+the other datasets, see the supplementary material.
+The plot in the bottom of Figure 2 shows the evolution of
+the minibatch size S on each small dataset. We fixed θδ =
+2 in (13) in all of our experiments. We fixed the minimum
+value for S to max(L, M ) = 2000. This value is selected
+with the retail dataset. Similar results are obtained with
+the large datasets. This plot shows that the optimal value
+of S varies greatly across datasets. Interestingly, for some
+datasets S grows as learning progresses, but for others it
+shrinks.
+
+Stochastic Inference for Scalable Probabilistic Modeling of Binary Matrices
+0.22
+0.21
+0.2
+
+Recall
+
+0.19
+0.18
+0.17
+0.16
+0.15
+
+S−Uniform
+S−Balanced
+S−Biased
+
+0.14
+0.13
+6
+
+6.5
+
+7
+
+log10 # observations
+
+7.5
+
+8
+
+12000
+Synthetic
+Netflix
+Kosarak
+
+Average size
+
+10000
+
+POS
+WebView
+Retail
+
+8000
+
+(sampled). Other than the analytic solutions (Nak10 and
+See12), all algorithms have linear cost in the number of
+observations. It is hard to quantify the number of entries
+observed by Nak10 and See12 which are based on iterative calls to an SVD subroutine. Therefore, we assume that
+they run instantaneously and their performance is presented
+as a constant line2 . Tables 1 and 2 show the average recall
+and average negative ELBO (7) (cost) after taking 107 samples with the small datasets and WebView and Retail large
+datasets, and 108 on the others. With the large datasets
+computing the ELBO is too expensive so we do not report
+cost. Bold typeface indicates the best results (and those
+statistically indistinguishable), underlining denotes the second best. Tables 1, 2 show that in terms of recall, the best
+method is SIBM-recall, with SIBM-auto coming close. Regarding the ELBO, SIBM-auto yields the best results.
+
+6000
+4000
+2000
+0
+0
+
+20
+
+40
+
+60
+
+80
+
+100
+
+Minibatch iteration number
+
+Figure 2. Top: average recall obtained for different sampling
+strategies with the small Netflix dataset. Bottom: evolution of
+the average minibatch size S selected in each small dataset.
+
+4.2. Comparison with Batch and Alternative Methods
+We compare the full SIBM algorithm that selects the minibatch size S automatically (SIBM-auto) to a version in
+which S is selected via cross-validation to maximize recall on a validation set (SIBM-recall). We also compare to
+a version of SIBM-recall that finds the Maximum a Posteriori (MAP) solution using stochastic gradient ascent (MAPrecall), see the supplementary material for details. On the
+small datasets we compare to the batch algorithm (batch)
+that maximizes (7) (Raiko et al., 2007). This method is too
+expensive with the large datasets. In these cases, we run it
+by subsampling zeros, keeping only 20 times as many zeros
+as ones.
+We compare our method to the analytic solution with a
+Gaussian likelihood (Nakajima et al., 2010) (Nak10) and
+the extension of this method to binary matrices (Seeger &
+Bouchard, 2012) (See12). We also evaluate the scheme described in (Paquet & Koenigstein, 2013) (Paq13). Finally,
+we compare to one of the best performing non-variational
+Bayesian algorithms, BPR (Rendle et al., 2009).
+4.3. Results
+Figure 3 shows the average recall obtained by each method
+versus the number of entries from X that are observed
+
+Figure 3 shows that SIBM converges faster than batch and
+sometimes to better solutions, such as with the WebView
+dataset. SIBM-auto produces the greatest improvements
+during the first iterations of learning. These first iterations
+are the most relevant iterations for large scale learning.
+With massive data, only a few passes over the available data
+are possible. It is in these cases that stochastic methods are
+most useful. The results of SIBM-auto are very close to
+those of the gold-standard, SIBM-recall, and MAP-recall
+performs worse in general than the variational methods
+SIBM-auto and SIBM-recall. MAP-recall seems to overfit
+since its performance sometimes deteriorates during later
+iterations. The analytic algorithms (Nak10, See12) obtain
+poor results due to the simplistic modelling assumptions
+that they make. Paq13 can perform poorly because this
+method subsamples the zeros and does not account for the
+bias introduced by the subsampling process. As a result,
+it converges to suboptimal solutions. BPR converges to
+worse solutions than SIBM and batch. On the large datasets
+the relative performances are similar, see the supplementary material.
+Figure 4 shows recall versus wall-clock time for the small
+Kosarak dataset. Plots for the other datasets are in the
+supplementary material. This plot is implementationdependent (all methods are coded in C) and so is less objective than Figure 3 which uses the number of entries observed. Nevertheless, the results for recall vs. time and
+recall vs. number of observed entries are similar. The
+main difference is that SIBM-recall, MAP-recall and BPR
+are penalized due to the additional time required to run
+cross validation searches for selecting the minibatch size
+(SIBM-recall and MAP-recall) and regularization parameters (BPR).
+2
+This is a generous assumption for See12, see wall-clock times
+in Figure 4 and in the supplementary material.
+
+Stochastic Inference for Scalable Probabilistic Modeling of Binary Matrices
+Synthetic
+
+Netflix
+
+0.3
+
+Recall
+
+Recall
+
+0.35
+
+0.25
+
+0.2
+
+6
+
+6.5
+
+7
+
+log10 # observations
+
+7.5
+
+0.42
+
+0.2
+
+0.4
+
+0.18
+
+0.38
+
+0.16
+
+0.34
+
+0.12
+
+0.32
+
+6.5
+
+POS
+
+7
+
+log10 # observations
+
+7.5
+
+0.3
+6
+
+8
+
+7
+
+log10 # observations
+
+7.5
+
+8
+
+7.5
+
+8
+
+Retail
+0.24
+
+0.45
+
+0.23
+
+0.37
+0.36
+
+0.22
+
+0.4
+
+SIBM−recall
+SIBM−auto
+batch
+MAP−recall
+Paq13
+BPR
+Nak10
+See12
+
+0.21
+
+0.35
+
+0.33
+0.32
+
+0.35
+
+Recall
+
+0.34
+
+Recall
+
+Recall
+
+6.5
+
+WebView
+
+0.38
+
+0.3
+
+0.2
+0.19
+0.18
+0.17
+
+0.31
+0.3
+
+0.16
+
+0.25
+
+0.15
+
+0.29
+6
+
+0.36
+
+0.14
+
+0.1
+6
+
+8
+
+Kosarak
+
+0.22
+
+Recall
+
+0.4
+
+6.5
+
+log
+
+10
+
+7
+
+# observations
+
+7.5
+
+8
+
+0.2
+6
+
+6.5
+
+log
+
+10
+
+7
+
+# observations
+
+7.5
+
+8
+
+6
+
+6.5
+
+log
+
+10
+
+7
+
+# observations
+
+Figure 3. Average recall for each method on each small dataset versus number of samples drawn from X.
+0.42
+
+SIBM−recall
+SIBM−auto
+batch
+MAP−recall
+Paq13
+BPR
+Nak10
+See12
+
+0.4
+
+cost×10
+SIBM SIBM
+batch See12
+recall auto
+1.804 1.803 1.821 4.313
+4.555 4.550 4.383 6.807
+2.124 1.963 1.994 3.607
+1.413 1.415 1.437 2.674
+1.672 1.573 1.630 2.886
+1.557 1.490 1.511 2.430
+
+Table 1. Small datasets, recall and cost after observing 107 samples.
+
+Table 2. Large datasets, recall after observing 107 samples from
+WebView, Retail and 108 from others.
+SIBM
+recall
+Synthetic 0.387
+Netflix
+0.203
+Kosarak 0.391
+POS
+0.373
+WebView 0.390
+Retail
+0.235
+Dataset
+
+SIBM
+auto
+0.367
+0.193
+0.372
+0.368
+0.343
+0.230
+
+batch
+0.324
+0.190
+0.346
+0.348
+0.359
+0.233
+
+MAP
+recall
+0.368
+0.192
+0.368
+0.352
+0.360
+0.239
+
+Paq13 BPR Nak10 See12
+0.249
+0.146
+0.327
+0.352
+0.235
+0.235
+
+0.374
+0.190
+0.370
+0.374
+0.326
+0.237
+
+0.262
+0.190
+0.319
+0.289
+0.303
+0.149
+
+0.266
+0.199
+0.341
+0.347
+0.213
+0.228
+
+5. Conclusions
+We have proposed a new stochastic inference method for
+efficient factorization of large binary matrices. Our approach extends stochastic variational inference (SVI) to
+matrix factorization models, a class of models not previously addressed by SVI. The proposed method has the fol-
+
+0.38
+
+Recall
+
+recall
+SIBM SIBM
+MAP
+batch
+Paq13 BPR Nak10 See12
+Dataset
+recall auto
+recall
+Synthetic 0.368 0.360 0.314 0.347 0.234 0.321 0.250 0.295
+Netflix
+0.198 0.198 0.203 0.189 0.143 0.187 0.188 0.201
+Kosarak 0.388 0.382 0.348 0.348 0.327 0.348 0.336 0.352
+POS
+0.373 0.371 0.351 0.353 0.354 0.345 0.295 0.350
+WebView 0.398 0.372 0.322 0.374 0.235 0.327 0.307 0.218
+Retail
+0.234 0.230 0.229 0.237 0.233 0.223 0.152 0.228
+
+−5
+
+0.36
+
+0.34
+
+0.32
+
+0.3
+
+0
+
+0.5
+
+1
+
+1.5
+
+log10 time (s)
+
+2
+
+2.5
+
+3
+
+Figure 4. Average recall for each method
+on the small Kosarak dataset versus time.
+
+lowing advantages with respect to existing probabilistic solutions for binary matrix factorization: i) we can handle
+fully observed matrices, ii) learning occurs by subsampling
+the matrix entries, iii) we use likelihood functions for binary data instead of for continuous data, iv) flexible priors
+and additional bias parameters can be incorporated into the
+method easily. The resulting technique achieves faster convergence than an alternative batch approach and has better
+predictive performance than other state-of-the-art scalable
+solutions or analytic methods based on the SVD decomposition. Good performance in this domain requires smart
+data subsampling mechanisms and the use of minibatches.
+Therefore we have provided a novel non-uniform data subsampling strategy and a technique to adjust the minibatch
+size adaptively to the data. Our minibatch selection algorithm could be used more generally with other SVI algorithms.
+
+Stochastic Inference for Scalable Probabilistic Modeling of Binary Matrices
+
+References
+Amari, Shun-Ichi. Natural gradient works efficiently in learning.
+Neural computation, 10(2):251–276, 1998.
+Brijs, Tom, Swinnen, Gilbert, Vanhoof, Koen, and Wets, Geert.
+Using association rules for product assortment decisions: a
+case study. In KDD, pp. 254–260, 1999.
+Bryant, Michael and Sudderth, Erik. Truly nonparametric online
+variational inference for hierarchical Dirichlet processes. In
+NIPS, pp. 2708–2716, 2012.
+Byrd, Richard H, Chin, Gillian M, Nocedal, Jorge, and Wu,
+Yuchen. Sample size selection in optimization methods for machine learning. Mathematical programming, 134(1):127–155,
+2012.
+Dror, Gideon, Koenigstein, Noam, Koren, Yehuda, and Weimer,
+Markus. The yahoo! music dataset and kdd-cup’11. Journal of Machine Learning Research-Proceedings Track, 18:8–
+18, 2012.
+Gopalan, Prem, Ruiz, Francisco JR, Ranganath, Rajesh, and Blei,
+David M. Bayesian nonparametric poisson factorization for
+recommendation systems. In AISTATS, pp. 275–283, 2014.
+Gopalan, Prem K and Blei, David M. Efficient discovery of overlapping communities in massive networks. Proceedings of the
+National Academy of Sciences, 110(36):14534–14539, 2013.
+Gunawardana, Asela and Shani, Guy. A survey of accuracy evaluation metrics of recommendation tasks. The Journal of Machine Learning Research, 10:2935–2962, 2009.
+
+MacKay, David JC. The evidence framework applied to classification networks. Neural computation, 4(5):720–736, 1992.
+Nakajima, Shinichi, Sugiyama, Masashi, and Tomioka, Ryota.
+Global analytic solution for variational Bayesian matrix factorization. NIPS, 23:1759–1767, 2010.
+Orr, Genevieve B. and Müller, Klaus-Robert (eds.). Neural Networks: Tricks of the Trade, this book is an outgrowth of a 1996
+NIPS workshop, London, UK, UK, 1998. Springer-Verlag.
+ISBN 3-540-65311-2.
+Paquet, Ulrich and Koenigstein, Noam. One-class collaborative
+filtering with random graphs. WWW, pp. 999–1008, 2013.
+Paquet, Ulrich, Thomson, Blaise, and Winther, Ole. A hierarchical model for ordinal matrix factorization. Statistics and
+Computing, 22(4):945–957, 2012.
+Raiko, T., Ilin, A., and Juha, K. Principal component analysis
+for large scale problems with lots of missing values. In Machine Learning: ECML 2007, volume 4701 of Lecture Notes
+in Computer Science, pp. 691–698. Springer Berlin / Heidelberg, 2007.
+Rendle, Steffen, Freudenthaler, Christoph, Gantner, Zeno, and
+Schmidt-Thieme, Lars. BPR: Bayesian personalized ranking
+from implicit feedback. In Proceedings of the Twenty-Fifth
+Conference on Uncertainty in Artificial Intelligence, pp. 452–
+461. AUAI Press, 2009.
+Robbins, Herbert and Monro, Sutton. A stochastic approximation
+method. The Annals of Mathematical Statistics, 22(3):400–
+407, 1951.
+
+Hoffman, Matthew, Blei, David M, and Bach, Francis. Online
+learning for latent dirichlet allocation. NIPS, 23:856–864,
+2010.
+
+Salakhutdinov, Ruslan and Mnih, Andriy. Probabilistic matrix
+factorization. In NIPS, volume 20, 2008.
+
+Hoffman, Matthew D., Blei, David M., Wang, Chong, and Paisley,
+John. Stochastic variational inference. Journal of Machine
+Learning Research, 14:1303–1347, 2013.
+
+Seeger, Matthias and Bouchard, Guillaume. Fast variational
+Bayesian inference for non-conjugate matrix factorization
+models. Journal of Machine Learning Research - Proceedings
+Track, 22:1012–1018, 2012.
+
+Jaakkola, T and Jordan, M. A variational approach to Bayesian
+logistic regression models and their extensions. In Sixth International Workshop on Artificial Intelligence and Statistics,
+1997.
+
+Settles, Burr. Active learning literature survey. University of Wisconsin, Madison, 2010.
+
+Jordan, Michael I., Ghahramani, Zoubin, Jaakkola, Tommi S.,
+and Saul, Lawrence K. An introduction to variational methods for graphical models. In Learning in Graphical Models,
+volume 89, pp. 105–161. Springer Netherlands, 1998.
+Kohavi, Ron, Brodley, Carla E., Frasca, Brian, Mason, Llew, and
+Zheng, Zijian. KDD-Cup 2000 organizers’ report: peeling the
+onion. SIGKDD Explorations Newsletter, 2:86–93, 2000.
+Koren, Yehuda. Factorization meets the neighborhood: a multifaceted collaborative filtering model. In KDD, KDD ’08, pp.
+426–434, New York, NY, USA, 2008. ACM.
+Lakshminarayanan, Balaji, Bouchard, Guillaume, and Archambeau, Cedric. Robust Bayesian matrix factorisation. In International Conference on Artificial Intelligence and Statistics,
+pp. 425–433, 2011.
+Lim, Yew Jin and Teh, Yee Whye. Variational Bayesian approach
+to movie rating prediction. In Proceedings of KDD Cup and
+Workshop, pp. 15–21, 2007.
+
+Srebro, Nathan, Rennie, Jason DM, and Jaakkola, Tommi.
+Maximum-margin matrix factorization. In NIPS, pp. 1329–
+1336, 2005.
+Stern, David H, Herbrich, Ralf, and Graepel, Thore. Matchbox:
+large scale online Bayesian recommendations. In WWW, pp.
+111–120. ACM, 2009.
+Wang, Chong, Paisley, John, and Blei, David M. Online variational inference for the hierarchical Dirichlet process. In AISTATS, pp. 752–760, 2011.
+Zheng, Zijian, Kohavi, Ron, and Mason, Llew. Real world performance of association rule algorithms. In SIGKDD, pp. 401–
+406, 2001.
+
+

@@ -1,0 +1,1004 @@
+Fast Stochastic Alternating Direction Method of Multipliers
+
+Leon Wenliang Zhong
+WZHONG @ CSE . UST. HK
+James T. Kwok
+JAMESK @ CSE . UST. HK
+Department of Computer Science and Engineering, Hong Kong University of Science and Technology, Hong Kong
+
+Abstract
+
+as proximal gradient methods (Duchi & Singer, 2009; Xiao, 2010), the use of ADMM has been shown to have faster
+convergence in several difficult structured sparse regularization problems (Suzuki, 2013).
+
+We propose a new stochastic alternating direction method of multipliers (ADMM) algorithm, which incrementally approximates the full gradient in the linearized ADMM formulation.
+Besides having a low per-iteration complexity
+as existing stochastic ADMM algorithms, it improves the √
+convergence rate on convex problems
+from O(1/ T ) to O(1/T ), where T is the number of iterations. This matches the convergence
+rate of the batch ADMM algorithm, but without
+the need to visit all the samples in each iteration. Experiments on the graph-guided fused lasso demonstrate that the new algorithm is significantly faster than state-of-the-art stochastic and
+batch ADMM algorithms.
+
+1. Introduction
+The alternating direction method of multipliers (ADMM)
+(Boyd, 2010; Gabay & Mercier, 1976; Glowinski & Marrocco, 1975) considers problems of the form
+min
+x,y
+
+Φ(x, y) ≡ φ(x) + ψ(y) : Ax + By = c,
+
+(1)
+
+where φ, ψ are convex functions, and A, B (resp. c) are
+constant matrices (resp. vector) of appropriate sizes. Because of the flexibility in splitting the objective into φ(x)
+and ψ(y), it has been a popular optimization tool in many
+machine learning, computer vision and data mining applications. For example, on large-scale distributed convex optimization, each φ or ψ can correspond to an optimization subproblem on the local data, and the constraint
+Ax+By = c is used to ensure all the local variables reach a
+global consensus; for regularized risk minimization which
+will be the focus of this paper, φ can be used for the empirical loss, ψ for the regularizer, and the constraint for encoding the sparsity pattern of the model parameter. In comparison with other state-of-the-art optimization methods such
+Proceedings of the 31 st International Conference on Machine
+Learning, Beijing, China, 2014. JMLR: W&CP volume 32. Copyright 2014 by the author(s).
+
+Existing works on ADMM often assume that Φ(x, y) is deterministic. In the context of regularized risk minimization,
+this corresponds to batch learning and each iteration needs to visit all the samples. With the proliferation of dataintensive applications, it can quickly become computationally expensive. For example, in using ADMM on the overlapping group lasso, the matrix computations become costly when both the number of features and data set size are
+large (Qin & Goldfarb, 2012). To alleviate this problem,
+the use of stochastic and online techniques have recently
+drawn a lot of interest. Wang & Banerjee (2012) first proposed the online ADMM, which learns from only one sample (or a small mini-batch) at a time. However, in general,
+each round involves nonlinear optimization and is thus not
+computationally appealing. Very recently, three stochastic
+variants of ADMM are independently proposed (Ouyang
+et al., 2013; Suzuki, 2013). Two are based on the stochastic
+gradient descent (SGD) (Bottou, 2004), while one is based
+on regularized dual averaging (RDA) (Xiao, 2010). In both
+cases, the difficult nonlinear optimization problem inherent in the online ADMM is circumvented by linearization,
+which then allows the resultant iterations in these stochastic
+variants to be efficiently performed.
+However, despite their low per-iteration complexities, these
+stochastic ADMM algorithms converge at a suboptimal rate
+compared to their batch counterpart. Specifically, the algorithms in (Ouyang
+√ et al., 2013; Suzuki, 2013) all achieve
+a rate of O(1/ T ), where T is the number of iterations,
+for general convex problems and O(log T /T ) for strongly
+convex problems; whereas batch ADMM achieves O(1/T )
+and linear convergence, respectively (Deng & Yin, 2012;
+He & Yuan, 2012). This gap in the convergence rates between stochastic and batch ADMM algorithms is indeed
+not surprising, as it is also observed between SGD and
+batch gradient descent in the analogous unconstrained optimization setting (Mairal, 2013). Recently, there have been
+several attempts on bridging this gap (Le Roux et al., 2012;
+
+Fast Stochastic Alternating Direction Method of Multipliers
+
+Mairal, 2013; Shalev-Shwartz & Zhang, 2013a). For example, Le Roux et al. (2012) proposed an approach whose
+per-iteration cost is as low as SGD, but can achieve linear
+convergence for strongly convex functions.
+Along this line, we propose in the √
+sequel a novel stochastic algorithm that bridges the O(1/ T ) vs O(1/T ) gap in
+the convergence rates for ADMM. The new algorithm enjoys the same computational simplicity as existing stochastic ADMM algorithms, but with a much faster convergence
+rate matching that of its batch counterpart. Experimental
+results demonstrate that it dramatically outperforms existing stochastic and batch ADMM algorithms.
+Notation. Let k · k be the Euclidean norm. For a function f , we let f 0 be a subgradient in the subdifferential set
+∂f (x) = {g | f (y) ≥ f (x) + g T (y − x), ∀y}. When f is
+differentiable, we use ∇f for its gradient. A function f is
+L-Lipschitz if kf (x) − f (y)k ≤ Lkx − yk ∀x, y. It is Lsmooth if k∇f (x) − ∇f (y)k ≤ Lkx − yk, or equivalently,
+f (y) ≤ f (x) + ∇f (x)T (y − x) +
+
+L
+kx − yk2 .
+2
+
+(2)
+
+Moreover, a function f is µ-strongly convex if f (y) ≥
+f (x) + g T (y − x) + µ2 ky − xk2 for g ∈ ∂f (x).
+
+where n is the number of samples, `i (x) is sample i’s contribution to the (possibly nonsmooth) empirical loss, and
+Ω(x) is the regularizer. Problem (4) then becomes
+n
+
+xt+1
+
+← arg min
+x
+
+1X
+`i (x) + Ω(x)
+n i=1
+
+ρ
++ kAx + Byt − c + αt k2 .
+2
+
+When the data set is large, solving (8) can be computationally expensive. To alleviate this problem, Wang &
+Banerjee (2012) proposed the online ADMM that uses only one sample in each iteration. Consider Ω = 0. Let
+the index of the sample selected at iteration t be k(t) ∈
+{1, 2, . . . , n}. Instead of using (8), x is updated as xt+1 ←
+t)
+arg minx `k(t) (x) + ρ2 kAx + Byt − c + αt k2 + D(x,x
+ηt+1 ,
+where D(x, xt ) is a Bregman divergence between x and
+xt , and ηt ∝ √1t is the stepsize. In general, this involves
+nonlinear optimization, making it potentially expensive.
+Very recently, several stochastic versions of ADMM have
+been independently proposed. Ouyang et al. (2013) proposed the stochastic ADMM1 , which updates x as
+xt+1 ← arg min `0k(t) (xt )T (x − xt ) +
+x
+
+2. Related Work
+2.1. Batch and Stochastic ADMM
+As in the method of multipliers, ADMM starts with the
+augmented Lagrangian of problem (1):
+L(x, y, β) = φ(x) + ψ(y) + β T (Ax + By − c)
+ρ
++ kAx + By − ck2 ,
+(3)
+2
+where β is the vector of Lagrangian multipliers, and ρ > 0
+is a penalty parameter. At the tth iteration, the values
+of x and y (denoted xt , yt ) are updated by minimizing
+L(x, y, β) w.r.t. x and y. Unlike the method of multipliers,
+these are minimized in an alternating manner, which allows
+the problem to be more easily decomposed when φ and ψ
+are separable. Using the scaled dual variable αt = βt /ρ,
+the ADMM update can be expressed as (Boyd, 2010):
+ρ
+xt+1 ←arg min φ(x) + kAx + Byt − c + αt k2 , (4)
+x
+2
+ρ
+yt+1 ←arg min ψ(y) + kAxt+1 + By − c + αt k2,(5)
+y
+2
+αt+1 ←αt + Axt+1 + Byt+1 − c.
+(6)
+In the context of regularized risk minimization, x denotes
+the model parameter to be learned. Moreover,
+
+(8)
+
+kx − xt k2
+2ηt+1
+
+ρ
++ kAx + Byt − c + αt k2
+(9)
+2
+
+−1
+1
+=
+I + ρAT A
+·
+ηt+1
+
+
+xt
+− `0k(t) (xt ) − ρAT (Byt − c + αt ) (10)
+,
+ηt+1
+where `0k(t) (xt ) is the (sub)gradient of `k(t) at xt , ηt ∝ √1t
+is the stepsize, and I is the identity matrix. The updates for
+y and α are the same as in (5) and (6).
+For the special case where B = −I and c = 0, Suzuki (2013) proposed a similar approach called online proximal gradient descent ADMM (OPG-ADMM), which uses
+the inexact Uzawa method (Zhang et al., 2011) to further
+linearize the last term in (9). Specifically, let LA be an
+upper bound on the eigenvalues of ρAT A it upper-bounds
+ρ
+ρ
+2
+2
+T
+2 kAx − yt + αt k with 2 kAxt − yt + αt k + ρA (Ax −
+L
+yt + αt )T (x − xt ) + 2A kx − xt k2 , leading to
+xt+1 ←arg min (`0k(t) (xt ) + ρAT (Axt − yt + αt ))T x
+x
+
+kx − xt k2
++
+(11)
+2ηt+1
+h
+i
+= xt −ηt+1 `0k(t) (xt )+ρAT (Axt − yt + αt ) . (12)
+
+n
+
+φ(x) =
+
+1X
+`i (x) + Ω(x),
+n i=1
+
+(7)
+
+1
+To avoid confusion, this particular stochastic variant will be
+called STOC-ADMM in the sequel.
+
+Fast Stochastic Alternating Direction Method of Multipliers
+1
+Compared to (10), it avoids the inversion of ηt+1
+I + ρAT A
+which can be computationally expensive when AT A is
+large. Suzuki (2013) also proposed another stochastic variant called RDA-ADMM based on the method of regularized
+dual averaging (RDA) (Xiao, 2010) (again for the special
+case with B = −I and c = 0), in which x is updated as
+
+xt+1 ←arg min(ḡt + ρAT (Ax̄RDA
+− ȳtRDA + ᾱtRDA )T x
+t
+x
+
+kxk2
++
+ηt+1
+
+
+= −ηt+1 ḡt + ρAT (Ax̄RDA
+− ȳtRDA + ᾱtRDA ) .(13)
+t
+√
+Pt
+Here, ηt ∝
+t, ḡt = 1t j=1 `0k(j) (xj ), x̄RDA
+=
+t
+Pt
+Pt
+Pt
+1
+1
+1
+RDA
+RDA
+= t j=1 yj , and ᾱt
+= t j=1 αj
+j=1 xj , ȳt
+t
+are averages obtained from the past t iterations.
+For general convex problems, these online/stochastic ADMM approaches all converge at a rate of O( √σT ) w.r.t.
+either the objective value (Suzuki, 2013) or a weighted
+combination of the objective value and feasibility violation
+(Ouyang et al., 2013), where σ is the standard deviation of
+the stochastic gradient. When φ is further required to be
+strongly convex and that the gradient’s norm is bounded by
+2
+log T
+M , the convergence rate can be improved to O( M µT
+)
+(except for RDA-ADMM whose convergence rate in this
+situation is unclear). However, in both cases (general and
+strongly convex), these are inferior to the O( T1 ) and linear convergence rates of their batch ADMM counterparts
+(Deng & Yin, 2012; He & Yuan, 2012; Hong & Luo, 2012).
+2.2. Stochastic Optimization with Finite Samples
+While the full gradient descent has linear convergence, it is
+well-known that SGD only achieves sublinear convergence
+(Mairal, 2013) (i.e., O( TL )). Recently, by observing that
+the training set is indeed finite, it is shown that the convergence rates of stochastic algorithms can be improved to
+match those of the batch learning algorithms. A pioneering approach along this line is the stochastic average gradient (SAG) (Le Roux et al., 2012), which considers the
+optimization
+Pn of a strongly convex sum of smooth functions
+(minx n1 i=1 `i (x)). By updating an estimate of the full gradient incrementally in each iteration, the per-iteration
+time complexity of SAG is only as low as SGD, yet surprisingly its convergence rate is linear. Specifically, at iteration
+t, a sample with index k(t) ∈ {1, 2, . . . , n} is randomly
+chosen and its contribution to the objective’s gradient recomputed. Variable x is then updated as
+n
+
+xt+1 ← xt −
+where
+
+
+τi (t) =
+
+ηX
+∇`i (xτi (t) ),
+n i=1
+
+t
+i = k(t)
+,
+τi (t − 1) otherwise
+
+and η is a constant stepsize. The recently proposed stochastic coordinate descent (Shalev-Shwartz & Zhang, 2013b)
+also obtains a similar convergence rate.
+Another closely related approach is the minimization
+by incremental surrogate optimization (MISO) (Mairal,
+2013), which replaces each `i by some “surrogate” function in an
+Pnincremental manner similar to SAG. To optimize n1 i=1 `i (x) + Ω(x), where `i (x) is smooth and
+convex, and Ω(x) is nonsmooth, MISO
+Pn first approximates the smooth part as Pt` (x) ≡ n1 i=1 `i (xτi (t) ) +
+∇`i (xτi (t) )T (x − xτi (t) ) + L2 kx − xτi (t) k2 , and then updates x as xt+1 ← arg minx Pt` (x) + Ω(x). This can be
+viewed as an extension of SAG, and enjoys the same convergence
+ rate as proximal methods with full gradient, i.e.,
+O Tn for general convex problems and linear convergence
+for strongly convex problems. Proximal stochastic coordinate descent methods are also studied recently in (ShalevShwartz & Zhang, 2013a).
+
+3. Stochastic Average ADMM (SA-ADMM)
+On comparing the update rules on x for the STOC-ADMM
+and OPG-ADMM ((9) and (11)) with that of the batch ADMM (8), one can see that
+Pnthe empirical loss on the whole
+training set (namely, n1 i=1 `i (x)) is replaced by the linear approximation based on one single sample plus a proxi2
+tk
+mal term kx−x
+2ηt+1 . This follows the standard approach taken by SGD. As discussed in Section 2.2, SGD has slower
+convergence than full gradient descent. This also agrees
+with the result in Section 2.1 that the existing stochastic
+versions of ADMM all have slower convergence rates than
+their batch counterpart.
+Motivated by the recent stochastic optimization results in
+Section 2.2, we will propose a novel stochastic ADMM algorithm that achieves the same convergence rate as batch
+ADMM on general convex problems. Unlike SAG or MISO, the proposed algorithm is more general and can be applied to optimization problems with equality constraints,
+which are naturally handled by ADMM.
+3.1. Algorithm
+In the following, we assume that `i in (7) is L-smooth (e.g.,
+square loss and logistic loss). As in existing stochastic ADMM approaches (Wang & Banerjee, 2012; Ouyang et al.,
+2013; Suzuki, 2013), y and α are still updated by (5), (6).
+The key difference is on the update of x (Algorithm 1).
+
+(14)
+
+First, consider the special case where Ω = 0. At iteration t, we randomly choose a sample k(t) uniformly from
+{1, 2, . . . , n}, and then update x as
+
+(15)
+
+xt+1 ← arg min Pt` (x) + r(x, yt , αt ),
+x
+
+(16)
+
+Fast Stochastic Alternating Direction Method of Multipliers
+
+Algorithm 1 Stochastic average alternating direction
+method of multipliers (SA-ADMM).
+1: Initialize: x0 , y0 , α0 and τi (−1) = 0∀i.
+2: for t = 0, 1, . . . , T − 1 do
+3:
+randomly choose k ∈ {1, 2, . . . , n}, and set τi (t) as
+in (15);
+4:
+update xt+1 using (17) or (20) when Ω = 0; and use
+(23) when Ω 6= 0;
+5:
+yt+1 ← arg miny ψ(y)+ ρ2 kAxt+1 +By −c+αt k2 ;
+6:
+αt+1 ← αt + (Axt+1 + Byt+1 − c);
+7: end for
+PT
+PT
+1
+8: Output: x̄T ← T1
+t=1 xt , ȳT ← T
+t=1 yt .
+
+Hence, (16) becomes
+xt+1
+
+← arg min Pt` (x) + Ptr (x)
+x
+
+
+Lx̄t + LA xt − ∇`t + ∇tx r)
+=
+.
+LA + L
+
+(19)
+(20)
+
+Analogous to the discussion on the relationship between
+(16) and (9) above, our (20) is also similar to the OPGADMM update in (12), except that all the information from
+{`1 , `2 , . . . , `n } are now used. Moreover, note that although RDA-ADMM also uses an average of gradients (ḡt
+in (13)), its convergence is still slower than the proposed
+algorithm (as will be seen in Section 3.4).
+When Ω 6= 0, it can be added back to (16), leading to
+xt+1 ← arg min Pt` (x) + Ω(x) + r(x, yt , αt ).
+
+where
+Pt` (x) ≡
+
+x
+
+(21)
+
+n
+In general, it is easier to solve with the inexact Uzawa sim1X
+`i (xτi (t) ) + ∇`i (xτi (t) )T (x − xτi (t) ) plification. The update then becomes
+n i=1
+
+L
++ kx − xτi (t) k2 ,
+2
+ρ
+kAx + By − c − αk2 ,
+r(x, y, α) ≡
+2
+and τi (t) is as defined in (15). Hence, as in SAG, out
+of the n gradient terms in (16), only one of them (which
+corresponds to sample k(t)) is based on the current iterate
+xt , while all others are previously-stored gradient values.
+Moreover, note its similarity with the STOC-ADMM update in (9), which only retains terms related to `k(t) , while
+(16) uses the information from all of {`1 , `2 , . . . , `n }. Another difference with (9) is that the proximal term in (16)
+involves a constant L, while (10) requires a time-varying
+stepsize ηt .
+By setting the derivative of (16) to zero, we have
+xt+1 ← (ρAT A + LI)−1
+
+
+· Lx̄t − ρAT (Byt − c + αt ) − ∇`t , (17)
+Pn
+1
+where x̄t
+=
+and ∇`t
+=
+i=1 xτi (t) ,
+n
+P
+n
+1
+T
+When the dimension of A A is
+i=1 ∇`i (xτi (t) ).
+n
+manageable, (ρAT A + LI)−1 can be pre-computed and
+stored. On the other hand, when ρAT A + LI is large, even
+storing its inverse can be expensive. A technique that has
+been popularly used in the recent ADMM literature is the
+inexact Uzawa method (Zhang et al., 2011), which uses (2)
+to approximate r(x, yt , αt ) by its upper bound:
+r(x, yt , αt ) ≤ Ptr (x)
+≡ r(xt , yt , αt ) + ∇tx rT (x − xt )
+LA
++
+kx − xt k2 ,
+(18)
+2
+where ∇tx r ≡ ρAT (Axt +Byt −c+αt ) and LA is an upper
+bound on the eigenvalues of ρAT A (He & Yuan, 2012).
+
+xt+1 ← arg min Pt` (x) + Ptr (x) + Ω(x)
+(22)
+x
+
+
+ 2
+Lx̄t + LA xt − ∇`t + ∇tx r 
+1
+
+
+= arg min x −
+
+x 2 
+
+LA + L
++
+
+Ω(x)
+.
+LA + L
+
+(23)
+
+This is the standard proximal step popularly used in optimization problems with structured sparsity (Bach et al.,
+2011). As is well-known, it can be efficiently computed as
+Ω is assumed “simple” (e.g., Ω(x) = kxk1 , kxk2 , kxk∞
+and various mixed norms (Duchi & Singer, 2009)).
+3.2. Discussion
+In the special case where ψ = 0, (1) reduces to minx φ(x)
+and the feasibility violation r(x, yt , αt ) can be dropped.
+The update rule in (16) then reduces to MISO using the
+Lipschitz gradient surrogate; and (21) corresponds to the
+proximal gradient surrogate (Mairal, 2013). SAG, on the
+other hand, does not have the proximal term kx − xτi (t) k2
+in its update rule, and also cannot handle a nonsmooth Ω.
+When ψ 6= 0, (18) can be regarded as a quadratic surrogate
+(Mairal, 2013). Then, (19) (resp. (21)) is a combination
+of the Lipschitz (resp. proximal) gradient surrogate and
+quadratic surrogate, which can be easily seen to be another
+surrogate function in the sense of (Mairal, 2013). Note that
+when ψ 6= 0, MISO has to compute the proximity operator
+w.r.t. the equality constraints, which is difficult in general.
+The stochastic algorithms in Section 2.1 only require φ
+to be convex, and do not explicitly consider its form in
+(7). Hence, there are two possibilities in the handling of
+a nonzero Ω. The first approach directly takes the nonsmooth φ in (7), and uses its subgradient in the update equations ((10), (12) and (13)). However, unlike the proximal
+
+Fast Stochastic Alternating Direction Method of Multipliers
+
+step in (23), this does not exploit the structure of φ and
+subgradient descent often has slow empirical convergence
+(Duchi & Singer, 2009). The second approach folds Ω into
+ψ by rewriting the optimization problem as
+n
+
+min
+
+ 
+y
+
+x, z
+
+s.t.
+
+1X
+`i (x) + [ψ(y) + Ω(z)]
+n i=1
+ 
+
+   
+A
+B 0
+y
+c
+x+
+=
+.
+I
+0 −I z
+0
+
+ 
+y
+In the update step for
+, it is easy to see from (5) that y
+z
+and z are decoupled and thus can be optimized separately.
+In comparison with (23), a disadvantage of this reformulation is that an additional variable z (which is of the same
+size as x) has to be introduced. Hence, it is more computationally expensive empirically. Moreover, the radius
+of the parameter space is also increased, leading to bigger constants in the big-O notation of the convergence rate
+(Ouyang et al., 2013; Suzuki, 2013).
+3.3. Per-Iteration Time Complexity
+The proposed algorithm uses the same update rules for yt
+and αt as the existing stochastic ADMM algorithms (in
+Section 2.1). Hence, we only consider the complexities of
+the xt updates here. For easy comparison, we take B = −I
+and c = 0, as assumed in (Suzuki, 2013). OPG-ADMM
+is the most efficient. Its update rule (12) takes O(nz(A))
+time, where nz(A) is the number of nonzero elements in
+A. Both RDA-ADMM and the proposed update rule (20)
+require taking the average of the gradients/variables. The
+resultant complexities are O(nz(A) + dx ) and O(nz(A) +
+dy ), respectively, where dx (resp. dy ) is the dimensionality
+of x (resp. y). Typically, nz(A) is larger than dx and dy ,
+and so OPG-ADMM, RDA-ADMM and rule (20) have the
+same complexity. STOC-ADMM (with update rule (10)) is
+the most expensive as matrix inversion is involved, which
+takes O(d3x ) time. As to the proposed rule (17), one can
+pre-compute the matrix inverse as the step size is a constant.
+3.4. Convergence Analysis
+In this section, we show that the proposed ADMM algorithm has fast convergence. Recall that in the standard ADMM, equation (4) is used for updating x. In the proposed
+algorithm, the loss and feasibility violation are linearized,
+making the convergence analysis more difficult than those
+in (He & Yuan, 2012; Wang & Banerjee, 2012). Moreover,
+though related to MISO, our analysis is a non-trivial extension because of equality constraints and additional Lagrangian multipliers in the ADMM formulation.
+Let kxkH ≡ xT Hx for a psd matrix H, Hx ≡ LA I −
+
+ρAT A, and Hy ≡ ρB T B. Denote the optimal solution of
+(1) by (x∗ , y ∗ ). As in (Ouyang et al., 2013), we first consider the convergence of (x̄T , ȳT ) in terms of a combination
+of the objective value and feasibility violation (weighted
+by some γ > 0). The following theorem establishes O T1
+convergence.
+Theorem 1 Using update rule (23),
+E [Φ(x̄T , ȳT ) − Φ(x∗ , y ∗ ) + γkAx̄T + B ȳT − ck]
+1 n ∗
+≤
+kx − x0 k2Hx + nLkx∗ − x0 k2 + ky ∗ − y0 k2Hy
+2T 
+
+γ2
+2
++2ρ
++
+kα
+k
+.
+0
+ρ2
+When Ω = 0 and the inexact Uzawa simplification is not
+used, update rule (17) leads to
+E [Φ(x̄T , ȳT ) − Φ(x∗ , y ∗ ) + γkAx̄T + B ȳT − ck]
+1 n
+nLkx∗ − x0 k2 + ky ∗ − y0 k2Hy
+≤
+2T 
+
+γ2
+2
++
+kα
+k
+.
++2ρ
+0
+ρ2
+Remark 1 When Ω = 0, (22) reduces to (19). Hence, Theorem 1 trivially holds when update rule (20) is used.
+However, similar to the other ADMM algorithms, the
+(x̄T , ȳT ) obtained from Algorithm 1 may not exactly satisfy the linear constraint Ax + By = c. As discussed in
+(Suzuki, 2013), when B is invertible, the feasibility violation can be reduced to zero by obtaining y from x̄T as
+y(x̄T ) = B −1 (c − Ax̄T ). The followingCorollary shows
+that the (x̄T , y(x̄T )) pair still have O T1 convergence towards the objective value.
+Corollary 1 Assume that ψ is L̃-Lipschitz continuous, and
+B is invertible. Using the update rule (20) or (23), we have
+E [Φ(x̄T , y(x̄T )) − Φ(x∗ , y ∗ )]
+1 n ∗
+≤
+kx − x0 k2Hx + nLkx∗ − x0 k2 + ky ∗ − y0 k2Hy
+2T
+!)
+L̃2 LB
++ρ
++ kα0 k2
+,
+ρ2
+where LB is the largest eigenvalue of (B −1 )T B −1 . When
+update rule (17) is used,
+E [Φ(x̄T , y(x̄T )) − Φ(x∗ , y ∗ )]
+1 n
+≤
+nLkx∗ − x0 k2 + ky ∗ − y0 k2Hy
+2T
+!)
+L̃2 LB
+2
++ρ
++ kα0 k
+.
+ρ2
+
+Fast Stochastic Alternating Direction Method of Multipliers
+
+Alternatively, when A is invertible, one can obtain x from
+ȳT as x(ȳT ) = A−1 (c − B ȳT ). Thefollowing corollary
+shows that (x(ȳT ), ȳT ) also has O T1 convergence.
+
+analysis in this section still holds, with n simply replaced
+by nnb , where nb is the mini-batch size. This can thus also
+be used to reduce the essential value of n.
+
+Corollary 2 Assume that Ω is L̂-Lipschitz continuous, and
+A is invertible. Using the update rule (20) or (23), we have
+
+Remark 3 Compared with the existing stochastic ADMM
+algorithms, the faster convergence of Algorithm 1 comes
+at the cost of an extra O(ndx ) memory for the historical
+information used in Step 4. This is similar to the algorithms
+in (Le Roux et al., 2012; Mairal, 2013).
+
+E [Φ(x(ȳT ), ȳT ) − Φ(x∗ , y ∗ )]
+1 n ∗
+kx − x0 k2Hx + nLkx∗ − x0 k2 + ky ∗ − y0 k2Hy
+≤
+2T
+!)
+(L̂ + L)2 L̂A
++ρ
++ kα0 k2
+,
+ρ2
+where L̂A is the largest eigenvalue of (A−1 )T A−1 . When
+update rule (17) is used,
+E [Φ(x(ȳT ), ȳT ) − Φ(x∗ , y ∗ )]
+1 n
+nLkx∗ − x0 k2 + ky ∗ − y0 k2Hy
+≤
+2T
+!)
+(L̂ + L)2 L̂A
+2
++ρ
++ kα0 k
+.
+ρ2
+Remark 2 The convergence rates obtained here are of the
+form O( Tn ). Recall that batch ADMM has O( T1 ) convergence (Section 2.1). It may thus appear that the proposed stochastic algorithms are much slower, especially
+for large n. However, in the worst case, this is inevitable.
+For example, consider the lasso problem on the data set
+{(zi , li )}ni=1 , where zi is the input
+Pnand li is the output. This
+can be formulated as φ(x) = i=1 (li − ziT x)2 , ψ(y) =
+kyk1 , A = −B = I, and c = 0. Assume that each input sample is nonzero in only one and unique dimension
+(e.g., [zi ]i 6= 0 and [zi ]j = 0 ∀i 6= j). Obviously, there
+are indeed n independent optimization problems. The stochastic algorithm can only update one dimension in each
+iteration, and so will inevitably be n times slower than
+the batch algorithm. However, this situation is very rare
+in practice. Empirical results in Section 4 show that stochastic algorithms always outperform their batch counterparts. It is also interesting to compare with the existing stochastic ADMM algorithms. In this worst-case scenario, σ 2 =√ O(n), and these algorithms converge as
+O( √σT ) = O( √Tn ). When the whole data set is processed
+more than once (as is typically the case), T √
+> n as each
+iteration processes only one sample, and O( √Tn ) is worse
+than our O( Tn ) rate.
+Instead of updating the gradient of only one sample in each
+iteration, extension to the use of mini-batch is straightforward. This is particularly useful when (i) the gradients of
+the multiple samples in the mini-batch can be computed
+in parallel; or (ii) the other steps are much more expensive than computing the gradient of one single sample. The
+
+Remark 4 The present analysis considers convergence
+w.r.t. the training objective (or a combination with the feasibility violation), but does not directly bound the generalization performance. Intuitively, for any algorithm that
+only have access to a finite training set, it is impossible
+to achieve perfect generalization even after infinite iterations. Nevertheless, improved generalization performance
+is observed in our experiments (Section 4). Moreover, while
+Agarwal et al. (2012) show that O( √1T ) is the optimal
+convergence rate for any stochastic optimization scheme
+on general convex problems, this does not contradict our
+analysis as we further assume a finite training sample.
+
+4. Experiments
+In this section, we perform experiments on the generalized P
+lasso model (Tibshirani & Taylor, 2011):
+n
+minx n1 i=1 `i (x) + λkAxk1 , where λ is the regularization parameter, and A is a penalty matrix specifying the
+desired structured sparsity pattern of x. With different settings of A, this can be reduced to models such as the fused
+lasso, trend filtering, and wavelet smoothing. Here, we will
+focus on the graph-guided fused lasso (Kim et al., 2009).
+As in (Ouyang et al., 2013), the graph is obtained by sparse inverse covariance selection (Banerjee et al., 2008),
+and A = [G; I] for the sparsity pattern G. Moreover, as
+classification problems are considered here, we use the logistic loss instead of the square loss.
+While proximal methods have been used in the optimization of graph-guided fused lasso (Barbero & Sra, 2011; Liu
+et al., 2010), in general, the underlying proximal step is difficult to solve because of the presence
+Pnof A. ADMM, by
+splitting the objective as φ(x) = n1 i=1 `i (x), ψ(y) =
+λkyk1 and with constraint Ax = y, has been shown to be
+more efficient (Ouyang et al., 2013; Suzuki, 2013). In this
+experiment, we compare
+1. two variants of the proposed method: SA-ADMM,
+which uses update rule (17); and SA-IU-ADMM,
+which uses (20)) based on the inexact Uzawa method;
+2. three existing stochastic ADMM algorithms: STOCADMM (Ouyang et al., 2013); OPG-ADMM (Suzuki,
+2013); and RDA-ADMM (Suzuki, 2013);
+
+Fast Stochastic Alternating Direction Method of Multipliers
+
+(a) a9a
+
+(b) covertype
+
+(c) rcv1
+
+(d) sido
+
+(e) a9a
+
+(f) covertype
+
+(g) rcv1
+
+(h) sido
+
+Figure 1. Performance versus running time on general convex problems. Top: objective value; Bottom: testing loss.
+
+3. two deterministic ADMM variants: batch-ADMM,
+which is the batch version of SA-ADMM using full gradient (i.e., τi (t) = t ∀i); and batch-IU-ADMM,
+which is the batch version of SA-IU-ADMM.
+All these share the same update rules for y and α (i.e., steps 5 and 6 in Algorithm 1), and differ only in the updating
+of x, which are summarized in Table 1. We do not compare with the online ADMM (Wang & Banerjee, 2012) or
+a direct application of the batch ADMM, as an expensive
+matrix inverse is required for the update of x in (10). Moreover, it has been shown that the online ADMM is slower
+than RDA-ADMM (Suzuki, 2013).
+Table 1. A comparison of the update rules on x.
+gradient
+linearize
+constant
+computation
+kAx+By−ck2 ? stepsize?
+SA-ADMM
+average
+no
+yes
+average
+yes
+yes
+SA-IU-ADMM
+STOC-ADMM
+one sample
+no
+no
+OPG-ADMM
+one sample
+yes
+no
+RDA-ADMM average (history)
+yes
+no
+batch-ADMM
+all samples
+no
+yes
+batch-IU-ADMM
+all samples
+yes
+yes
+
+Experiments are performed on four popular binary classification data sets2 (Table 2) (Le Roux et al., 2012; Suzuki, 2013). For each data set, half of the samples are used
+for training, while the rest for testing. To reduce statistical
+variability, results are averaged over 10 repetitions. To ensure that the ADMM iterates satisfy the constraint during
+the iterations, we report the performance using (xt , y(xt ))
+as discussed in Section 3.4. Moreover, we fix the regularization parameter λ to 10−5 for a9a, covertype, and to
+2
+
+a9a, covertype and rcv1 are from the LIBSVM archive, and
+sido from the Causality Workbench website.
+
+10−4 for rcv1 and sido. For ρ in (3) and the stepsize (or
+its proportionality constant), we use a small training subset
+with 500 samples, and choose the parameter setting with
+the smallest training objective value after running the stochastic algorithm over 5 data passes; or after running the
+batch algorithm for 100 iterations. As the proposed methods require historical information, we initialize them with
+OPG-ADMM for the first n iterations. All methods are implemented in MATLAB, and experiments are performed on
+a PC with an Intel i7-2600K CPU and 32GB memory.
+Table 2. Summary of data sets.
+
+data set
+a9a
+covertype
+rcv1
+sido
+
+number of samples
+32,561
+581,012
+20,242
+12,678
+
+dimensionality
+123
+54
+47,236
+4,932
+
+Figure 1 shows the objective value and testing loss obtained
+by the various algorithms versus running time. Overall,
+SA-ADMM and SA-IU-ADMM are the fastest and rapidly lead to a model with good generalization performance.
+These are followed by the other stochastic algorithms, whie
+the batch ADMM algorithms are the slowest.
+As in (Mairal, 2013), we also study the variation of the
+objective value with the number of “effective passes” over
+the data3 . For a batch algorithm, one effective pass is the
+same as one iteration; whereas for a stochastic algorithm,
+one effective pass is equal to n iterations (as each iteration
+processes only one sample). Results are shown in Figure 2.
+As can be seen, the relative performance of the various al3
+
+Because of the lack of space, the variation of the testing loss
+with the number of effective passes is not shown here. Similar to
+the objective value, the trend is similar to that in Figure 1.
+
+Fast Stochastic Alternating Direction Method of Multipliers
+
+(a) a9a
+
+(b) covertype
+
+(c) rcv1
+
+(d) sido
+
+(e) a9a
+
+(f) covertype
+
+(g) rcv1
+
+(h) sido
+
+Figure 2. Performance versus the number of effective passes on general convex problems. Top: objective value; Bottom: testing loss.
+
+(a) a9a
+
+(b) covertype
+
+(c) rcv1
+
+(d) sido
+
+(e) a9a
+
+(f) covertype
+
+(g) rcv1
+
+(h) sido
+
+Figure 3. Performance versus the running time on strongly convex problems. Top: objective value; Bottom: testing loss.
+
+gorithms is similar to that in Figure 1. In other words, not
+only is the total time required by the proposed algorithms
+shorter, the number of iterations required is also smaller.
+As discussed in Section 2.1, STOC-ADMM and OPGADMM has O( logT T ) convergence when the loss is strongly convex. It is still an open question whether this also
+holds for the proposed algorithm. In the following, we
+compare their performance empirically by adding an extra
+`2 -regularizer on x to the model. Results are shown in Figure 3. As can be seen, the improvement of SA-IU-ADMM
+over others is even more dramatic.
+
+5. Conclusion
+In this paper, we developed a novel stochastic algorithm
+that incrementally approximates the full gradient in the lin-
+
+earized ADMM formulation. It enjoys the same computational simplicity as existing stochastic ADMM algorithms,
+but has a fast convergence rate that matches the batch ADMM. Empirical results on both general convex and strongly
+convex problems demonstrate its efficiency over batch and
+stochastic ADMM algorithms. In the future, we will investigate the theoretical convergence rate of the proposed
+algorithm on strongly convex problems.
+
+Acknowledgments
+This research was supported in part by the Research Grants
+Council of the Hong Kong Special Administrative Region
+(Grant 614311).
+
+Fast Stochastic Alternating Direction Method of Multipliers
+
+References
+Agarwal, A., Bartlett, P.L., Ravikumar, P., and Wainwright,
+M.J. Information-theoretic lower bounds on the oracle complexity of stochastic convex optimization. IEEE
+Transactions on Information Theory, 58(5):3235–3249,
+2012.
+Bach, F., Jenatton, R., Mairal, J., and Obozinski, G. Convex optimization with sparsity-inducing norms. In Sra,
+S., Nowozin, S., and Wright, S.J. (eds.), Optimization
+for Machine Learning, pp. 19–53. MIT Press, 2011.
+Banerjee, O., El Ghaoui, L., and d’Aspremont, A. Model
+selection through sparse maximum likelihood estimation
+for multivariate Gaussian or binary data. Journal of Machine Learning Research, 9:485–516, 2008.
+Barbero, A. and Sra, S. Fast Newton-type methods for total
+variation regularization. In Proceedings of the 28th International Conference on Machine Learning, pp. 313–
+320, New York, NY, USA, 2011.
+Bottou, L. Stochastic learning. In Advanced Lectures on
+Machine Learning, pp. 146–168. Springer Verlag, 2004.
+Boyd, S. Distributed optimization and statistical learning
+via the alternating direction method of multipliers. Foundations and Trends in Machine Learning, 3(1):1–122,
+2010.
+Deng, W. and Yin, W. On the global and linear convergence of the generalized alternating direction method of
+multipliers. Technical Report TR12-14, Rice University,
+2012.
+Duchi, J. and Singer, Y. Efficient online and batch learning
+using forward backward splitting. Journal of Machine
+Learning Research, 10:2873–2908, 2009.
+Gabay, D. and Mercier, B. A dual algorithm for the solution of nonlinear variational problems via finite element
+approximation. Computers & Mathematics with Applications, 2(1):17–40, 1976.
+Glowinski, R. and Marrocco, A. Sur l’approximation,
+par elements finis d’ordre un, et la resolution, par
+penalisation-dualite, d’une classe de problems de dirichlet non lineares. Revue Francaise d’Automatique, Informatique, et Recherche Opérationelle, 9:41–76, 1975.
+He, B. S. and Yuan, X. M. On the O(1/t) convergence
+rate of alternating direction method. SIAM Journal on
+Numerical Analysis, 22(4):1431–1448, 2012.
+Hong, M. and Luo, Z.-Q. On the linear convergence of the
+alternating direction method of multipliers. Technical
+Report arXiv:1208.3922, University of Minnesota, 2012.
+
+Kim, S., Sohn, K.-A., and Xing, E.P. A multivariate regression approach to association analysis of a quantitative
+trait network. Bioinformatics, 25(12):i204–i212, 2009.
+Le Roux, N., Schmidt, M., and Bach, F. A stochastic gradient method with an exponential convergence rate for
+finite training sets. In Advances in Neural Information
+Processing Systems 25, pp. 2672–2680, 2012.
+Liu, J., Yuan, L., and Ye, J. An efficient algorithm for
+a class of fused lasso problems. In Proceedings of the
+16th International Conference on Knowledge Discovery
+and Data Mining, pp. 323–332, Washington, DC, USA,
+2010.
+Mairal, J. Optimization with first-order surrogate functions. In Proceedings of the 30th International Conference
+on Machine Learning, Atlanta, GA, USA, 2013.
+Ouyang, H., He, N., Tran, L., and Gray, A. Stochastic alternating direction method of multipliers. In Proceedings of
+the 30th International Conference on Machine Learning,
+Atlanta, GA, USA, 2013.
+Qin, Z. and Goldfarb, D. Structured sparsity via alternating direction methods. Journal of Machine Learning Research, 13:1435–1468, 2012.
+Shalev-Shwartz, S. and Zhang, T. Proximal stochastic dual
+coordinate ascent. arXiv:1211.2717, 2013a.
+Shalev-Shwartz, S. and Zhang, T. Stochastic dual coordinate ascent methods for regularized loss minimization. Journal of Machine Learning Research, 14:437–
+469, 2013b.
+Suzuki, T. Dual averaging and proximal gradient descent for online alternating direction multiplier method. In
+Proceedings of the 30th International Conference on
+Machine Learning, pp. 392–400, Atlanta, GA, USA,
+2013.
+Tibshirani, R. J. and Taylor, J. The solution path of the
+generalized lasso. Annals of Statistics, 39(3):1335–1371,
+2011.
+Wang, H. and Banerjee, A. Online alternating direction
+method. In Proceedings of the 29th International Conference on Machine Learning, pp. 1119–1126, Edinburgh, Scotland, UK, 2012.
+Xiao, L. Dual averaging methods for regularized stochastic
+learning and online optimization. Journal of Machine
+Learning Research, 11:2543–2596, 2010.
+Zhang, X., Burger, M., and Osher, S. A unified primaldual algorithm framework based on Bregman iteration.
+Journal of Scientific Computing, 46(1):20–46, January
+2011.
+
+

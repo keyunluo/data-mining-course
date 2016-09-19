@@ -1,0 +1,1098 @@
+Filtering with Abstract Particles
+
+Jacob Steinhardt
+Percy Liang
+Stanford University, 353 Serra Street, Stanford, CA 94305 USA
+
+Abstract
+By using particles, beam search and sequential
+Monte Carlo can approximate distributions in
+an extremely flexible manner. However, they
+can suffer from sparsity and inadequate coverage on large state spaces. We present a new filtering method for discrete spaces that addresses
+this issue by using “abstract particles,” each of
+which represents an entire region of state space.
+These abstract particles are combined into a hierarchical decomposition, yielding a compact and
+flexible representation. Empirically, our method
+outperforms beam search and sequential Monte
+Carlo on both a text reconstruction task and a
+multiple object tracking task.
+
+1. Introduction
+Sequential Monte Carlo (Cappé et al., 2007; Doucet &
+Johansen, 2011), together with its deterministic analogue
+beam search (Pal et al., 2006) have been incredibly successful at solving a wide variety of filtering and other inference
+tasks (Quirk & Moore, 2007; Görür & Teh, 2008; Carreras
+& Collins, 2009; Liang et al., 2011; Bouchard-Côté et al.,
+2012). However, despite their flexibility, they can perform
+poorly when there are insufficiently many particles to cover
+all high-probability regions of the posterior distribution; it
+is then possible that all particles will assign low probability to a new observation, which leads to estimates with very
+high variance (Gilks & Berzuini, 2001).
+The issue is a lack of coverage: when there are relevant regions of the space that are not represented at all by the particles at hand. Motivated by this observation, we construct
+“abstract particles” where each particle covers an entire region of the space. Within each particle we then perform
+a local variational approximation to the target distribution
+over that region (Jordan et al., 1999; Minka, 2001). More
+Proceedings of the 31 st International Conference on Machine
+Learning, Beijing, China, 2014. JMLR: W&CP volume 32. Copyright 2014 by the author(s).
+
+JSTEINHARDT @ CS . STANFORD . EDU
+PLIANG @ CS . STANFORD . EDU
+
+importantly, we also optimize over the choice of regions.
+This can be thought of as adaptively choosing the structure
+of the variational family. Our contributions are four-fold;
+in all cases we are focused on inference in discrete spaces.
+• We formally define the notion of an abstract particle
+(Section 2.1).
+• We identify a large but tractable family of abstract
+particles based on hierarchical decompositions (Section 2.2).
+• We provide efficient algorithms for choosing particles
+from this family (Section 4).
+• We demonstrate improved performance over both
+beam search and sequential Monte Carlo on two tasks
+(Section 5).
+
+2. Relevance-Directed Variational
+Approximation
+Our goal is to approximate an intractable target distribution p∗ (x) by a tractable distribution p̂(x). We assume that
+p∗ is given as an unnormalized product of factors. A common approach would be to parameterize p̂ as an exponential
+family:
+1
+def
+p̂θ (x) =
+exp(θ> φ(x))
+(1)
+Z(θ)
+and then choose θ to minimize the objective function
+
+ ∗
+X
+p (x)
+def
+∗
+∗
+.
+KL (p k p̂θ ) =
+p (x) log
+p̂θ (x)
+x
+
+(2)
+
+In practice, finding the optimum of (2) is intractable, but
+one can still employ heuristic techniques such as expectation propagation (Minka, 2001).
+Such variational approximations are useful in allowing us
+to approximate otherwise intractable distributions; however, they suffer in that they are forced to approximate the
+entire space by a single, coarse distribution. Sometimes,
+some regions of the space are more important than others,
+and we would like a way to capture this in our approximation.
+
+Filtering with Abstract Particles
+
+To do so, we will show how to obtain improved variational
+approximations by partitioning the state space, then provide a formalism for optimizing the partition via hierarchical decompositions.
+
+X◦
+
+X
+P
+R
+
+Q
+R
+
+◦
+
+P◦
+
+Q◦
+
+2.1. Improved Variational Approximations via
+Partitions
+Let Y = {Y1 , . . . , Yk } be any partition of X . Given an exponential family F defined by sufficient statistics φ, define
+F Y to be the exponential family with sufficient statistics
+{φIYj }kj=1 , which corresponds to taking the outer product
+of φ with the indicator functions of the partition. F Y is thus
+an expanded variational family that is more flexible than F
+itself. Using θ = (θj )kj=1 to indicate the parameters of F Y ,
+the resulting distributions are piecewise exponential families on each element of the partition, with a single global
+normalization constant Z(θ):
+p̂θ (x) =
+
+1
+exp(θj> φ(x)) : x ∈ Yj
+Z(θ)
+
+(3)
+
+(this is similar to the setup of split variational inference in
+(Bouchard & Zoeter, 2009)). We refer to each Yj as an
+abstract particle. Define fˆθj to be the unnormalized probability exp(θj> φ(x)) over Yj . Because Y is a partition of
+X , the KL divergence decouples over each Yj ∈ Y :
+KL (p∗ k p̂θ ) =
+
+k X
+X
+
+p∗ (x)
+1 ˆ
+fθ (x)
+
+p∗ (x) log
+
+j=1 x∈Yj
+
+= log Z(θ) +
+
+Z(θ)
+k
+X
+
+!
+(4)
+
+j
+
+ 
+
+
+KLYj p∗  fˆθj .
+
+(5)
+
+j=1
+def
+
+
+
+
+
+p(x)
+Here KLS (p k q) =
+x∈S p(x) log q(x) is the regionspecific KL divergence. Note that minimizing KL in this direction is intractable; this is a general property of the problem, not a consequence of introducing a partition.
+
+P
+
+There are many techniques for heuristically minimizing the
+KL, such as expectation propagation (Minka, 2001). Another interesting approach (though it has no justification in
+terms of variational inference) is to obtain the fˆθj by using a fixed simpler model which has been trained on the
+same data as p∗ (we will explain this in more detail later).
+Normally, using only a subset of features of the original
+model p∗ would result in a poor approximation. However,
+when combined with partitions, this approach can be very
+powerful, as we will demonstrate in a text reconstruction
+experiment (see Section 3.1).
+For now, we will simply assume that we have a function
+Fit that maps Yj to θj . We will explore both the use of EP
+and of lower-order models in Section 3.
+
+Figure 1. A hierarchical decomposition (left) and its corresponding partition (right). We have C(X ) = {P, Q}, C(P ) = {R},
+and C(Q) = C(R) = ∅. The elements of the partition are
+X ◦ = X \(P ∪ Q), P ◦ = P \R, Q◦ = Q, and R◦ = R.
+
+2.2. Optimizing the Partition via Hierarchical
+Decompositions
+While a fixed partition Y allows us to construct a richer exponential family F Y out of F, a more interesting prospect
+is to adaptively optimize the partition Y . The tool we will
+use for doing so is a hierarchical decomposition:
+Definition 2.1. Given a space X , a hierarchical decomposition is a collection A ⊆ 2X of subsets satisfying: (i)
+X ∈ A and (ii) if a, b ∈ A, then a ∩ b ∈ {a, b, ∅}.
+Note that the elements of A form a tree. For a ∈ A, let
+CA (a) denote the children of a in the tree: b ∈ CA (a) iff
+b ( a and there is no b0 ∈ A with b ( b0 ( a. An example
+of a decomposition is shown in the left panel of Figure 1.
+Finally, let a◦ for a ∈ A denote the set of elements lying in
+a but not in any of its children:
+
+
+[
+def
+a◦ = a\ 
+b .
+(6)
+b∈CA (a)
+
+This is illustrated in the right panel of Figure 1. Hierarchical decompositions are connected to partitions in the following way:
+Lemma 2.2. If A is a hierarchical decomposition, then the
+def
+collection A◦ = {a◦ }a∈A forms a partition of X .
+Thus, every hierarchical decomposition gives rise to a partition, as does any subset:
+Lemma 2.3. Let A be a hierarchical decomposition and
+let B ⊆ A such that X ∈ B. Then B is a hierarchical
+decomposition.
+Therefore, a hierarchical decomposition A determines a
+family of 2|A|−1 partitions (some of which may end up being identical), defined by
+{B ◦ | {X } ⊆ B ⊆ A}.
+
+(7)
+
+We can now cast the optimization of the partition as the
+following problem: Given a (large) hierarchical decomposition A, find a subset B of (small) size k and a distribution
+◦
+p̂ ∈ F B such that KL (p∗ k p̂) is small.
+
+Filtering with Abstract Particles
+
+In equations, this is
+minimize KL (p∗ k p̂)
+
+subject to p̂ ∈ F
+
+(8)
+
+B◦
+
+{X } ⊆ B ⊆ A
+|B| ≤ k
+
+Note that p̂ will be parameterized by a variable θ =
+(θa )a∈B . While there are exponentially many possibilities for B, we can heuristically optimize (8) over B using a greedy algorithm, as well as exactly optimize a surrogate function using dynamic programming. The greedy
+algorithm is described in Section 4 and the dynamic programming algorithm is described in the supplementary material. In Section 4 we also provide an algorithm, analogous
+to beam search, for approximately optimizing B in cases
+where A itself is exponentially large.
+Effect of hierarchical decomposition on approximation.
+As an example to better understand how the hierarchical
+decomposition affects the approximation, suppose that F
+consists of distributions over (x1 , x2 ) that do not depend
+on x1 : p̂(x1 , x2 ) = q(x2 ). Let a be a region where x1
+is fixed to a value x̂1 . Then we can take fˆθa (x1 , x2 ) =
+p∗ (x̂1 )p∗ (x2 | x̂1 ). Since x̂1 is a constant, fˆθa doesn’t
+“depend” on x1 , even though it matches p∗ exactly over a.
+More generally, any factor of p∗ that is constant over a region a can be matched exactly over that region, no matter what the family F. This provides some intuition for
+the role that the hierarchical decomposition B plays in improving the approximation to p∗ : even if F cannot approximate a factor satisfactorily, an appropriately chosen hierarchical decomposition will be able to incorporate the factor
+exactly, at least locally.
+Note that in the limiting case where a region a consists of
+a single point, all factors are incorporated exactly, and we
+recover regular particle-based inference.
+
+the values of certain variables in the model, then fˆθa (b) is
+just an (unnormalized) marginal probability and so is often
+tractable. Note that the KL divergence decomposes similarly to (10), although the individual terms in the decomposition will not be tractably computable in general.
+In practice, we will never work directly with a◦ from a
+computational perspective, but rather use a and its children
+CB (a) together with equation (10). To make this clearer
+notationally, we will use Fit(a, CB (a)) to denote the value
+obtained for θa (in fact, in all of our later examples θa depends only on a).
+2.3. Summary
+We have so far presented a recipe for improving variational
+approximations via partitions of the space, using hierarchical decompositions to provide an interesting family of partitions. The recipe consists of the following steps:
+1. Take as input a target distribution p∗ .
+2. Choose a variational family F and a hierarchical decomposition A.
+3. Choose a fitting method Fit(a, C(a)).
+4. Find a subset B of A of size k by optimizing (8).
+This leaves us with two outstanding issues, which we address in subsequent sections:
+• How to pick F, A, and Fit for two concrete filtering
+problems (Section 3).
+• How to find a good choice of B (Section 4), since in
+practice (8) can only be solved approximately.
+
+3. Examples
+Computational issues. One important question is which
+hierarchical decompositions A lead to a tractable family
+◦
+F B . Typically we will want to choose A so that each region a is “simple”, in order to compute the normalization
+constant Z(θ). To elaborate, let fˆθa denote the unnormalized exponential family exp(θa> φ(x)), and note the equalities
+X X
+Z(θ) =
+fˆθa (x)
+(9)
+a∈B x∈a◦
+
+
+=
+
+X
+a∈B
+
+fˆθa (a) −
+
+
+X
+
+fˆθa (b) ,
+
+(10)
+
+b∈CB (a)
+
+which allows us to compute Z(θ) as long as we can compute fˆθa (b) for given regions b ∈ A. If b is defined by fixing
+
+We have seen how a variational family F, together with a
+hierarchical decomposition of the space X , can in theory
+be used to construct a much richer variational family. In
+this section, we consider two filtering tasks, showing how
+hierarchical decompositions are more powerful than standard particle-based methods. In each case, we will define
+a generative model p(x, y) = p(x)p(y | x), and consider
+the posterior inference problem p∗ (x) = p(x | y). Since
+y is observed, we will form our hierarchical decomposition
+over X only, rather than X × Y.
+We assume that X consists of ordered T -tuples
+(x1 , . . . , xT ) ∈ ΣT , where Σ is the alphabet. Our
+task is to predict xt given y1:t for all t = 1, . . . , T . For
+clarity of exposition, we focus on the t = T case.
+
+Filtering with Abstract Particles
+q̂1 (x1 )q̂1 (x2 )
+q̂1 (x1 )q̂1 (x2 )
+q̂1 (x1 )q̂2 (x2 | x̂1 )
+
+To approximate p∗ (x) = p(x | y), we define the following unigram model, where fˆθa denotes the unnormalized
+probability over a◦ :
+
+??
+
+?a
+
+aa
+
+ba
+
+?c
+
+?b
+
+ca
+
+ab
+
+bb
+
+cb
+
+ac
+
+bc
+
+fˆθa (x) =
+
+cc
+
+T
+Y
+
+ψ̂t (xt ).
+
+(13)
+
+t=1
+
+Figure 2. A hierarchical decomposition A (all nodes) together
+with a subset B (black). The underlying space X is {a, b, c}2 .
+The symbol ? is a wildcard, so for instance ?a indicates the set
+{aa, ba, ca}. Note that the parent of ab in B is ??, even though its
+parent in A is ?b. The local approximation to p∗ used at each level
+of the decomposition is indicated on the left (see Equation 14).
+
+3.1. Text Reconstruction
+Setup. We consider the task of text reconstruction, where
+x1:T is a string of characters and each observation yt is either present (in which case yt = xt ) or missing (in which
+case yt = ‘?’). Our prior over x1:T is a character-level ngram model, which has been used in named-entity recognition (Klein et al., 2003), authorship attribution (Kešelj
+et al., 2003), and language identification (Vatanen et al.,
+2010). Our generative model is as follows:
+p(x1:T , y1:T ) =
+
+T
+Y
+t=1
+
+p(xt | x(t−n+1):(t−1) )p(yt | xt ).
+
+(11)
+Optimal performance for such models is typically achieved
+at relatively large values of n, around 5 or 6 (Vatanen et al.,
+2010; Klein et al., 2003). In such cases, exact inference can
+be quite expensive.
+Approximating family (F). Our variational family F
+consists of all unigram models. By itself, F would provide a very poor approximation to p∗ . However, using a
+hierarchical decomposition A will provide a much better
+approximation.
+Hierarchical decomposition (A). The 0th layer of the
+decomposition consists of a single set containing all of X ;
+the 1st layer partitions the space based on xT ; the 2nd layer
+partitions the space based on xT −1 and xT ; and so on. Recalling that Σ is the alphabet, the dth layer of the hierarchical decomposition A can be expressed algebraically as
+ T −d
+	
+Σ
+× {x̂(T −d+1):T } | x̂(T −d+1):T ∈ Σd
+
+(12)
+
+(so we abstract away x1:T −d but represent x(T −d+1):T concretely). A simple example is given in Figure 2.
+Region-specific model (Fit). Suppose the region a is
+defined by a sequence x̂t0 :T as in (12), where we use t0
+in place of T − d + 1 for convenience in the sequel.
+
+1 ˆ
+Then p̂θ is locally a unigram model (equal to Z(θ)
+fθa ) over
+◦
+each region a ; note however that the full distribution p̂θ
+has much richer structure. In particular, since xt0 is fixed
+across a, we can let ψ̂t0 +1 (xt0 +1 ) “depend” on xt0 by setting it equal to q̂2 (xt0 +1 | x̂t0 ), where q̂2 is a bigram model.
+Similarly, we can set ψ̂t0 +2 to q̂3 (xt0 +2 | x̂t0 +1 , x̂t0 ),
+where q̂3 is a trigram model. In general, we will fit lowerorder m-gram models q̂m for 1 ≤ m < n, and use the
+approximation
+
+
+: t ≤ t0
+
+ q̂1 (xt )
+ψ̂t (xt ) =
+q̂t−t0 +1 (xt | x̂t0 :(t−1) ) : t0 < t < t0 + n − 1
+
+
+ p(x | x̂
+) : t≥t +n−1
+t
+
+(t−n+1):(t−1)
+
+0
+
+(14)
+(This is all for the case when yt equals ‘?’; otherwise we
+would have ψ̂t (xt ) = δ(xt = yt ).)
+
+So, by picking an appropriate subset B of A, we can interpolate as necessary between the coarse unigram model and
+exact inference; for instance, if we take the entire T th layer
+(i.e. all the singleton sets) then we recover the exact posterior. Note that this is not necessarily true if we only take the
+nth layer, despite the model being an n-gram model. This
+is because ψ̂T −n+1 (xT −n+1 ) would still be q̂1 (xT −n+1 ),
+rather than p(xT −n+1 | x̂(T −2n+2):(T −n) ).
+More generally, for any element of the dth layer, information is propagated exactly for the final d time steps, while
+the characters are treated completely independently (no
+propagation of information) for the first T − d time steps.
+By optimizing the elements of the hierarchical decomposition, we identify regions where the information to propagate is important, and expend additional computational resources on those regions.
+3.2. Multiple Object Tracking
+Setup. Another filtering problem where exact inference
+is intractable is multiple object tracking. Suppose that we
+have K objects following trajectories through some space,
+and a sensor that can detect the location of an object but
+not which object it is; the object identities must therefore
+be disambiguated using knowledge about their dynamics.
+For simplicity, we assume that only one object is observed
+at a time; this isn’t necessary for the math to work out.
+We can model this as a factorial HMM; there
+are K independently evolving Markov chains
+
+Filtering with Abstract Particles
+
+x1,1:T , x2,1:T , . . . , xK,1:T , together with independent
+hidden variables c1 , . . . , cT ∼ Uniform({1, . . . , K}) such
+that ct specifies which of the objects was observed at time
+t. The observed node, yt , is deterministically equal to
+def
+xct ,t . Assuming xk,t takes values in [S] = {1, . . . , S},
+K
+the alphabet Σ is [S] × [K]; thus |Σ| grows exponentially
+in K.
+Approximating family (F). We will use independent
+Markov chains over each xk,1:T as our variational family F. This avoids the computational difficulties of the
+true posterior, in which the observation potential p(yt |
+x1:K,t , ct ) couples all of the chains.
+Hierarchical decomposition (A). Our hierarchical decomposition A consists of regions where some suffix of the
+ct are specified; that is, the dth level is
+
+
+	
+[K]T −d × {ĉt0 :T } × [S]T K | ĉt0 :T ∈ [K]d , (15)
+with t0 = T − d + 1.
+Region-specific model (Fit). Suppose that our region a
+is defined by a sequence ĉt0 :T as in (15). Our target distridef
+
+bution is p∗ (x1:T,1:K ) = p(x1:T,1:K | y1:T ). We can write
+this as
+"K
+#
+T
+Y
+Y
+∗
+p (x) ∝
+p(xt,k | xt−1,k ) × p(yt | xt,1:K ) .
+t=1
+
+k=1
+
+(16)
+F handles the transition potentials p(xt,k | xt−1,k ) exactly,
+but approximates the observation potential p(yt | xt,1:K )
+QK
+by a factored potential k=1 ψ̂t,k (xt,k ). Our unnormalized
+approximating distribution fˆθa over a◦ is therefore
+#
+"K
+K
+T
+Y
+Y
+Y
+ψ̂t,k (xt,k ) .
+p(xt,k | xt−1,k ) ×
+fˆθ (x) =
+
+4. Algorithms for Optimizing the Partition
+Recall the framework introduced in Section 2; given a hierarchical decomposition A, we choose a partition by searching over subsets {X } ⊆ B ⊆ A, attempting to optimize
+the objective given in (8).
+In this section, we present heuristics for solving this optimization problem. To start, we will assume that A is
+small enough for algorithms that are polynomial-time in
+|A| to be feasible; in this case we present an O(|A| log |A|)
+greedy algorithm. (There is also a potentially more accurate O(|A|dk 2 ) dynamic programming algorithm, described in the supplementary material, which exactly optimizes a surrogate for KL (p∗ k p̂).)
+Then, we will consider the case where |A| is too large for
+even a linear-time algorithm to be feasible, and introduce
+an analogue of beam search; this is the form of the algorithm that we use in our experiments.
+Greedy heuristic. We define the local probability mass
+of each region a to be the unnormalized mass that fˆθa asdef P
+ˆ
+signs to a◦ : mloc (a) =
+x∈a◦ fθa (x). Then we simply
+greedily include the k elements of A where mloc (a) is the
+largest, together with X . This only requires sorting by mloc
+and so has runtime O(|A| log |A|).
+Abstract beam search. In both of the examples in Section 3, the hierarchical decomposition A was exponentially large, so we adopt an incremental refinement strategy:
+write the target distribution p∗ (x) as an unnormalized prodQT
+uct of potentials p∗ (x) ∝ t=1 ψt (x), and let A0 = {X }.
+Then, for t = 1, . . . , T execute the following sequence of
+steps:
+
+a
+
+t=1
+
+k=1
+
+k=1
+
+(17)
+We use the following formula for ψ̂t,1:K , which corresponds to a single forward pass of expectation propagation
+(Minka, 2001):
+
+
+: t ≥ t0 , ĉt = k
+
+ δ(xt,k = yt )
+ψ̂t,k =
+
+1
+
+
+
+
+
+P
+δ(xt,k =yt )+ l6=k pprior (xt,l =yt )
+K
+
+: t ≥ t0 , ĉt 6= k
+: t < t0 .
+
+(18)
+Here pprior (xt,l = yt ) is the marginal probability that xt,l
+is equal to yt under the prior.
+The observations y1:(t0 −1) are incorporated approximately
+via the factored variational approximation, while the observations yt0 :T are incorporated exactly. We therefore obtain
+the ability to exactly incorporate recent information that
+may be most relevant to predicting yT while still benefiting from information further in the past.
+
+1. Refine At−1 to get Ãt .
+2. Prune Ãt down to a subset
+Qt At of size k by solving (8)
+with target distribution s=1 ψs (x).
+For the pruning step, we can use the greedy algorithm discussed above. For the refinement step, we need to make
+sure that Ãt is a hierarchical decomposition S
+whenever At−1
+is. One way to do this is to set Ãt = {X } ∪ a∈At−1 rt (a),
+where rt is a refinement operator satisfying the following
+properties: (i) rt (a) is a partition of a; (ii) if b ( a, then
+every element of rt (b) is contained in an element of rt (a).
+It is also possible to construct refinement operators satisfying weaker conditions, but the conditions above will suffice
+for our purposes.
+Example 4.1. In filtering, where X = ΣT , a natural choice
+for ψt (x) is p(xt | x1:t−1 , yt ), and a natural choice for rt
+is to partition based on the value of xt . This is illustrated
+
+Filtering with Abstract Particles
+???
+r3 (? ? ?)
+???
+
+??a
+
+??b
+
+??c
+
+r3 (?c?)
+?c?
+
+?ca
+
+?cc
+
+?cb
+
+parameters: the model order n and the discount parameter
+λ. We fit these by minimizing perplexity on the development set, and found that n = 8, λ = 0.9 was optimal. In
+the test set, 75% of the characters were randomly replaced
+with a wildcard symbol. The inference task was to recover
+the original value of each of the replaced characters.
+
+r3 (ab?)
+ab?
+
+aba
+
+abb
+
+abc
+
+Figure 3. A hierarchical decomposition A2 (left) together with its
+refinement Ã3 (right). These correspond to the refinement strategy in Example 4.1. Each dotted rectangle indicates the refinements of a particular region in A2 .
+
+Algorithm 1 Abstract beam search algorithm. Inputs are
+the space X , a refinement function r, a fitting method Fit,
+and a beam size k. Generates a sequence of hierarchical
+decompositions, each of which defines a distribution over
+X.
+AbstractBeamSearch(X , r, Fit, k)
+A0 = {X }
+for t = 1 to T do
+S
+Ãt = {X } ∪ a∈At−1 rt (a)
+for a ∈ Ãt do
+Qt
+θa = result of using Fit with target s=1 ψs
+P
+mloc (a) = fˆθa (a) − b∈C (a) fˆθa (b)
+Ãt
+end for
+At = {X } ∪ {k items in Ãt with largest mloc }
+end for
+
+in Figure 3, where a refinement function r3 is used to transition from A2 to Ã3 . It is also the choice of rt used for the
+n-gram task in Section 5.
+Summary. Algorithm 1 depicts the pseudocode for our
+abstract beam search algorithm. The major steps at each
+stage of the algorithm are to refine the particles from step
+t−1, then to update the approximation to p∗ based on a new
+potential ψt , then to compute the local probability mass
+mloc (a) for each region a using (10), and finally to prune
+the hierarchical decomposition down to size k.
+
+5. Experiments
+To test our approach, we performed experiments on both of
+the filtering examples in Section 3.
+For the text reconstruction task, we fit an n-gram model
+for the transitions using interpolated Kneser-Ney (Kneser
+& Ney, 1995) trained on The Complete Works of William
+Shakespeare (about 125, 000 lines in total). The first
+115, 000 lines were used to train the model and each of
+the next 5, 000 lines were used as a development and test
+set, respectively. Interpolated Kneser-Ney has two hyper-
+
+For the multiple object tracking task, we generated synthetic data. Each of K objects labeled 1, . . . , K travel
+around a circle and each second one of the objects (but
+not its label) is observed. The inference task is to recover
+the label of the observed objects (their initial positions are
+known).
+Task characteristics and particle coverage. We now
+study the characteristics of our tasks. Our intuition was
+that the text reconstruction task is “easy” while the objecttracking task is “hard”. This is because, even though there
+are many possible 8-grams, the number of plausible 8grams is not too large, since there are strong correlations
+between one character and the next. In contrast, the number of plausible states for the object-tracking task grows
+exponentially with the number of objects. To validate this
+intuition, we performed a preliminary experiment to determine the effective size of the state space for both tasks.
+We performed beam search under the prior, then plotted
+the amount of probability mass covered by the top k elements of the beam. The point of this was to determine how
+concentrated the probability mass is under the model (a
+beam size of 30, 000 was used in order to capture all highprobability regions). The results are given in Figure 4. For
+the text reconstruction task, most of the mass is covered by
+relatively few elements; in contrast, for the object-tracking
+task, even thousands of elements are insufficient to provide
+coverage.
+Quality of particles. Next, we wanted to test the hypothesis that abstract particles generate a higher quality approximate posterior than concrete particles. We used prediction
+accuracy as our scoring metric (i.e. a score of 1 if the posterior mode for an example is at the truth and 0 otherwise).
+The results of our experiments are given in Figures 5 and 6.
+In Figure 5, we plotted accuracy versus number of particles.
+For the text reconstruction task, abstract beam search outperforms concrete beam search, which slightly outperforms
+SMC. For the object tracking task, abstract beam search
+again outperforms both other methods, but this time concrete beam search performs poorly compared to SMC.
+Measuring computation. We have demonstrated that
+abstract particles are higher quality per-particle, but this
+doesn’t address their additional overhead. This is especially important for the object-tracking task, where each
+abstract particle requires a forward pass of HMM inference
+
+Filtering with Abstract Particles
+
+1.0
+
+1.0
+
+mass covered
+
+0.8
+
+mass covered
+
+0.8
+
+K=5, T=4
+K=5, T=7
+K=5, T=10
+K=10, T=4
+K=10, T=7
+K=10, T=10
+
+0.6
+
+0.6
+
+n=2
+n=3
+n=4
+n=5
+n=6
+n=7
+n=8
+
+0.4
+
+0.2
+
+0.0
+0
+
+1000
+
+2000
+
+3000
+
+number of particles
+
+4000
+
+0.4
+
+0.2
+
+0.0
+0
+
+5000
+
+1000
+
+2000
+
+3000
+
+number of particles
+
+4000
+
+5000
+
+0.2
+
+0.55
+
+0.1
+
+0.50
+
+0.0
+
+0.45
+
+−0.1
+
+0.40
+
+accuracy
+
+accuracy
+
+Figure 4. Left: coverage of the prior distribution over the first n characters for text reconstruction (n-gram prior). Right: coverage of
+the prior distribution over the first T seconds for object-tracking (factorial HMM prior), for T ∈ {4, 7, 10}. Note that some curves
+asymptote to less than 1; this happens when a non-negligible amount of probability mass falls off the beam.
+
+−0.2
+−0.3
+−0.4
+
+−0.6
+0
+
+10
+
+20
+
+30
+
+40
+
+50
+
+60
+
+number of particles
+
+0.30
+abstract (greedy)
+abstract (dp)
+concrete (smc)
+concrete (beam)
+
+0.25
+
+abstract (greedy)
+concrete (smc)
+concrete (beam)
+
+−0.5
+
+0.35
+
+0.20
+0.15
+0
+
+70
+
+5
+
+10
+
+15
+
+20
+
+number of particles
+
+25
+
+30
+
+0.2
+
+0.55
+
+0.1
+
+0.50
+
+0.0
+
+0.45
+
+−0.1
+
+0.40
+
+accuracy
+
+accuracy
+
+Figure 5. Number of particles (k) vs. accuracy, for abstract beam search, beam search, and SMC. Left: text reconstruction with n-gram
+prior, for n = 8; right: object-tracking task for 15 objects with state size 100.
+
+−0.2
+−0.3
+−0.4
+
+−0.6
+0.0
+
+0.5
+
+1.0
+
+1.5
+
+language model queries (billions)
+
+0.30
+abstract (greedy)
+abstract (dp)
+concrete (smc)
+concrete (beam)
+
+0.25
+
+abstract (greedy)
+concrete (smc)
+concrete (beam)
+
+−0.5
+
+0.35
+
+0.20
+2.0
+
+0.15
+0
+
+50
+
+100
+
+runtime (seconds)
+
+150
+
+Figure 6. Computational cost vs. accuracy, for abstract beam search, concrete beam search, and SMC. The cost metric is language model
+queries for the text reconstruction task and runtime for the object-tracking task. Runtime was computed using a single core of a 3.4GHz
+machine with 32GB of RAM. These plots correspond to those of Figure 5.
+
+Filtering with Abstract Particles
+
+and thus requires memory proportional to K · S. We therefore also plotted computational costs against accuracy for
+both models in Figure 6. For the text reconstruction task,
+we used the number of queries to the language model to
+measure cost, as this is a bottleneck in many applications.
+We found that despite abstract beam search requiring more
+queries per particle, the same story holds as before: abstract
+beam search outperforms beam search, which outperforms
+SMC. The exception is when the number of queries is large,
+in which case SMC slightly outperforms our algorithm.
+For the object-tracking task, we used runtime as our metric, and also included a variant of our algorithm where dynamic programming is used in place of the greedy algorithm during the pruning step. Again, the same story as
+before holds: abstract beam search outperforms both concrete beam search and SMC. Furthermore, we found that
+the greedy pruning heuristic was typically comparable to
+or better than pruning with dynamic programming. This
+suggests that we can use the greedy pruner without losing
+accuracy.
+Details of SMC sampler. We provide here the details of
+our (concrete) SMC implementation to provide more context to our comparisons. In both tasks, we used p(xt+1 |
+xt , yt+1 ) as the proposal distribution. We performed resampling after each step since this was not a performance
+bottleneck. For the object-tracking task, one major issue
+was particle collapse, wherein all of the particles received
+zero mass (due to being incompatible with the observations). When this happened, we “re-initialized” the particles by sampling from the prior marginal and then randomly changing the location of one of the objects for each
+particle to match the current observation. We found that
+this heuristic substantially improved the performance of
+SMC on the object-tracking task.
+
+6. Discussion
+We have presented a new “abstract” filtering algorithm
+based on hierarchical decompositions, which combines the
+flexibility of particle-based algorithms (e.g., SMC) with the
+compactness of parametrized approximations (e.g., variational inference). Broadly speaking, our approach shares
+similar intuitions as many other coarse-to-fine methods
+such as decision and density estimation trees (Ram & Gray,
+2011), state-split grammars (Petrov et al., 2006), structured
+prediction cascades (Weiss & Taskar, 2010), and clustering
+variables in Markov logic (Kiddon & Domingos, 2011).
+The work most closely related to ours is the split variational
+inference framework of (Bouchard & Zoeter, 2009). Split
+variational inference uses a similar decomposition to that
+given in Section 2.1, but uses variational Bayes to fit the parameters. They also use soft partitions (non-negative func-
+
+tions summing to 1) given by a continuously parameterized
+family, allowing numerical optimization of the partitions in
+contrast to our combinatorial approach in Section 2.2. In
+this work we also make use of a beam search heuristic in
+conjunction with variational approximation, which allows
+us to scale our approach to difficult combinatorial inference
+problems. It would be interesting to determine whether the
+idea of smooth partitions could be used to extend our ideas
+to continuous state spaces.
+Another line of related work is logical particle filtering
+(Zettlemoyer et al., 2007; Hajishirzi & Amir, 2012), which
+performs sequential Monte Carlo over first order predicates. This approach shares our goal of obtaining compact
+representations for inference, but focuses on obtaining an
+exact representation of the posterior within each region,
+and also does not use a collection of regions that covers
+the space. Logical predicates are a way to specify rich but
+flexible hierarchical decompositions, and so would be interesting to apply in our context.
+Other related work includes quasi-Monte Carlo, which
+uses deterministic sample placement to speed up Markov
+chain convergence (Niederreiter, 1992; Caflisch, 1998);
+and various hierarchical Bayesian nonparametric techniques (Heller & Ghahramani, 2005; Gramacy & Lee,
+2008; Fox & Dunson, 2012), which often use variational
+techniques to infer a hierarchy.
+Our work can also be viewed as performing a form of variational inference with feature induction in log-linear models (Pietra et al., 1997; McCallum, 2003), where base features are conjoined with flexible features corresponding to
+regions of the input space. This view strengthens the connection between SMC and variational inference, and we
+believe this bridge will allow us to develop new families of
+inference algorithms.
+Acknowledgments Thanks to the anonymous reviewers,
+whose comments substantially improved the paper. The
+first author was supported by the Hertz Foundation.
+
+References
+Bouchard, Guillaume and Zoeter, Onno. Split variational inference. In Proceedings of the 26th Annual International Conference on Machine Learning, pp. 57–64. ACM, 2009.
+Bouchard-Côté, Alexandre, Sankararaman, Sriram, and Jordan,
+Michael I. Phylogenetic inference via sequential monte carlo.
+Systematic biology, 61(4):579–593, 2012.
+Caflisch, Russel E. Monte carlo and quasi-monte carlo methods.
+Acta numerica, 1998:1–49, 1998.
+Cappé, Olivier, Godsill, Simon J, and Moulines, Eric. An
+overview of existing methods and recent advances in sequential
+Monte Carlo. Proceedings of the IEEE, 95(5):899–924, 2007.
+
+Filtering with Abstract Particles
+Carreras, Xavier and Collins, Michael. Non-projective parsing
+for statistical machine translation. In Proceedings of the 2009
+Conference on Empirical Methods in Natural Language Processing, pp. 200–209. Association for Computational Linguistics, 2009.
+Doucet, Arnaud and Johansen, Adam M. A tutorial on particle filtering and smoothing: Fifteen years later. In Oxford Handbook
+of Nonlinear Filtering. Citeseer, 2011.
+Fox, Emily B and Dunson, David B. Multiresolution gaussian
+processes. arXiv preprint arXiv:1209.0833, 2012.
+Gilks, Walter R and Berzuini, Carlo. Following a moving target—
+Monte Carlo inference for dynamic Bayesian models. Journal
+of the Royal Statistical Society: Series B (Statistical Methodology), 63(1):127–146, 2001.
+Görür, Dilan and Teh, Yee W. An efficient sequential monte carlo
+algorithm for coalescent clustering. In Advances in Neural Information Processing Systems, pp. 521–528, 2008.
+Gramacy, Robert B and Lee, Herbert KH. Bayesian treed gaussian process models with an application to computer modeling. Journal of the American Statistical Association, 103(483),
+2008.
+Hajishirzi, Hannaneh and Amir, Eyal. Sampling first order logical
+particles. arXiv preprint arXiv:1206.3264, 2012.
+Heller, Katherine A and Ghahramani, Zoubin. Bayesian hierarchical clustering. In Proceedings of the 22nd international
+conference on Machine learning, pp. 297–304. ACM, 2005.
+Jordan, Michael I, Ghahramani, Zoubin, Jaakkola, Tommi S, and
+Saul, Lawrence K. An introduction to variational methods for
+graphical models. Machine learning, 37(2):183–233, 1999.
+Kešelj, Vlado, Peng, Fuchun, Cercone, Nick, and Thomas,
+Calvin. N-gram-based author profiles for authorship attribution. In Proceedings of the conference pacific association for
+computational linguistics, PACLING, volume 3, pp. 255–264,
+2003.
+Kiddon, C. and Domingos, P. Coarse-to-fine inference and learning for first-order probabilistic models. In Association for the
+Advancement of Artificial Intelligence (AAAI), 2011.
+Klein, Dan, Smarr, Joseph, Nguyen, Huy, and Manning, Christopher D. Named entity recognition with character-level models.
+In Proceedings of the seventh conference on Natural language
+learning at HLT-NAACL 2003-Volume 4, pp. 180–183. Association for Computational Linguistics, 2003.
+Kneser, Reinhard and Ney, Hermann. Improved backing-off for
+m-gram language modeling. In Acoustics, Speech, and Signal
+Processing, 1995. ICASSP-95., 1995 International Conference
+on, volume 1, pp. 181–184. IEEE, 1995.
+Liang, P., Jordan, M. I., and Klein, D. Learning dependencybased compositional semantics. In Association for Computational Linguistics, pp. 590–599, 2011.
+McCallum, A. Efficiently inducing features of conditional random fields. In Uncertainty in Artificial Intelligence (UAI), pp.
+403–410, 2003.
+
+Minka, Thomas P. Expectation propagation for approximate
+Bayesian inference. In Proceedings of the Seventeenth conference on Uncertainty in artificial intelligence, pp. 362–369.
+Morgan Kaufmann Publishers Inc., 2001.
+Niederreiter, Harald. Quasi-Monte Carlo Methods. Wiley Online
+Library, 1992.
+Pal, Chris, Sutton, Charles, and McCallum, Andrew. Sparse
+forward-backward using minimum divergence beams for fast
+training of conditional random fields. In IEEE International
+Conference on Acoustics, Speech and Signal Processing, volume 5, pp. V–V. IEEE, 2006.
+Petrov, S., Barrett, L., Thibaux, R., and Klein, D. Learning accurate, compact, and interpretable tree annotation. In International Conference on Computational Linguistics and Association for Computational Linguistics (COLING/ACL), pp. 433–
+440, 2006.
+Pietra, S. D., Pietra, V. D., and Lafferty, J. Inducing features
+of random fields. IEEE Transactions on Pattern Analysis and
+Machine Intelligence, 19(4):380–393, 1997.
+Quirk, Chris and Moore, R. Faster beam-search decoding for
+phrasal statistical machine translation. Machine Translation
+Summit XI, 2007.
+Ram, P. and Gray, A. G. Density estimation trees. In International
+Conference on Knowledge Discovery and Data Mining (KDD),
+pp. 627–635, 2011.
+Vatanen, Tommi, Väyrynen, Jaakko J, and Virpioja, Sami. Language identification of short text segments with n-gram models. In LREC, 2010.
+Weiss, D. and Taskar, B. Structured prediction cascades. In Artificial Intelligence and Statistics (AISTATS), 2010.
+Zettlemoyer, Luke S, Pasula, Hanna M, and Kaelbling,
+Leslie Pack. Logical particle filtering. In Probabilistic, Logical
+and Relational Learning-A Further Synthesis, 2007.
+
+

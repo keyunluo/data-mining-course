@@ -1,0 +1,1019 @@
+Alpha-Beta Divergences Discover Micro and Macro Structures in Data
+
+Karthik Narayan
+University of California, Berkeley, CA, 94720, USA
+
+KARTHIK . NARAYAN @ BERKELEY. EDU
+
+Ali Punjani
+University of Toronto, ON M5S, CANADA
+
+ALIPUNJANI @ CS . TORONTO . EDU
+
+Pieter Abbeel
+University of California, Berkeley, CA, 94720, USA
+
+Abstract
+Although recent work in non-linear dimensionality reduction investigates multiple choices of
+divergence measure during optimization (Yang
+et al., 2013; Bunte et al., 2012), little work discusses the direct effects that divergence measures
+have on visualization. We study this relationship,
+theoretically and through an empirical analysis
+over 10 datasets. Our works shows how the α and
+β parameters of the generalized alpha-beta divergence can be chosen to discover hidden macrostructures (categories, e.g. birds) or microstructures (fine-grained classes, e.g. toucans).
+Our method, which generalizes t-SNE (van der
+Maaten, 2008), allows us to discover such structure without extensive grid searches over (α, β)
+due to our theoretical analysis: such structure is
+apparent with particular choices of (α, β) that
+generalize across datasets. We also discuss efficient parallel CPU and GPU schemes which are
+non-trivial due to the tree-structures employed in
+optimization and the large datasets that do not
+fully fit into GPU memory. Our method runs 20x
+faster than the fastest published code (Vladymyrov & Carreira-Perpinán, 2014). We conclude
+with detailed case studies on the following very
+large datasets: ILSVRC 2012, a standard computer vision dataset with 1.2M images; SUSY, a
+particle physics dataset with 5M instances; and
+HIGGS, another particle physics dataset with
+11M instances. This represents the largest published visualization attained by SNE methods.
+We have open-sourced our visualization code:
+http://rll.berkeley.edu/absne/.
+Proceedings of the 32 nd International Conference on Machine
+Learning, Lille, France, 2015. JMLR: W&CP volume 37. Copyright 2015 by the author(s).
+
+PABBEEL @ CS . BERKELEY. EDU
+
+ILSVRC, Test (50K)!
+
+Birds within ILSVRC 2012, Test
+
+Flamingos
+
+Chickens
+
+Macaw parrots
+
+α = 0.8, λ = 1.0!
+Time: 10.4 s
+
+Toucans
+
+Birds swimming
+
+Hummingbirds
+
+Birds in the sky
+
+Perched birds!
+transitioning into!
+swinging monkeys
+
+Figure 1. Discovering micro-structures using the settings α <
+1, λ = 1, prescribed by the intuition in (Section 4). Using
+Caffe fc7 features (Jia et al., 2014), we discover structures in the
+ILSVRC 2012 test set, e.g., classes of birds, and visual transitions,
+e.g., perched birds transitioning smoothly to swinging monkeys.
+
+1. Introduction and Related Work
+Data visualization techniques aim to generate a lowdimensional representation of a dataset which data scientists and researchers can inspect to gain insight into the
+structure and complexity of the data. Vital to data-driven
+decision making, visualizations graphically represent latent structure and meaning in the dataset. Many recent
+approaches produce low-dimensional embeddings of data
+
+Alpha-Beta Divergences Discover Micro and Macro Structures in Data
+
+instances, which we can view via scatter plots (CarreiraPerpinan, 2010; Hinton & Roweis, 2003; van der Maaten,
+2008; Lawrence, 2011; Bunte et al., 2012; Vladymyrov
+& Carreira-Perpinán, 2014; Yang et al., 2014). Particularly, recent variants on stochastic neighborhood embedding (SNE) have become popular (Hinton & Roweis,
+2003); the recently published t-SNE (t-distributed stochastic neighbor embedding) is particularly popular (van der
+Maaten, 2008). At a high level, SNEs (i) capture neighborhood information from pairs of points in the original dataset
+with m data instances into an m × m data similarity matrix, and (ii) learn a low-dimensional embedding of those
+points whose similarity matrix closely matches the original. Computing an embedding which matches the structure
+of the original data involves minimizing a divergence measure, e.g., KL-divergence, between the data and embedding
+similarity matrices. Indeed, most methods employ the KLdivergence (Hinton & Roweis, 2003; van der Maaten, 2008;
+2013; Yang et al., 2009).
+Unfortunately, most proposed methods either (1) are
+hyperparameter-free, giving researchers little room to directly communicate what types of patterns they are searching for in the data, or (2) have non-intuitive hyperparameters that require expensive, tedious grid searches.
+Contributions. We propose a method featuring 2 hyperparameters (α, β). Our theoretical analysis predicts that (1)
+setting α + β < 1 reveals macro-structures (categories,
+e.g., dogs), (2) α < 1 reveals micro-structures (fine-grained
+classes, e.g. dalmations), and (3) α + β > 1 reveals instances close to class boundaries (e.g., digits that are easily
+confused as 1 vs 7 or 4 vs 9) (Section 4). The meaning of
+the parameters makes data exploration intuitive, and can
+obviate the need for extensive grid searches over hyperparameter settings. We emphasize that these settings are
+dataset-agnostic, empirically substantiated on 10 datasets
+covering a wide swath of sizes (100 – 11M instances)
+drawn from a broad set of domains (computer vision, biology, particle physics). Our method allows for fast parallel CPU/GPU implementations; our GPU implementation
+runs 20× faster than the state of the art SNE-based implementations (Section 5).
+Our theoretical analysis additionally answers a question
+recently posed in (Bunte et al., 2012): under what circumstances should we choose a particular divergence to
+minimize in the SNE framework, and what consequences
+does this choice have? While minimizing divergences
+other than the KL-divergence in the SNE objective has
+recently been explored computationally, these works do
+not answer this question. Yang et. al. demonstrate
+that several popular SNE variants arise from varying the
+divergence that is being minimized (Yang et al., 2013).
+Yang et. al. show that a novel optimization equivalence
+
+theorem between α-divergences, β-divergences, and γdivergences yields a class of methods that build on the best
+aspects of graph layout and vectorial embedding. Bunte
+et. al. apply t-SNE variants using several Bregman divergences, f -divergences, and γ-divergences to two small
+datasets (COIL-20 (Nene et al., 1996) and the Olivetti face
+dataset (Samaria & Harter, 1994)) (Bunte et al., 2012). Although Bunte et. al. acknowledge that varying divergences
+produce different visualizations, they admit that they are
+unable to deliver an overall recipe for choosing a particular
+divergence in a given task. To the best of our knowledge,
+this paper is the first to provide such a recipe.
+Past work primarily explores minimizing purely a single
+divergence in the SNE framework. We discover that minimizing the generalized alpha-beta divergence (a.k.a. ABdivergence) (Cichocki et al., 2011), which blends the αand β- divergences, is crucial to discovering important micro and macro structures in the data (Section 4).
+
+2. Background: t-distributed Stochastic
+Neighborhood Embedding
+Given a dataset D = {x1 , x2 , · · · , xm }, with data instances xi ∈ Rn , t-distributed Stochastic Neighbor Embedding (t-SNE) (van der Maaten, 2008) aims to learn an
+embedding E = {y1 , y2 , · · · , ym }, where yi ∈ Rd (usually, d = 2 or 3). To achieve this goal, t-SNE defines
+exp(−kxi − xj k2 /2σi2 )
+Pj|i = P
+2 ,
+2
+ik exp(−kxi − xk k /2σi )
+
+(1)
+
+Pij = (Pi|j + Pj|i )/2m,
+
+(2)
+2 −1
+
+Qij = P
+
+(1 + kyi − yj k )
+2 −1
+k6=l (1 + kyk − yl k )
+
+(3)
+
+where additionally, Pi|i = Qii = 0. Determining the
+individual variances σi2 involves running a binary search
+such that the perplexity (2 raised to the entropy) of the conditional P·|j equals k, a free parameter (van der Maaten,
+2013). The embedding employs a Student-t kernel rather
+than a Gaussian to prevent embedding points from crowding near the center of the visualization map without clear
+clustering, a.k.a. the “crowding problem.” t-SNE prescribes learning the embedding vectors yi by running gradient descent to minimize
+the resulting non-convex KLP
+divergence, J (E) = i6=j Pij log Pij /Qij :
+X
+∂J
+=4
+Z(yi − yj )(Pij Qij − Q2ij )
+(4)
+∂yi
+i6=j
+X
+X
+=
+4Pij Qij Z(yi − yj ) −
+4Q2ij Z(yi − yj )
+|
+{z
+}
+{z
+}
+|
+i6=j
+i6=j
+Force 1
+
+Force 2
+
+(5)
+where Z = k6=l (1 + kyk − yl k2 )−1 . Naively computing
+this gradient takes O(m2 ) time, making visualizations of
+P
+
+Alpha-Beta Divergences Discover Micro and Macro Structures in Data
+
+greater than 50K data vectors prohibitively expensive.
+
+4
+
+Barnes-Hut-SNE (BHSNE) (van der Maaten, 2013) approximates the t-SNE’s gradient in sub-quadratic time,
+yielding nearly identical visualizations to t-SNE while allowing for visualizations of millions of data vectors in a
+few hours. To this end, BHSNE only retains Pij where
+data vector xj is one of xi ’s closest 3k neighbors, and
+sets the rest to 0. In practice, BHSNE constructs a vantage point tree to execute all nearest neighbor searches
+in O(kmn log m) time (van der Maaten, 2013; Yianilos,
+1993). BHSNE computes Force 1 in O(km) time by
+adding only terms involving positive Pij and computing
+each Qij Z = (1 + kyi − yj k2 )−1 in constant time;
+we ignore the dimensionality of the yi , as BHSNE typically seeks a 2D or 3D embedding. BHSNE employs a
+Barnes-Hut approximation algorithm to compute Force 2 in
+O(m log m) time: given yi , yj , and yk where kyi − yj k ≈
+kyi − yk k  kyj − yk k, the contributions of yj and yk to
+Force 2 will be roughly equal. The Barnes-Hut algorithm
+exploits this in computing the sum of all contributions to
+an embedding vector yi by (i) constructing a quadtree over
+{yi }, (ii) traversing the quadtree via a depth-first-search,
+and (3) at every quadtree node, deciding whether the corresponding cell can summarize the gradient contributions for
+all points in that cell. In computing Force 2 for a point
+yi , if a cell is sufficiently small and far away from yi ,
+then Q2ij Z(yi − yj ) will be similar for all points yj in
+that cell. As such, BHSNE approximates the total contribution as Ncell · Q2ij Z(yi − yj ) where Ncell denotes
+the total number of points in the cell. To compute Z efficiently, BHSNE (i)P
+runs a separate Barnes-Hut procedure
+to compute a zi = j Kq (kyi − yj k2 ) for each embedding point i and (ii) sums over the zi ’s to yield Z. BHSNE then uses this value of Z in the Barnes-Hut procedure
+to compute Force 2. BHSNE decides whether a cell can
+summarize the points that it contains by checking whether
+kyi − ycell k2 /rcell < θ, where rcell is the length of the
+cell diagonal, ycell is the cell’s center of mass, and θ is a
+threshold that trades off speed and accuracy (larger values
+lead to poorer approximations).
+
+3
+
+3. Alpha-Beta Stochastic Neighborhood
+Embedding
+Alpha-Beta Stochastic Neighborhood Embedding (ABSNE), our proposed method, differs from t-SNE in that it
+minimizes the alpha-beta divergence (AB-divergence). We
+αβ
+minimize the cost JABSNE (E; α, β) = DAB
+(PkQ), computed as
+
+Variations on ln −
+1
+
+i6=j
+
+(6)
+
+(rij)
+
+α = 0. 5
+α =0
+
+1
+
+−
+
+λ
+
+Qij
+
+0
+
+−
+
+3
+
+1
+
+−2
+1
+
+2
+
+rij
+
+3
+
+−
+
+λ
+ij
+
+1
+
+4
+
+5
+
+λ =0
+
+1
+
+2
+
+−1
+−3
+0
+
+Variations on Q
+
+4
+
+α = 1. 0
+
+2
+ln1 α(rij)
+
+5
+
+α = 2. 0
+α = 1. 5
+
+0
+0.0
+
+λ = 0. 5
+
+λ =1
+λ = 1. 5
+λ =2
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+1.0
+
+Qij
+
+Figure 2. Functions in the (left) Tsallis deformed q-logarithm and
+(right) power families. Dotted lines in the left figure denote absolute values of functions. | ln1−α (rij )|.
+
+where α ∈ R \ {0}, β ∈ R are hyperparameters. It is
+possible to set β = 0 or α + β = 0 by extending the ABdivergence via continuity, e.g., by applying l’Hôpital’s rule
+(see (Cichocki et al., 2011)); this does not affect the form
+of the gradient we present below (see Supplementary Materials). We use the definitions of Pij and Qij employed
+in BHSNE (see Section 2). We minimize the ABSNE objective via gradient descent. The gradient, ∂JABSNE /∂yi ,
+is computed as
+X
+β−1
+α+β−1
+4ZQ2ij (yi − yj )(Pα
+− Qij
+− J1 + J2 )
+ij Qij
+| {z } |
+{z
+}
+j
+Force 1
+
+Force 2
+
+(7)
+P
+P
+β
+α+β
+α
+where J1 =
+k6=l Pkl Qkl and J2 =
+k6=l Qkl . We
+compute ABSNE gradients in O(m log m + mk) time using BHSNE’s computational tricks: we can compute Force
+1 and J1 in O(km) time using P’s sparsity and Force 2
+via a Barnes-Hut algorithm similar to the one described in
+Section 2 after pre-computing Z and J2 using a separate
+Barnes-Hut procedure.
+
+4. How α and β Discover Hidden Structures
+The AB-divergence offers two hyperparameters, α and β,
+which have strong intuitive meaning. This conveniently removes the need for tedious grid searches. Defining λ =
+α + β, we inspect the updates taken during learning:
+αβ
+∂DAB
+(PkQ) X ∂Qij λ−1
+=
+Q
+ln1−α
+∆yi = −
+∂yi
+∂yi ij
+j
+
+
+
+Pij
+Qij
+
+
+
+(8)
+=
+
+X ∂Qij
+j
+
+
+
+α
+β
+1 X
+β
+α+β
+α+β
+−Pα
+Q
++
+P
++
+Q
+,
+ij ij
+αβ
+α + β ij
+α + β ij
+
+α
+
+∂yi
+
+Qλ−1
+ln1−α (rij )
+ij
+
+(9)
+
+where lnq (x) is the Tsallis deformed q-logarithm1 and
+rij = Pij /Qij . Our theoretical analysis considers how
+1
+
+lnq (x) ≡ (x1−q − 1)/(1 − q) if q 6= 1, else lnq (x) = ln x.
+
+Alpha-Beta Divergences Discover Micro and Macro Structures in Data
+
+Figure 3. Empirical evidence of the theory in Section 4: (col. 2) λ < 1 reveals macro-structures, (col. 4) α < 1 reveals micro-structures,
+and (col. 3) λ > 1 reveals instances close to class boundaries (Section 4). Further evidence on larger datasets (1M+ instances) is
+provided in Section 6. During data analysis, if supervision is not provided, column 2 may help in identifying classes. If supervision is
+provided, the right three plots can help understand “easily confused” (boundary) instances and instances within fine-grained categories.
+For reference, the left-most column displays t-SNE’s visualization, i.e., in the limit (α, λ) → (1, 1) (this derivation is non-trivial due to
+the limits and presented in the Supplementary Materials).
+
+each force fij = ∂Qij /∂yi · Qλ−1
+ln1−α (rij ) affects
+ij
+∆yi . The term ∂Qij /∂yi is a vector parallel to the ray
+k(yi − yj ). Since the t-distribution monotonically decreases for positive arguments, we must have k < 0,
+i.e., fij points towards yj , implying that fij attracts yi towards yj if Qλ−1
+ln1−α (rij ) > 0 ⇒ rij > 1 (see Figij
+ure 2) and repulses yi from yj if rij < 1. Specifically,
+non-neighboring point pairs in the original dataset D with
+Pij = 0 ⇒ rij = 0 < 1 repel each other.
+We interleave theoretical intuition with empirical verification on two datasets (more results presented in Section 6): MNIST (LeCun & Cortes, 1998), a dataset of 70K
+28 × 28 grayscale images depicting handwritten digits 0-9
+and CIFAR-10 (Krizhevsky & Hinton, 2009), a dataset of
+32 × 32 color images depicting 10 distinct object classes.
+We use the raw pixel data as MNIST’s feature representation. For CIFAR-10, we train a 3-layer convolutional neural network with the CUDACONVNET (Krizhevsky, 2011)
+architecture using Caffe (Jia et al., 2014) and employ only
+third layer convolutional features; we visualize the test set
+to avoid having training labels directly influence the embedding. Applying PCA to center and reduce each dataset
+to 100 dimensions, we ran ABSNE under various (α, λ)
+for both datasets with perplexity 30 (Figure 3). We initialize all yi in experiments with the same random seed and
+run exactly 1000 iterations of gradient descent per configuration (see Section 5 for optimization details), so structural
+details across a row should be comparable; the first column
+(α = 1.0, λ = 1.0) denotes vanilla t-SNE.
+Intuition Behind α. To study α, let us fix λ = 1. Consider a cluster of embedding points consisting of a few
+sub-clusters. After convergence, the sub-clusters will be
+
+placed together in such a way that the attractive and repulsive forces are balanced. According to Figure 2a., decreasing α below 1 emphasizes the magnitude of (repulsive) forces with rij < 1 relative to (attractive) forces with
+rij > 1. The emphasized repulsive forces and diminished
+attractive forces should cause sub-clusters to be placed further apart, implying that ABSNE should tend to produce
+lots of small, fine-grained clusters for α < 1. Because
+rij < 1 ⇒ Qij > Pij implies that points yi , yj are
+closer than they are supposed to be, the fij operating on
+close-proximity points yi , yj should be emphasized more
+than those of far away points, implying that setting α < 1
+should lead to fewer global changes in visualization structure in comparison with t-SNE (α = λ = 1), but lots of
+change in local structure. Similarly, setting α > 1 should
+lead to fewer, larger clusters with more global visualization changes. Inspecting columns 4 and 5 in Figure 3, we
+notice that varying α yields the anticipated effect of local
+clustering: in both CIFAR-10 and MNIST, individual clusters are more tight and fine-grained for α < 1 and loose for
+α > 1. As predicted, little global restructuring takes place
+for α < 1 in comparison with α > 1. Variations on α could
+be useful to a user interested in inspecting the relationships
+between sub-clusters arising within larger clusters of the
+data at various scales.
+Intuition Behind λ. To study λ, let us fix α = 1. According to Figure 2b., setting λ < 1 emphasizes fij with low
+Qij (distant yi , yj ), over fij with high Qij (near yi , yj ).
+So, changing λ should primarily affect global over local
+structure. Thus, λ < 1 increases the magnitudes of forces
+on distant, repulsive point pairs, exaggerating repulsion of
+non-neighboring point pairs in the original dataset, which
+
+Alpha-Beta Divergences Discover Micro and Macro Structures in Data
+
+we conjecture leads to greater cluster separation while setting λ > 1 leads to low separation. Inspecting column 2,
+setting λ < 1 yields the anticipated effect of greater cluster
+separation: examining MNIST for λ = 0.95 < 1, ABSNE
+places each cluster of points further away from the others.
+Similarly, the purple and brown clusters are more separated
+from the other clusters with CIFAR-10. In column 3, setting λ = 1.05 > 1 yields a single large glob of points containing smaller globs corresponding to the same class, as
+expected. This setting could be useful if the user wishes to
+inspect “boundary” cases between embedding points with
+known classes.
+The Importance of Blending α and β. While past work
+has individually applied the α- and β- divergences to the
+SNE problem (Yang et al., 2014; Bunte et al., 2012; Yang
+et al., 2013), the heavy dependence of the theory on λ =
+α + β shows that incorporating both divergences in the objective is crucial to discovering important micro and macro
+structures in data.
+
+5. Parallel CPU and GPU Implementations
+While many optimization methods exist for embeddings,
+e.g. spectral descent (Memisevic & Hinton, 2005), partial Hessian strategies (Vladymyrov & Carreira-Perpinan,
+2012), fast multipole methods with L-BGFGS (Vladymyrov & Carreira-Perpinán, 2014), we found that warmstarted gradient descent (van der Maaten, 2013) obtained
+strong results: we (1) initialize all yi from a 2D isotropic
+Gaussian with variance 10−4 and (2) update each yi via
+gradient descent (GD) with momentum (step size 200). For
+the first 250 descent iterations, we use momentum 0.5 and
+multiply all Pij values by a user-defined constant α = 12.
+For the last 750 iterations, we use momentum 0.8. We use
+a per-parameter adaptive learning rate scheme to speed up
+GD convergence (Jacobs, 1988), otherwise known to be
+very slow and sensitive to local optima in practice (Vladymyrov & Carreira-Perpinan, 2012). Concrete reasonings behind these choices can be found in (van der Maaten,
+2008; 2013). We now detail how to compute gradients and
+update the yi on the GPU, particularly using the NVIDIA
+compute unified device architecture (CUDA).
+5.1. Parallel GPU Gradients
+We store the yi in two arrays on the GPU, one array per
+dimension, to take advantage of cache locality, as done
+in (Burtscher & Pingali, 2011). We store the (sparse) affinity matrix P as a list of triplets. We take advantage of
+P’s symmetry to minimize the number of memory reads
+by storing only the upper half of the matrix. Our implementation consists of 13 kernels, which we now discuss.
+Kernels 1 – 5: Partially Computing Force 2. Recall from
+Section 3 that the ABSNE gradient consists of two types
+of forces: Force 1 and Force 2. We first compute Force 2,
+
+since it will yield structures useful in computing Force 1.
+Discussed in Section 2, computing Force 2 involves building a quadtree over the yi . To do this, we (Kernel 1) construct a bounding box over the yi , (Kernel 2) hierarchically subdivide the bounding box until each cell contains at
+most a single yi , and (Kernel 3) compute the center of mass
+and cumulative mass per cell. Next, we (Kernel 4) perform
+an in-order traversal of the quadtree, which approximately
+places nearby cells next to each other in the traversal; this is
+crucial in accelerating Kernel 5, which actually computes
+the forces on the individual yi .
+To understand why the in-order traversal is necessary, recall that in CUDA, all threads within a single warp will execute in lockstep on entering a conditional statement only
+if the conditional evaluation is identical for all threads;
+otherwise, threads within the warp belonging to different
+branches will execute serially, often severely affecting performance. The in-order traversal substantially reduces such
+within-warp thread divergence in Kernel 5, leading to an
+order of magnitude savings in run-time. For more details,
+see (Burtscher & Pingali, 2011), which we follow closely
+in implementing these five kernels.
+Jointly, this set of kernels computes and
+P
+P stores2 g1 =
+2
+4ZQ
+(y
+−
+y
+)
+and
+g
+=
+i
+j
+2
+ij
+j
+j 4ZQij (yi −
+α+β−1
+yj )Qij
+in GPU memory. We incorporate the contributions of J1 and J2 in later kernels.
+
+Kernel 6, 7: Computing J2 and Z. We evaluate J2 =
+P
+P
+(i)
+α+β
+α+β
+by (1) computing a J2 = k6=i Qki
+per
+k6=l Qkl
+P (i)
+yi and (2) executing a reduction to compute J2 = i J2 .
+(i)
+We efficiently perform (1) by computing auxiliary J2
+variables per yi in executing Kernel 5. We perform the
+reduction through the open-source Thrust library (Bell &
+Hoberock, 2011). We compute Z similarly.
+Kernel 8, 9: Computing J1 , Partially Computing Force
+1. Rather than computing Force 1 by iterating over each
+yi , we iterate through the positive entries of P, whose contributions we add to the prescribed yi (Kernel 8). To parallelize computation, we split the list of triplets (i, j, Pij )
+across enough blocks to allow for 1024 threads per block;
+each thread processes a single triplet and updates points
+i and j. One caveat of this approach is that these updates must be made atomically; e.g., parallel updates for
+tuples (2, 3) and (3, 5) without atomic updates would yield
+a racePcondition for y3 . Kernel 8 computes and stores
+β−1
+g3 = j 4ZQ2ij (yi − yj )Pα
+in GPU memory.
+ij Qij
+Computing J1 entails iterating through the positive entries
+of P, computing the associated summands, and executing a
+reduce operation (Kernel 9). With large datasets, the GPU
+cannot fully store P in memory; so, we swap batches of P
+between CPU and GPU memory and apply Kernels 8 and
+
+Alpha-Beta Divergences Discover Micro and Macro Structures in Data
+
+104
+
+Visualizer Run Times, 1000 Iterations
+
+103
+
+Time (s)
+
+102
+
+101
+
+t-SNE, CPU Naive
+t-SNE, CPU Barnes-Hut Parallel (ours)
+t-SNE, CPU Barnes-Hut Serial
+s-SNE, CPU Fast Multipole Method
+t-SNE, GPU Barnes-Hut (ours)
+
+100
+
+10-1
+102
+
+103
+
+104
+105
+Number of Instances
+
+106
+
+107
+
+Figure 4. Best viewed in color. Timing experiments comparing CPU - NAIVE (van der Maaten, 2008), FMM (Vladymyrov &
+Carreira-Perpinán, 2014), CPU - BH (van der Maaten, 2013) with
+our CPU - PAR - BH and GPU - BH implementations. Error bars denote 2 standard deviations of time across 30 experiments.
+
+9 per batch, accumulating only J1 and g3 in GPU memory.
+Kernels 10 – 12: Updating yi . Kernel 10 executes the gradient updates per yi . We compute the gradient by modifying each yi according to the entry in g = g1 ∗ (J2 − J1 ) −
+g2 + g3 , taking into account momentum and the adaptive
+learning rates described in Section 5.
+5.2. Parallel CPU Gradients
+We use a very similar computation flow in computing parallel CPU gradients. In computing Force 2 on the CPU,
+we build the quadtree serially, as this step typically takes
+less than 10% of the full training time. After constructing
+the quadtree, we similarly partially compute Force 2 using
+OpenMP to parallelize computations over each yi . We then
+compute Z and J2 via OpenMP’s parallel reduce operation,
+using similar auxiliary variables as in the GPU implementation. We compute Force 1 and J1 serially; in practice,
+we found that using atomic additions in parallel ran slower.
+We then similarly update the yi in parallel.
+5.3. Performance Experiments
+All experiments in this paper employ a machine with 2x
+Intel Xeon X5570 CPUs (8 cores total, 2.93 GHz), 64GB
+memory, and an NVIDIA Tesla K40c graphics card. Corroborated by (van der Maaten, 2013), fixing θ = 0.25 offers a good tradeoff between speed and accuracy. We explore the efficiency and scalability of (1) CPU - NAIVE: a
+naive CPU implementation (van der Maaten, 2008), (2)
+CPU - BH : a serial Barnes-Hut CPU implementation (van der
+Maaten, 2013), (3) FMM: a fast multipole method, a
+scheme with linear gradient time complexity, the fastest
+published code available online) (Vladymyrov & Carreira-
+
+Perpinán, 2014), (4) CPU - PAR - BH: our parallel BarnesHut CPU implementation, and (5) GPU - BH: our BarnesHut GPU implementation. All implementations run t-SNE
+by setting α = 1, β = 0. FMM runs s-SNE, since code
+for t-SNE was not available; timing comparisons are still
+valid, since the number of operations involved in computing s-SNE and t-SNE gradients are similar. In our experiments, we sample subsets of the HIGGS dataset (Baldi
+et al., 2014), a large dataset consisting of 11M instances
+and 28 features (see Section 6 for dataset details and visualizations); we use a perplexity of 20. Figure 4 summarizes
+our findings in a log-log plot. As expected, CPU - NAIVE
+timings have a slope of 2 while CPU - BH, GPU - BH, and FMM
+timings have slopes close to 1, indicating the expected theoretical complexities.
+Barnes-Hut CPU Parallel On datasets with more than
+50K instances, CPU - PAR - BH yields speedups of more
+than 3.5x over CPU - BH, approaching about half of linear
+speedup; we do not attain full linear speedup, since Force
+1’s computation is not parallelized. Corroborated by (Vladymyrov & Carreira-Perpinán, 2014), FMM runs substantially faster than CPU - BH (20 − 30x); on datasets with more
+than 1M instances, CPU - PAR - BH closes this gap to 2.5x.
+Barnes-Hut GPU Parallel On datasets with more than
+50K instances, GPU - BH yields speedups of 150−200x over
+CPU - BH and 55 − 60x over CPU - PAR - BH . While FMM is
+2x faster than GPU - BH on datasets with size < 2K, GPU - BH
+is 5 − 10x faster on datasets with size 20 − 500K and more
+than 20x faster on datasets with size 1 − 10M. Between
+100 and 50K instances, GPU - BH has a slope smaller than 1;
+this happens because (i) Force 2 (quadtree) computations
+dominate computation time and (ii) we are able to process
+ALL data instances simultaneously on the GPU, effectively
+yielding O(log m) computation time. At the 100K mark,
+Force 1 dominates computation times because (i) we need
+to update each data instance’s gradient atomically while (ii)
+swapping portions of the sparse matrix P in and out of GPU
+memory, causing the slope to return to 1.
+
+6. Case Studies
+Evaluating visualization quality is a difficult problem; in
+previous work, researchers have used supervised labels in
+tandem with a k-nearest neighbors metric to quantitatively
+assess performance (van der Maaten, 2008; 2013; Yang
+et al., 2009). However, such scores may not directly translate to “better visualization”: For example, a data-miner
+aspiring to explore micro, within-class clusters in a dataset
+without supervised labels may assign a low score to an embedding that perfectly separates high-level macro clusters.
+We now explore ABSNE for use in such goal-driven visualization. We strongly encourage readers to use a computer
+in tandem with digital zoom set to around 400% in looking
+at the large visualization in this section.
+
+Alpha-Beta Divergences Discover Micro and Macro Structures in Data
+
+ILSVRC (50K)!
+
+ILSVRC (50K)!
+
+α = 0.8, λ = 1.0!
+Time: 10.4 s
+
+t-SNE (α = 1.0, λ = 1.0)!
+Time: 10.4 s
+
+Entity
+
+Implement
+
+Covering
+
+Container
+
+Bird
+
+Structure
+
+(a) Our method, revealing micro-structures
+
+ILSVRC (50K)!
+α = 0.95, λ = 0.98!
+Time: 10.4 s
+
+Commodity
+
+Invertebrate
+
+(b) t-SNE
+
+Conveyance
+
+Mammal
+
+(c) Our method, revealing macro-structures
+
+α = 0.8, λ = 1.0, Purple Panel from (a)
+Monkeys Transitioning to Birds
+
+Hunting Dog
+
+α = 0.95, λ = 0.98, Red Panel from (c)
+
+Hummingbirds
+Mammals
+Birds
+
+Chickens
+
+Toucans
+Flying Birds
+
+Macaws
+
+Swimming Birds
+Flamingos
+
+Chickens
+
+Swimming Birds
+
+α = 0.95, λ = 0.98, Green Panel from (c)
+
+α = 0.8, λ = 1.0, Blue Panel from (a)
+
+Bernese Mountain Dogs
+Bernese Mountain Dogs
+
+Black Dogs
+
+Dobermans, Rottweilers
+
+Dobermans, Rottweilers
+
+Dalmatians
+
+HIGGS (11M), t-SNE!
+
+HIGGS (11M), α = 0.98, λ = 1.0!
+
+Background (Higgs not found)
+Signal (Higgs found)
+
+SUSY (5M), α = 0.98, λ = 1.0!
+
+Time: 1 hour, 2 mins
+
+Time: 1 hour, 1 min
+
+(h)
+
+(i)
+
+Background (Higgs not found)
+Signal (Higgs found)
+
+Time: 31 mins
+
+(j)
+
+Background (SUSY particles not found)
+Signal (SUSY particles found)
+
+Figure 5. Please use digital zoom at high levels to view details. (a - c) depict ILSVRC 2012’s micro (specific animal species) in the
+purple, blue panels and macro (classes under the animal kingdom) structures in the red, green panels. As expected, macro clusters are
+more widely separated in (c) than (a) and in the red, green panels than purple, blue panels. (h - j) depict analogous structures in the
+HIGGS and SUSY datasets; we are searching for what physical meaning these structures have in the Standard Model of particle physics.
+
+Alpha-Beta Divergences Discover Micro and Macro Structures in Data
+
+6.1. ILSVRC 2012: Kingdoms to Species
+A subset of ImageNet, ILSVRC 2012 (Deng et al., 2009)
+features a training set of 1.28M images of varying size, validation set of 50K images, and 1000 object categories. 2
+We employ fc7 features yielded by Alexnet (Krizhevsky
+et al., 2012) implemented in Caffe (Jia et al., 2014), trained
+on the 1.28M images.3 We show a t-SNE plot of the validation set in the top-middle of Figure 5; we also present
+plots and 2 zoom views for (α = 0.8, λ = 1) and
+(α = 0.95, λ = 0.98). Zoom views present a random
+subset of images from the plot; displayed images were
+not hand-picked. As Section 4 predicts, the top scatter
+plots show tight clusters and greater class separation in
+(α = 0.95, λ = 0.98) compared with the other settings,
+particularly clusters corresponding to birds, mammals, and
+dogs. The maroon oval in the purple panel shows a transition between perched birds to monkeys in trees, while the
+blue and orange boxes in the red panel show well-separated
+classes. As expected, we found stronger intra-class clustering for (α = 0.8, λ = 1); the purple panel shows separate
+clusters for hummingbirds (green), macaw parrots (yellow), toucans (orange), flamingos (blue), chickens (red),
+ducks (purple), and birds in the sky (gray). Similarly, the
+blue panel separately clusters dalmations (green), Bernese
+mountain dogs (blue), black and brown dogs, e.g. Doberman Pinschers and German Rottweilers (orange), and black
+dogs (red). In comparison, the red panel associated with
+(α = 0.95, λ = 0.98) shows fewer, vague clusters with all
+birds (orange): chickens (red) and swans/ducks (purple).
+The green panel shows fewer classes: Bernese mountain
+dogs (blue) and black and brown dogs (orange).
+
+ing until all points have been embedded, this produces final
+objectives with lower value.
+Interestingly, while clustering occurs, the clusters don’t
+correspond to the desired classes. Hoping that tighter
+global clustering will lead to more intuitive results, we
+set α = 0.98 (bottom middle plot). As predicted in Section 4, straggling points align with existing clusters to yield
+a cleaner plot. While some clusters appear to have slightly
+denser concentrations of positive signals, there still is not
+any concrete class separation. While we are not aware of
+what the resulting clusters mean, we believe that the clusters could yield further insights.
+6.3. SUSY: Discovering Supersymmetric Particles
+Discovering evidence of supersymmetry (SUSY) constitutes a major goal in the Large Hadron Collider’s central
+mission; one ramification of the theory includes the discovery of dark matter candidate particles (Baldi et al., 2014).
+We explore the SUSY dataset (Baldi et al., 2014), which
+similarly tries to distinguish between processes which do
+and do not produce supersymmetric particles. There is
+currently a vigorous effort to improve performance in this
+classification task (Cheng & Han, 2008; Barr et al., 2003;
+Rogan, 2010; Buckley et al., 2013). As with HIGGS, we
+found that setting α = 0.98, λ = 1 yields a cleaner plot
+with greater separation than that of t-SNE (not shown due
+to lack of space). While we do not observe perfect cluster
+separation, there is a distinct purple region corresponding
+to observed SUSY particles. Perhaps, replicating experimental conditions leading to particles in this region would
+have a higher chance of yielding SUSY particles.
+
+6.2. HIGGS: Discovering Higgs Bosons
+
+7. Discussion
+
+We return to the HIGGS dataset (Baldi et al., 2014), whose
+goal is to distinguish between signal processes which produce Higgs bosons and background processes which do
+not. Each data instance consists of 28 features: the first 21
+describe kinematic properties measured by detectors in the
+accelerator, while the last 7 are high-level functions of the
+first 21. Again, we first run t-SNE on the HIGGS dataset
+(bottom left of Figure 5). For HIGGS and SUSY, we
+first initialize and optimize with 0.5M random instances.
+Upon convergence, we place another 0.5M new random instances near their nearest neighbor in the original dataset
+with isotropic Gaussian noise with variance 0.01. Repeat-
+
+Although several papers have explored varying divergences
+in SNE methods, this is the first paper to theoretically attribute and empirically verify how divergence parameters
+qualitatively affect visualization. Our analysis reveals that
+parameter variation in (α, β) for the AB-divergence discovers micro and macro structures within data in a datasetagnostic fashion. Our well-optimized GPU implementation yields speedups of more than 20x on datasets with
+1 – 10M instances over the state of the art implementation (Vladymyrov & Carreira-Perpinán, 2014). This yields
+the largest published SNE visualization of a dataset (11M
+instances).
+
+2
+
+These classes correspond to leaves in a hierarchical tree of
+classes, with “entity” being the root. For convenient visualization, we greedily group together classes with the same parent until 11 classes remain of roughly equal cardinality ((Donahue et al.,
+2013) employ a similar method).
+3
+We visualize the validation set rather than the training set, because the training labels were used to train the Caffe model, and
+using the training labels themselves would yield perfect separation in visualization.
+
+8. Acknowledgements
+We thank Eriz Tzeng, Animesh Garg, and Teodor
+Moldovan for useful discussions and NVIDIA for donating
+2x Tesla K40 GPUs. KN was funded by an NSF Graduate
+Fellowship (Summer 2014) and by an NDSEG Fellowship
+(Fall 2014 - 2015). AP was partially funded by NSERC.
+This research was also funded in part by ONR through a
+Young Investigator Program award.
+
+Alpha-Beta Divergences Discover Micro and Macro Structures in Data
+
+References
+Baldi, P., Sadowski, P., and Whiteson, D. Deep learning
+in high-energy physics: improving the search for exotic
+particles. arXiv preprint arXiv:1402.4735, 2014.
+Barr, A., Lester, C., and Stephens, P. mt2: the truth behind
+the glamour. Journal of Physics G: Nuclear and Particle
+Physics, 29(10):2343, 2003.
+Bell, Nathan and Hoberock, Jared. Thrust: A productivityoriented library for cuda. GPU Computing Gems, 7,
+2011.
+Buckley, M. R., Lykken, J. D., Rogan, C., and Spiropulu,
+M. Super-razor and searches for sleptons and charginos
+at the lhc. arXiv preprint arXiv:1310.4827, 2013.
+Bunte, K., Haase, S., Biehl, M., and Villmann, T. Stochastic neighbor embedding (sne) for dimension reduction
+and visualization using arbitrary divergences. Neurocomputing, 90:23–45, 2012.
+Burtscher, M. and Pingali, K. An efficient cuda implementation of the tree-based barnes hut n-body algorithm.
+GPU Computing Gems Emerald edition, pp. 75, 2011.
+Carreira-Perpinan, M. A. The elastic embedding algorithm
+for dimensionality reduction. In ICML, 2010.
+Cheng, H. and Han, Z. Minimal kinematic constraints and
+mt2. Journal of High Energy Physics, 2008(12):063,
+2008.
+Cichocki, A., Cruces, S., and Amari, S. Generalized alphabeta divergences and their application to robust nonnegative matrix factorization. Entropy, 13:134–170, 2011.
+Deng, J., Dong, W., Socher, R., Li, L., Li, K., and Fei-Fei,
+L. Imagenet: A large-scale hierarchical image database.
+In CVPR, 2009.
+
+Krizhevsky, A., Sutskever, I., and Hinton, G. E. Imagenet
+classification with deep convolutional neural networks.
+In NIPS, 2012.
+Krizhevsky,
+Alex.
+cuda-convnet:
+Highperformance
+c++/cuda
+implementation
+of
+convolutional
+neural
+networks.
+https://code.google.com/p/cuda-convnet/,
+2011.
+Lawrence, N.D. Spectral dimensionality reduction via
+maximum entropy. In AISTATS, 2011.
+LeCun, Y. and Cortes, C. The mnist database of handwritten digits, 1998.
+Memisevic, R. and Hinton, G. Improving dimensionality
+reduction with spectral gradient descent. Neural networks, 18(5):702–710, 2005.
+Nene, S.A., Nayar, S.K., and Murase, H. Columbia object image library (coil-20). Technical report, Technical
+Report CUCS-005-96, 1996.
+Rogan, C. Kinematical variables towards new dynamics at
+the lhc. arXiv preprint arXiv:1006.2727, 2010.
+Samaria, F. S. and Harter, A. C. Parameterisation of a
+stochastic model for human face identification. In Applications of Computer Vision, 1994.
+van der Maaten, L.J.P. Visualizing high-dimensional data
+using t-sne. JMLR, 9:2579–2605, 2008.
+van der Maaten, L.J.P. Barnes-hut-sne. In ICLR, 2013.
+Vladymyrov, M. and Carreira-Perpinan, M. Partial-hessian
+strategies for fast learning of nonlinear embeddings. In
+ICML, 2012.
+Vladymyrov, Max and Carreira-Perpinán, Miguel A.
+Linear-time training of nonlinear low-dimensional embeddings. In AISTATS, pp. 968–977, 2014.
+
+Donahue, J., Jia, Y., Vinyals, O., Hoffman, J., Zhang, N.,
+Tzeng, E., and Darrell, T. Decaf: A deep convolutional
+activation feature for generic visual recognition. arXiv
+preprint arXiv:1310.1531, 2013.
+
+Yang, Z., King, I., Xu, Z., and Oja, E. Heavy-tailed symmetric stochastic neighbor embedding. In NIPS, 2009.
+
+Hinton, G.E. and Roweis, S.T. Stochastic neighbor embedding. In NIPS, 2003.
+
+Yang, Z., Peltonen, J., and Kaski, S. Scalable optimization
+of neighbor embedding for visualization. In ICML, 2013.
+
+Jacobs, R.A. Increased rates of convergence through learning rate adaptation. Neural Networks, 1:295–307, 1988.
+
+Yang, Zhirong, Peltonen, Jaakko, and Kaski, Samuel. Optimization equivalence of divergences improves neighbor embedding. In Proceedings of the 31st International
+Conference on Machine Learning (ICML-14), pp. 460–
+468, 2014.
+
+Jia, Y., Shelhamer, E., Donahue, J., Karayev, S., Long, J.,
+Girshick, R., Guadarrama, S., and Darrell, T. Caffe:
+Convolutional architecture for fast feature embedding,
+2014.
+Krizhevsky, A. and Hinton, G. Learning multiple layers of
+features from tiny images. Technical report, 2009.
+
+Yianilos, P.N. Data structures and algorithms for nearest
+neighbor search in general metric spaces. In ACM-SIAM
+Symposium on Discrete Algorithms, pp. 311–321, 1993.
+
+

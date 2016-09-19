@@ -1,0 +1,1939 @@
+Scalable Model Selection for Large-Scale Factorial Relational Models
+Chunchen Liu ∗
+Lu Feng ∗
+NEC Laboratories China
+Ryohei Fujimaki
+Yusuke Muraoka
+NEC Knowledge Discovery Research Laboratories
+
+Abstract
+With a growing need to understand large-scale
+networks, factorial relational models, such as
+binary matrix factorization models (BMFs), have
+become important in many applications. Although BMFs have a natural capability to uncover overlapping group structures behind network
+data, existing inference techniques have issues of
+either high computational cost or lack of model
+selection capability, and this limits their applicability. For scalable model selection of BMFs,
+this paper proposes stochastic factorized asymptotic Bayesian (sFAB) inference that combines
+concepts in two recently-developed techniques:
+stochastic variational inference (SVI) and FAB
+inference. sFAB is a highly-efficient algorithm,
+having both scalability and an inherent model
+selection capability in a single inference framework. Empirical results show the superiority
+of sFAB/BMF in both accuracy and scalability
+over state-of-the-art inference methods for overlapping relational models.
+
+1. Introduction
+Relational modeling has been an actively-studied research
+topic due to its increasing significance in such important
+applications as social network analyses (Kim et al., 2012),
+recommendation systems (Hsu, 2005), and bioinformatics
+(Jaimovich et al., 2006). Relational modeling has two main
+purposes: (1) to reveal latent group structures underlying
+the networks (partition entities into several groups on the
+basis of their connectivities) and (2) to predict unseen links
+on the basis of known links (i.e. link prediction). With
+respect to (1), identification of the appropriate number of
+groups (a.k.a. model selection) is one of the most important
+∗
+
+Equal contribution.
+Proceedings of the 32 nd International Conference on Machine
+Learning, Lille, France, 2015. JMLR: W&CP volume 37. Copyright 2015 by the author(s).
+
+LIU CHUNCHEN @ NEC . CN
+FENG LU @ NEC . CN
+
+RFUJIMAKI @ NEC - LABS . COM
+YMURAOKA @ NEC - LABS . COM
+
+challenges in the learning of relational models.
+Recently, research interests have been particularly focused
+on overlapping relational data (a single entity may belong
+to multiple groups), which is a natural property commonly
+observed in real-world relational networks. One pioneering work proposes mixed-membership stochastic blockmodels (MMSB) (Airoldi et al., 2008; Gopalan et al., 2012)
+that express “overlaps” using multinomial distributions.
+Analogous models like mixed membership relational clustering (Long et al., 2007) and modular structures (Azizi
+et al., 2014) take node information into consideration.
+For model selection, state-of-the-art algorithms usually
+follow non-parametric Bayesian frameworks by employing
+infinite priors such as hierarchical Dirichlet processes (Kim
+et al., 2013) and Chinese restaurant processes (Koutsourelakis & Eliassi-Rad, 2008), which automatically select the
+effective number of groups from among “infinite groups”.
+An alternative approach for expressing overlapping group
+structures is factorial modeling. Unlike multinomial modeling, in which individual entities are essentially generated
+from one group (similar to the situation in which each
+sample belongs to a single component in standard mixture
+models), factorial models express entities by combining
+multiple binary latent features, and, therefore, they can literally express overlapping structures. Binary matrix factorization models (BMFs) (Meeds et al., 2007) are powerful
+factorial relational models. Although they provide natural
+overlapping structures, their high computational cost of
+model selection, arising from non-parametric Bayesian
+priors, restricts their applicability to large-scale datasets.
+To address the problem of Bayesian modeling on massive
+data, stochastic variational inference (SVI) has been recently developed (Hoffman et al., 2012) and has already
+been extended to several applications, such as topic models
+(Wang & Blei, 2012; Ranganath et al., 2013), time series
+modeling (Johnson & Willsky, 2014), multinomial relational models (Gopalan & Blei, 2013; Kim et al., 2013), and
+matrix factorization (Hernández-Lobato et al., 2014). SVI
+relies on external mechanisms for model selection (such as
+
+Scalable Model Selection for Large-Scale Factorial Relational Models
+
+non-parametric Bayesian priors and an outer loop for cross
+validation, which substantially increase computational cost
+in general), and it would be an interesting challenge to
+develop an SVI-type algorithm with model selection in a
+single inference framework in which model selection itself
+would be part of the optimization objective.
+This paper proposes a scalable model selection algorithm
+for BMFs that combines two recently developed techniques: factorized asymptotic Bayesian (FAB) (Eto et al.,
+2014; Fujimaki & Morinaga, 2012; Fujimaki & Hayashi,
+2012; Hayashi & Fujimaki, 2013; Hayashi et al., 2015)
+inference and SVI. FAB inference is a VB-like inference
+but has an inherent model selection mechanism in its inference procedure. Starting from a sufficient number of latent
+features, FAB inference automatically prunes away useless
+features by maximizing a factorized information criterion
+(FIC). We first derived FIC/FAB inference for BMFs.
+Inspired by SVI, we then derived stochastic FAB (sFAB)
+inference that enables us to perform model selection of
+BMFs on large-scale networks. sFAB introduces natural
+regularization that eliminates redundant latent features during stochastic optimization. This “shrinkage” mechanism
+significantly improves the computational efficiency of sFAB over standard SVI when model selection is required.
+Empirical results show the superiority of sFAB/BMF in
+both accuracy and scalability over state-of-the-art inference
+methods for overlapping relational modeling.
+
+2. Related Work
+BMF (Meeds et al., 2007) is the most well-studied factorial relational model because it naturally and expressively
+reveals overlapping group structures on dyadic data. It
+employs Beta-Bernoulli priors on latent features to support
+overlapping modeling, and it also can easily be extended
+to an infinite model by adopting Indian buffet process
+(IBP) priors to support automatic model selection for BMF.
+Latent feature relational models (LFRMs) (Miller et al.,
+2009) extend BMFs by incorporating covariates (i.e., entity
+attributes, multiple relations) for link prediction. As a
+family of LFRMs, max-margin nonparametric latent feature models (MNLFs) (Zhu, 2012) minimize hinge loss,
+which is a measure of the quality of link prediction, under
+the principle of maximum entropy discrimination. These
+BMF families employ non-parametric Bayesian priors for
+model selection, and Markov Chain Monte Carlo (MCMC)
+or mean-field variational inference is used for model inference. The biggest challenge is their heavy computation
+cost, especially on large-scale data.
+Recently, more advanced factorial relational models have
+been proposed. Infinite latent attribute (ILA) models (Palla
+et al., 2012; 2014) use hierarchical structures to reveal overlapping, where entities are characterized by latent feature
+vectors, and each feature is partitioned into disjoint sub-
+
+clusters. Infinite multiple relational models (Morup et al.,
+2013) utilize IBP priors to associate entities with a subset of
+groups. However, these models allow for neither arbitrary
+feature interactions nor negative feature correlations, and
+thus provide less capability to explain data.
+SVI has been introduced to relational modeling for
+Bayesian inference on massive data. SVINET applies SVI
+to a multinomial-mixture type relational model, though it
+has no explicit model selection capability (Gopalan & Blei,
+2013). A hierarchical Dirichlet processes relational model,
+which is also multinomial, has been built on SVINET and
+automatically prunes away useless communities by means
+of hierarchical Dirichlet processes (Kim et al., 2013). To
+the best of our knowledge, no existing study has directly
+extended SVI to factorial models, while there is a study
+on SVI for probabilistic matrix factorization (HernándezLobato et al., 2014) handling continuous latent features.
+
+3. FAB Inference for BMFs
+3.1. Binary Matrix Factorization
+BMF is a probabilistic model for an I × J data matrix
+X (Meeds et al., 2007), where I and J are the number
+of rows and columns, respectively. The (i, j)-th entry
+xij can be binary, count-valued, or continuous-valued. A
+row latent feature is denoted by U ∈ {0, 1}I×K , whose
+i-th row ui· indicates features associated with the i-th
+row of X. Similarly, a column latent feature is denoted
+by V ∈ {0, 1}J×L , whose j-th row vj· corresponds to
+the j-th column of X. A weight matrix W ∈ RK×L
+is introduced to represent the primary parameters. Then
+the data matrix X is drawn from a stochastic process
+characterized by UWVT , i.e., a Bernoulli distribution
+with mean fσ (UWVT ) for binary data. Here fσ (x) =
+1/(1+exp(−x)) is the logistic sigmoid function. Although
+a previous study used BMFs with Gaussian distribution to
+model continuous pixel intensity (Meeds et al., 2007), in
+this paper we extend BMFs to the Bernoulli distribution
+because many real-world relational matrices are binary.
+The likelihood function of BMFs is described as follows:
+p(X|U, V, W) =
+
+I Y
+J
+Y
+
+p(xij |ui· , vj· , W)
+
+(1)
+
+i=1 j=1
+
+=
+
+I Y
+J
+Y
+
+
+1−xij
+T xij
+T
+fσ (ui· Wvj·
+)
+1 − fσ (ui· Wvj·
+)
+.
+
+i=1 j=1
+
+We use fully-factorized Bernoulli priors for U and V,
+namely uik ∼ B(αk ) and vjl ∼ B(βl ), that is,
+p(U|α)
+
+=
+
+I Y
+K
+Y
+
+u
+
+αk ik (1 − αk )1−uik ,
+
+(2)
+
+i=1 k=1
+
+p(V|β)
+
+=
+
+J Y
+L
+Y
+j=1 l=1
+
+v
+
+βl jl (1 − βl )1−vjl .
+
+(3)
+
+Scalable Model Selection for Large-Scale Factorial Relational Models
+
+The parameter set P is defined as P ≡ {α, β, W}. The
+joint marginal likelihood is described as p(X, U, V|P) =
+p(U|α)p(V|β)p(X|U, V, W). We assume a “log-flat”
+prior on P (i.e., (log p(P)) /N → 0, which is asymptotically ignored in the following FIC derivation, as is done in
+other FAB methods1 (Fujimaki & Morinaga, 2012; Hayashi
+& Fujimaki, 2013).
+
+see an explicit dependency between two latent features,
+U and V, in the regularization term, which yields an
+effect of pruning away redundant features during the
+EM-like iterative optimization process. This indicates that
+FIC/BMF naturally captures a unique characteristic of
+relational models (i.e., “multiple” latent variables) in its
+regularization mechanism.
+
+3.2. FIC for BMFs
+Consider the following marginal log-likelihood:
+
+Note that FIC has the regularization effect despite its
+asymptotic ignorance of priors on p(P). In this sense,
+its model selection mechanism is essentially different from
+other prior-based Bayesian model selection such as nonparametric Bayesian methods, automatic relevance determination (Wipf & Nagarajan, 2007), etc.
+
+(
+
+p (X, U, V|M)
+log p (X|M) = max
+q (U, V) log
+q
+q (U, V)
+U,V
+X
+
+)
+,
+
+(4)
+R
+where p (X, U, V|M) = p (X, U, V|P) p (P|M) dP.
+M and P are a model and its parameters.
+The
+Laplace method (Wong, 2001) is individually applied
+to log p (U|α), log p (V|β), and log p (X|U, V, W). It is
+worth noting that we follow the asymptotic analysis of the
+Hessian matrix of log-likelihood in (Hayashi & Fujimaki,
+2013) and obtain
+
+
+log FW  =
+
+K X
+L
+X
+
+I X
+J
+X
+
+log
+
+!
+uik vjl
+
+3.3. FAB algorithm for BMFs
+For efficient maximization of (6), we introduce approximations to find a tractable lower bound. First, a meanfield approximation on U and V is introduced with the
+factorized forms of q(U) and q(V) as follows:
+q(U) =
+
+!
+/ (IJ)
+
+q(V) =
+
+(5)
+
+where | • | is the determinant of •, and FW =
+− 52 log p (X|U, V, W) /(IJ).
+By applying the
+Laplace method and introducing (5) to (4), we obtain the
+following FIC of BMF:
+
+F ICBM F (X) ≡ max Eq log p(X, U, V|P̂)
+q
+
+−
+
+J
+I X
+K
+L
+X
+1 XX
+uik vjl
+log
+2
+i=1 j=1
+k=1 l=1
+
+!
+−
+
+(6)
+
+Dα
+log I
+2
+
+Dβ
+DW − KL
+−
+log J −
+log(IJ) + Hq (U, V),
+2
+2
+
+where q is an arbitrary joint distribution on U
+and V, Hq (•) is the entropy of •, D? is the
+dimensionality of the subscribed parameter ?, and
+P̂ = arg maxP log p(X, U, V|P). Like other FICs
+(Fujimaki & Morinaga, 2012; Hayashi & Fujimaki,
+2013), it is easy to show the asymptotic consistency
+of F ICBM F with marginal log-likelihood, i.e.,
+F ICBM F (X) = log p(X) + Op (1) under certain
+regularity conditions2 .
+Unlike previously-studied FIC for “single” latent
+variablePmodels,
+FIC/BMF
+PI has
+PJthe regularization term
+K PL
+which
+Eq [− 12 k=1 l=1 log( i=1 j=1 uik vjl )],
+comes from the approximation of the Hessian matrix
+of log-likelihood in (5). It is worth noting that we can
+1
+This assumption is necessary for asymptotic ignorance of
+priors in the FIC derivation.
+2
+We can skip the proof. We followed the proof in (Hayashi &
+Fujimaki, 2013).
+
+q(uik )uik (1 − q(uik ))1−uik ,
+
+(7)
+
+q(vjl )vjl (1 − q(vjl ))1−vjl .
+
+(8)
+
+i=1 k=1
+
++ Op (1),
+
+i=1 j=1
+
+k=1 l=1
+
+I Y
+K
+Y
+
+J Y
+L
+Y
+j=1 l=1
+
+Second, we replace P̂ with P because, from the definition of P̂, log p(X, U, V|P
+P̂)P≥ log p(X, U, V|P)
+holds for any P. Third, log( i j uik vjl ) ≤ log r̃kl +
+P P
+( i j uik vjl − r̃kl )/r̃kl is applied using the concavity of
+logarithm functions with parameters r̃kl . The above three
+approximations have already been applied in existing FAB
+methods, but for BMFs, Eq [log p (xij |ui· , vj· , W)] is still
+intractable. We address this by borrowing the Gaussian
+lower bound technique of (Jaakkola & Jordan, 1997) as
+follows:
+T
+Eq [log p(xij |ui· , vj· , W)] ≥ xij ui· Wvj·
++ log fσ (ξ˜ij )
+1
+T
+T 2
+2
+− ξ˜ij )
+(9)
++ λ(ξ˜ij )((ui· Wvj·
+) − ξ˜ij
+) − (ui· Wvj·
+2
+:= g(xij , ui· , vj· , W, ξ˜ij )
+(10)
+
+where λ(ξ˜ij ) = (0.5 − fσ (ξ˜ij ))/(2ξ˜ij ), and ξ˜ij is a newly
+introduced parameter.
+By utilizing above approximations, a tractable lower bound
+of F ICBM F (X) is derived as follows:
+
+L(q, R̃, Ξ̃, P, X) = Eq log p(U|α) + log p(V|β)
++
+
+I X
+J
+X
+
+g(xij , ui· , vj· , W, ξ˜ij )
+
+i=1 j=1
+K
+L
+1 XX
+−
+log r̃kl +
+2
+k=1 l=1
+
+−
+
+PI
+
+i=1
+
+PJ
+
+j=1
+
+uik vjl − r̃kl
+
+r̃kl
+
+Dα
+Dβ
+log I −
+log J + Hq (U) + Hq (V),
+2
+2
+
+!
+
+(11)
+
+Scalable Model Selection for Large-Scale Factorial Relational Models
+
+˜ I,J
+where R̃ = {r̃kl }K,L
+k,l=1 and Ξ̃ = {ξij }i,j=1 .
+An EM-style alternating optimization w.r.t. q, P, R̃, and Ξ̃
+is derived with the stopping condition (L(t) − L(t−1) ) < δ.
+Here the superscription (t) denotes the t-th update, and δ is
+optimization tolerance.
+FAB E-step: The FAB E-step optimizes q(U) and q(V)
+by fixing the parameter set {P, R̃, Ξ̃}. Because q(U) and
+q(V) do not have a closed form solution jointly, alternating
+updates of q(U) and q(V) are carried out several times
+in a single E-step. The update equation is found in
+Appendix A.1.
+FAB M-step: The FAB M-step optimizes {P, R̃, Ξ̃} by
+fixing q(U) and q(V). The update equations are found in
+Appendix A.2.
+FAB Shrinkage step: The FAB E-step induces the
+sparseness of latent features (for details, please
+see Appendix A.1).
+In practice, we apply the
+following simple thresholding
+to eliminate
+P
+ redundant
+PI
+PL
+J
+features: If
+quik
+<  (or
+j=1
+l=1 qvjl
+P i=1
+
+PJ
+PK
+I
+< ), then the k-th (l-th)
+j=1 qvjl
+i=1
+k=1 quik
+feature will be eliminated with a pre-set threshold value .
+The FAB shrinkage step is carried out after the FAB E-step
+and removes irrelevant features. This reduces the model
+complexity, which means that the FIC lower bound will
+increase, and that we can mitigate over-fitting. Moreover,
+reducing irrelevant features during the EM iteration leads
+to less computational cost and makes FAB/BMF efficient,
+as we empirically show in our experiments.
+
+4. Stochastic FAB Inference
+Although FAB inference is a computationally efficient
+inference framework, the batch algorithm is still computationally too expensive to handle huge real-world networks. To address this computational bottleneck, we propose
+stochastic FAB (sFAB) inference, extending SVI (Hoffman et al., 2012) and its application to relational models
+(Gopalan & Blei, 2013; Kim et al., 2013). Although sFAB
+looks similar at first glance to existing SVI methods (e.g.,
+SVINET), the former has an essential and important advantage over the latter, i.e., sFAB has an intrinsic model selection mechanism that eliminates redundant features during
+the stochastic optimization. This is particularly important
+in co-clustering scenarios in which model identification is
+one of the most significant interests (since we have many
+alternative methods for link prediction scenarios, such as
+probabilistic matrix factorization). Existing SVI methods achieve model identification with an external model
+selection mechanism. One simple way would be to use
+an outer loop for model selection, but this would require
+additional computational cost. Another way would be
+
+the incorporation of non-parametric Bayesian priors (Kim
+et al., 2013), but this would make the model more complex
+and also generally require additional computational cost.
+Unlike SVI which is designed to be a stochastic optimization of evidence lower bounds (ELBO, a.k.a. variational
+free energy), our objective function is the FIC lower bound
+described in (11). Let i0 and j 0 , respectively, denote
+the indices of a row and column entities drawn from
+X uniformly; i0 ∼ U(1, · · · , I), j 0 ∼ U(1, · · · , J),
+where U(·) represents the uniform distribution. We can
+then derive an approximative (stochastic) FIC lower bound
+whose expectation is equal to that of (11) as follows:
+Li0 j 0 (q, R̃, Ξ̃, P, xi0 j 0 ) = I Eq [log p(ui0 · |α)]
+(12)
+
+− Eq [log q(ui0 · )] + J (Eq [log p(vj 0 · |β)] − Eq [log q(vj 0 · )])
+h 
+i
++ IJEq g xi0 j 0 , ui0 · , vj 0 · , W, ξ˜i0 j 0
+" K L 
+#
+IJui0 k vj 0 l − r̃kl
+1 XX
++ const.
+− Eq
+log r̃kl +
+2
+r̃kl
+k=1 l=1
+
+Next, sFAB is performed in a four-step iteration: (i) randomly subsample an entry xi0 j 0 from the data matrix; (ii)
+update the variational distributions of associated latent feature vectors ui0 · and vi0 · ; (iii) prune away the useless features using the thresholding described in Section 3.3; (iv)
+incrementally update model parameters P = {α, β, W} in
+accord with the updated ui0 · and vi0 · . The only difference
+from the standard stochastic approximative ELBO is the
+PK PL
+IJui0 k vj 0 l −r̃kl
+last term −Eq [ 12 k=1 l=1 (log r̃kl +
+)],
+r̃kl
+but this term yields the essential difference between SVI
+and sFAB, i.e., model selection capability in stochastic
+inference.
+sFAB E-step The optimization of (12) w.r.t. q (t) (ui0 · )
+results in (19) (in Appendix A.3) and so is q (t) (vj 0 · ). After
+single sampling of i0 and j 0 , we iterate updating ui0 · and
+updating vj 0 · several times. Different sampling strategies,
+such as node sampling and link sampling (Gopalan &
+Blei, 2013) are applicable as long as the expectation of an
+approximative FIC lower bound becomes equivalent to that
+of the original FIC lower bound (our sampling is similar to
+“pair sampling” proposed in (Gopalan & Blei, 2013)).
+sFAB M-step We first compute the intermediate model
+parameter P (t−1/2) by optimizing (12) w.r.t. P. The
+update equation is found in Appendix A.4. Then we use
+a weighted average of P (t−1) and P (t−1/2) to update the
+model parameters. We denote the weight as ρ, which will
+provably lead P to converge to a local optimum if appropriately chosen. In each iteration, the parameter Ξ̃ also needs
+to be updated in a timely fashion
+ to make the approximative
+
+lower bound tight because g xij , ui· , vj· , W, ξ˜ij is close
+h
+i
+T
+to log p (xij |ui· , vj· , W) when ui· Wvj·
+∈ −ξ˜ij , ξ˜ij .
+The updated P might deviate significantly if information
+on single-edge distributions were used in individual iter-
+
+Scalable Model Selection for Large-Scale Factorial Relational Models
+
+Algorithm 1 stochastic FAB for BMFs
+1: Initialize {q(U),q(V),P,R̃,Ξ̃,ρ}.
+2: while convergence criteria or a fixed number of maximum
+iterations is not met do
+3:
+Randomly sample a subset Sr of row entities and a subset
+Sc of column entities.
+4:
+for m = 1, · · · , M do
+5:
+Optimize q (t,m) (ui· ), ∀i ∈ Sr using (19).
+6:
+Optimize q (t,m) (vj· ), ∀j ∈ Sc accordingly.
+7:
+Update R̃ and update ξ˜ij , ∀i ∈ Sr , ∀j ∈ Sc using (15)
+and (18).
+8:
+end for
+9:
+Prune away the useless features using the thresholding
+described in Section 3.3.
+10:
+Update R̃ and Ξ̃ using (15) and (18).
+P
+q(ui· )
+11:
+α(t) = (1 − ρ(t) )α(t−1) + ρ(t) i∈S|Srr |
+12:
+
+β (t) = (1 − ρ(t) )β (t−1) + ρ(t)
+
+P
+
+q(vj· )
+|Sc |
+q (t) (ui· ) and
+j∈Sc
+
+Optimize W(t−1/2) based on
+∀i ∈ Sr , ∀j ∈ Sc using (20).
+14:
+W(t) = (1 − ρ(t) )W(t−1) + ρ(t) W(t−1/2)
+15:
+Update ξ˜ij , ∀i ∈ Sr , ∀j ∈ Sc
+16: end while
+13:
+
+q (t) (vj· ),
+
+ations, so a mini-batch {xij |i ∈ Sr , j ∈ Sc } is adopted
+to generate a more informative parameter estimation, as
+is shown in Algorithm 1. We can easily apply a minibatch strategy by little changes in the update equations in
+Appendix A.3 and A.4. Assuming the subsampling ratio to
+be γ, the speed of sFAB will be scaled up to 1/(γ 2 ) times
+over that with the batch algorithm.
+
+5. Experiments
+In the following experiments, we utilized 10-fold cross
+validation, each time holding out a different 10% of the
+data (links and non-links).
+5.1. Baseline Methods
+We compared the following four state-of-the-art methods
+with sFAB/BMF and FAB/BMF as baselines: 1) BMF with
+variational Bayesian inference (VB/BMF) (Miller, 2011),
+2) BMF with Gibbs sampling (MCMC/BMF) (Meeds et al.,
+2007), 3) ILA with Gibbs sampling (Palla et al., 2014), and
+4) SVINET (mixed membership stochastic block model
+with SVI) (Gopalan et al., 2012). The first two methods
+were selected to verify the superiority of the sFAB inference for relational modeling against the other inference
+methods. The third was selected as the latest and the most
+advanced factorial relational model and for a comparison
+with prior-based model selection (ILA uses IBP for model
+selection). The fourth was selected as state-of-the-art SVIbased relational modeling.
+We used the latest implementations provided by the authors
+
+for SVINET (in C++)3 and ILA (in MATLAB)4 , and
+implemented VB/BMF and MCMC/BMF in MATLAB on
+our own. sFAB/BMF and FAB/BMF were implemented
+in C++ to compare their computational time with that
+of SVINET. For model selection, ILA and MCMC/BMF
+select the model using IBP or Beta-Bernoulli priors, while
+SVINET and VB/BMF employ an outer loop of cross
+validation. sFAB/BMF and FAB/BMF select the feature
+numbers automatically using the shrinkage effect, as we
+have explained in Sections 3.2 and 3.3.
+Prediction accuracy, clustering accuracy, and computational efficiency were evaluated using test log-likelihood,
+normalized mutual information (NMI), and elapsed time,
+respectively. We defined log-likelihood on test data as
+the test log-likelihood. The learning rate for sFAB/BMF
+was set to 0.5 for small datasets (N < 1000) and 0.2
+for large datasets (N ≥ 1000), in consideration of the
+balance between accuracy and efficiency. SVINET set the
+mini-batch to the entire set of links and used a learning
+rate of 1. That means its learning rate depended on the
+sparsity of a given network. We followed the experimental
+setting of the original paper of ILA (Palla et al., 2012)
+and ran 500 MCMC iterations for ILA and 1000 iterations
+for MCMC/BMF. sFAB/BMF, FAB/BMF, and SVINET all
+employed δ = 1 × 10−5 as the optimization tolerance.
+5.2. Description of Datasets
+We adopted the “benchmark” tool (Lancichinetti &
+Fortunato, 2009) that was utilized in the SVINET
+paper (Gopalan & Blei, 2013) to generate synthetic
+“overlapping” networks with different scales, different
+group numbers, and different densities (dense and sparse).
+Further, eight real network datasets (namely, Zachary’s
+Karate Club (Zachary, 1977), summer school survey
+network5 , U.S. Political Books6 , NIPS coauthorship
+network (Globerson et al., 2007), Facebook, autonomous
+systems, the collaboration network of Arxiv Astro Physics
+(AstroPh for short), and Arxiv High Energy Physics
+(HepPh for short)7 ) with different scales (node numbers
+ranged from 34 to 10K) were used to evaluate sFAB/BMF
+and FAB/BMF. The number of nodes and edges are
+summarized in Table 1. With the exception of the summer
+school survey network, these real networks were all
+undirected. For the NIPS coauthorship network, we
+extracted a subset of the 234 most connected authors from
+the overall network, in accord with previous studies (Miller
+et al., 2009; Palla et al., 2012). We also extracted a subset
+with 10K nodes from AstroPh and HepPh since SVINET
+3
+
+https://github.com/premgopalan/svinet.
+http://mlg.eng.cam.ac.uk/konstantina/ILA/
+5
+http://clique.ucd.ie/data
+6
+http://www.orgnet.com
+7
+http://snap.stanford.edu/data
+4
+
+Scalable Model Selection for Large-Scale Factorial Relational Models
+Table 1. Comparisons for Test Log-likelihood on Real Networks. Standard deviations are showed in parentheses. The best and second
+best results for each dataset are highlighted in bold and italic respectively.
+
+would have required an unrealistically long time for
+execution.
+5.3. Synthetic Data
+In all the simulation experiments below, we set the initial
+K as 40 for sFAB/BMF and FAB/BMF, and performed
+inference with K = 2, · · · , 40 for VB/BMF and SVINET.
+ILA was excluded due to its huge computational cost. In
+terms of network densities, the probability of generating
+a link within a community (pin ) was about 0.7 for dense
+networks, and about 0.35 for sparse networks. For both
+dense and sparse networks, the probability of having a
+link between two nodes belonging to different communities
+(pout ) was roughly 0.01.
+We first investigated the performance of sFAB/BMF,
+FAB/BMF, VB/BMF, MCMC/BMF, and SVINET on
+the synthetic networks with 500 nodes. The left-hand
+column in Figure 1 shows prediction accuracy (a) and
+clustering accuracy (b) in four different settings (K=10,30
+× dense/sparse).
+In terms of difference in (batch)
+inference methods, FAB/BMF outperformed the other
+methods (VB and MCMC) and the same results were
+obtained in model selection (see Table 2 (top)). The two
+stochastic inference methods, sFAB/BMF and SVINET,
+performed competitively, but we should also note that the
+model in the benchmark tool (Lancichinetti & Fortunato,
+2009) is a multinomial relational model and that this
+setting is rather advantageous to SVINET. Compared
+to FAB/BMF, sFAB/BMF suffered a little accuracy loss
+but still performed reasonably well. We have omitted
+comparisons in terms of computational speed on the
+small synthetic networks due to the inconsistency among
+implementation language platforms used for the various
+algorithms.
+Next we evaluated sFAB/BMF, FAB/BMF, and SVINET
+on the synthetic networks with 5000 nodes. The righthand column in Figure 1 shows prediction accuracy (c),
+clustering accuracy (d), and elapsed time (e) for four
+different settings (K=10,30 × dense/sparse). In terms of
+prediction accuracy, sFAB/BMF, FAB/BMF, and SVINET
+appeared comparable, and SVINET sometimes performed
+slightly better (again, this setting is rather advantageous
+to SVINET). On the other hand, we can also see a clear
+
+VB/BMF
+−0.264(.0568)
+−0 .253 (.0128 )
+−0.256(.0317)
+−0.100(.0195)
+–
+–
+–
+–
+
+MCMC/BMF
+−0.269(.0712)
+−0.270(.0333)
+−0.268(.0427)
+−0.106(.0271)
+–
+–
+–
+–
+
+SVINET
+−0.400(.0556)
+–
+−0.260(.0144)
+−0.084(.0099)
+−0.027(.0001)
+−0.008(.0000)
+−0 .0138 (.0001 )
+−0.010(.0001)
+
+(a)
+-0.02
+-0.03
+-0.04
+-0.05
+-0.06
+-0.07
+-0.08
+-0.09
+-0.10
+-0.11
+-0.12
+
+(c) -0.03
+FAB/BMF
+sFAB/BMF
+SVINET
+VB/BMF
+MCMC/BMF
+
+Test Log-likelihood
+
+FAB/BMF
+−0.230(.0419)
+−0.248(.0201)
+−0.186(.0052)
+−0.060(.0054)
+−0.024(.0003)
+−0.005(.0002)
+−0.0135(.0002)
+−0.007(.0003)
+
+-0.04
+-0.05
+-0.06
+-0.07
+-0.08
+-0.09
+-0.10
+-0.11
+-0.12
+
+ILA
+−0.323(.0778)
+−0.344(.0243)
+−0.494(.0465)
+−0.108(.0095)
+–
+–
+–
+–
+
+FAB/BMF
+sFAB/BMF
+SVINET
+
+dense sparse dense sparse
+
+K=10
+dense sparse dense sparse
+K=10
+K=30
+
+(b)
+1.00
+
+K=30
+
+(d) 1.00
+0.90
+NMI
+
+sFAB/BMF
+−0 .259 (.0229 )
+−0.265(.0279)
+−0 .206 (.0208 )
+−0 .066 (.0056 )
+−0 .026 (.0003 )
+−0 .007 (.0001 )
+−0.0143(.0001)
+−0 .008 (.0001 )
+
+0.90
+0.80
+
+0.80
+0.70
+0.60
+0.50
+0.40
+0.30
+0.20
+0.10
+dense sparse dense sparse
+
+0.70
+
+(e)
+
+0.60
+0.50
+
+0.40
+0.30
+
+dense sparse dense sparse
+K=10
+K=30
+Synthetic networks with 500 nodes
+
+Time (103 s)
+
+edges
+78
+1138
+441
+832
+88.2K
+10.5K
+144K
+116K
+
+Test Log-likelihood
+
+nodes
+34
+73
+105
+234
+4.0K
+5.2K
+10K
+10K
+
+NMI
+
+data
+Z.K.Club
+SumSchool
+PolBooks
+NIPS
+Facebook
+as-733
+AstroPh
+HepPh
+
+K=10
+
+K=30
+
+100
+80
+60
+40
+20
+0
+dense sparse dense sparse
+
+K=10
+K=30
+Synthetic networks with 5000 nodes
+
+Figure 1. Comparisons on synthetic networks.
+
+advantage for sFAB/BMF and FAB/BMF over SVINET in
+terms of clustering performance (NMI). One explanation is
+that SVINET assigns one node to a group when one link
+of the node belongs to that group, and that it overestimates
+the overlaps existing in the network. On the other hand,
+(s)FAB/BMF provide clear grouping assignments by estimating feature matrices. Comparison of sFAB/BMF with
+FAB/BMF shows that sFAB/BMF significantly reduced the
+computational cost without losing much accuracy. Further,
+sFAB/BMF is much more computationally efficient than
+SVINET. This is because 1) the shrinkage mechanism
+in sFAB/BMF automatically eliminates redundant features
+and eventually accelerates the algorithm over EM iterations, and 2) SVINET does not have an intrinsic model
+selection mechanism and needs an outer loop for model
+selection. Results here (particularly for clustering accuracy
+and efficiency) indicate that sFAB/BMF is more powerful
+than SVINET in detecting overlapping group structures
+(clustering).
+The top half in Table 2 shows comparisons w.r.t. model selection. MCMC/BMF performed unstably (over- or underestimation, depending on data). sFAB/BMF, FAB/BMF,
+and SVINET performed competitively and slightly better
+
+Scalable Model Selection for Large-Scale Factorial Relational Models
+Table 2. Comparisons for Model Selection Capability on synthetic data (top) and real-world data (bottom). Estimated feature
+numbers are shown with the standard deviations in parentheses.
+N
+
+K
+
+Density
+
+500
+500
+500
+500
+5000
+5000
+5000
+5000
+
+10
+10
+30
+30
+10
+10
+30
+30
+
+dense
+sparse
+dense
+sparse
+dense
+sparse
+dense
+sparse
+
+data
+Z.K.Club
+SumSchool
+PolBooks
+NIPS
+Facebook
+as-733
+AstroPh
+HepPh
+
+sFAB
+3(0)
+15(1)
+8(1)
+14(1)
+62(2)
+31(1)
+96(2)
+83(4)
+
+BMF
+sFAB
+11(1)
+11(1)
+31(1)
+33(1)
+14(1)
+16(1)
+30(0)
+34(1)
+BMF
+FAB
+5(1)
+15(1)
+9(1)
+15(1)
+64(2)
+28(4)
+87(5)
+88(5)
+
+FAB
+
+VB
+
+MCMC
+
+11(1)
+10(1)
+31(1)
+32(3)
+12(1)
+13(1)
+30(0)
+31(2)
+
+10(1)
+9(2)
+27(2)
+27(3)
+–
+–
+–
+–
+
+14(3)
+9(1)
+21(5)
+10(1)
+–
+–
+–
+–
+
+VB
+
+MCMC
+
+7(2)
+6(2)
+11(2)
+9(0)
+–
+–
+–
+–
+
+5(1)
+6(1)
+9(3)
+14(3)
+–
+–
+–
+–
+
+SVINET
+10(0)
+10(0)
+31(2)
+32(2)
+10(0)
+14(1)
+33(2)
+31(1)
+
+ILA
+
+SVINET
+
+31(7)
+35(9)
+73(8)
+27(7)
+–
+–
+–
+–
+
+3(1)
+–
+5(1)
+18(2)
+75(11)
+2(0)
+100(0)
+93(4)
+
+than VB/BMF. SVINET performed comparably with
+FAB/BMF and slightly better than sFAB/BMF. Overall,
+FAB/BMF and sFAB/BMF outperformed the other methods on the synthetic data despite the fact that the “true”
+model assumes multinomial relations.
+5.4. Real-world Data
+We evaluated the performance of sFAB/BMF, FAB/BMF,
+VB/BMF, MCMC/BMF, SVINET, and ILA on the small
+real networks (N < 1000) and compared the performance
+for sFAB/BMF and FAB/BMF with that for SVINET on
+the large real networks (N ≥ 1000). On the small real
+networks, we set the initial K as 20 for sFAB/BMF and
+FAB/BMF, and performed inference with K = 2, · · · , 20
+for VB/BMF and SVINET. On the large networks, the
+upper bound of K was extended to 100. SVINET software
+supported undirected networks, and we omitted it on the
+summer school survey network, which is directed.
+We have summarized in Table 1 the test log-likelihood
+for each algorithm as an evaluation metric for prediction
+accuracy . As can be seen, FAB/BMF outperformed all
+the other methods on all of the datasets. Combining
+results in Table 3, we find that sFAB/BMF sacrificed some
+precision for time, though the loss of precision was not
+large for those large-scale datasets. sFAB/BMF performed
+the second best after FAB/BMF on datasets other than the
+summer school survey network and AstroPh. VB/BMF
+and MCMC/BMF achieved comparable performance on
+the small networks, while SVINET was more suitable for
+the large networks. Results shown in Table 2 (bottom)
+suggest that ILA may have suffered from over-fitting, as
+its feature dimensionality is much larger than those of
+the others. Our experience indicates that non-parametric
+Bayesian priors prefer more complicated models than do
+true ones8 , and IBP in ILA might be the relevant factor. As
+8
+
+There are theoretical studies for the case of mixture models
+(Miller & Harrison, 2013; 2014).
+
+Table 3. Comparisons for Elapsed Time on Real Networks. Standard deviations are shown in parentheses. s, h, d, and m denote
+second, hour, day, and month respectively.
+data
+Z.K.Club
+SumSchool
+PolBooks
+NIPS
+Facebook
+as-733
+AstroPh
+HepPh
+
+sFAB/BMF
+1.07s(0.43s)
+6.24s(2.17s)
+5.89s(2.85s)
+27.5s(10.8s)
+12.0h(1.29h)
+13.0h(0.61h)
+7.93d(0.89d)
+6.35d(0.17d)
+
+FAB/BMF
+1.00s(0.46s)
+7.68s(5.11s)
+8.76s(1.61s)
+113s(12.1s)
+87.7h(10.0h)
+65.8h(2.37h)
+22.1d(5.01d)
+21.7d(0.77d)
+
+SVINET
+228s(159s)
+–
+129s(50.5s)
+118s(14.0s)
+156h(2.13h)
+75.7h(0.51h)
+> 1m
+> 1m
+
+Table 2 shows, in most cases, sFAB/BMF and FAB/BMF
+chose the smallest number of features and provided the
+most compact and precise models. Further, sFAB/BMF and
+FAB/BMF tended to choose similar model complexities.
+This indicates that FAB model selection capability works
+well to mitigate over-fitting and can be integrated perfectly
+with stochastic optimization. Finally, we compared the
+elapsed time of sFAB/BMF , FAB/BMF, and SVINET, as
+is shown in Table 3. It is rather surprising that FAB/BMF
+performed even faster than SVINET. We observed two
+reasons for this. First, FAB/BMF performs model selection
+in a single EM iteration loop and therefore is significantly
+advantageous over SVINET which requires an outer loop
+for model selection. Note that, although the outer loop of
+SVINET can be parallelized, the computational cost is still
+lower bounded by the maximum K value. Second, SVINET
+took far more iterations for convergence. Intuitively speaking, (s)FAB/BMF can eliminate “poorly-fitted” latent features during EM iteration, and this accelerates convergence.
+Finally, sFAB/BMF significantly improved computational
+efficiency, particularly on large-scale networks.
+
+6. Summary and Concluding Remarks
+This paper has proposed a scalable inference method with
+model selection for large-scale BMFs, created by combining two recently developed technologies: FAB and
+SVI. sFAB is a highly-efficient algorithm, having both
+scalability and an inherent model selection capability in
+a single inference framework. Experimental results on
+both simulation and real datasets show that sFAB inference
+outperforms other inference technologies, such as VB
+and MCMC, and is more computationally efficient than
+SVINET when model selection is needed. A number of interesting areas remain for future work. For web-scale relational modeling, distributed stochastic optimization might
+be required. Also, SVI has been extended for streaming
+scenarios (Tamara et al., 2013). Extending sFAB’s model
+selection capability to such streaming scenarios would be
+another interesting possibility to explore.
+
+A. Appendix: Update Equations
+A.1. FAB E-step
+Let us consider the update of q(U) as an example. The notation
+U−ik refers to the set of entries in the matrix U other than uik .
+
+Scalable Model Selection for Large-Scale Factorial Relational Models
+For convenience, let quik and qvjl denote q(uik ) and q(vjl ),
+respectively. Then, taking the gradient of L w.r.t. quik and setting
+it to zero, we can obtain its closed-form solution:
+(t,m)
+
+quik
+
+=
+
++
+
+J
+X
+
+αk
+
++
+
+(t−1)
+
+1 − αk
+
+(t−1)
+
+λ(ξ˜ij
+
+L X
+J 
+X
+l=1 j=1
+
+)
+
+X
+L
+
+j=1
+
++2
+
+
+
+(13)
+(t−1)
+
+fσ log
+
+where W−kl denotes the entries in the matrix W other than wkl .
+Given {q(U), q(V), P, R̃}, Ξ̃ is optimized by setting
+
+1
+xij −
+2
+
+
+(t,m−1)
+
+qvjl
+
+
+
+(t−1)
+
+wkl
+
+K X
+L
+X
+
+(t)
+ξ˜ij = Eq 
+
+(t,m−1) (t−1)
+qvjl
+wkl
+
+!2  12
+uik vjl wkl
+
+(18)
+
+
+
+k=1 l=1
+
+2
+
+A.3. sFAB E-step
+
+l=1
+
+L X
+X
+
+
+
+Let us consider the update of q(ui0 · ) as an example. Taking the
+gradient of Li0 j 0 in (12) w.r.t. qui0 k and setting it to zero, we can
+obtain the closed-form solution:
+
+(t,m−1)
+(t,m−1) (t−1) (t−1)
+qvjl
+qvjq
+wkl wkq
+
+l=1 q<l
+
++2
+
+L X
+X
+
+(t,m)
+
+(t,m−1)
+
+qvjl
+
+(t,m−1)
+
+quip
+
+(t−1)
+
+wkl
+
+qui0 k
+
+(t−1)
+
+wpl
+
+l=1 p6=k
+
++2
+
+L XX
+X
+
+fσ log
+(t,m−1)
+
+qvjl
+
+(t,m−1)
+
+qvjq
+
+(t,m−1)
+
+quip
+
+(t−1)
+
+wkl
+
+(t−1)
+wpq
+
+
+
+l=1 q6=l p6=k
+L X
+J
+X
+qvjl
+l=1 j=1
+
++2
+
+where the superscription (t, m) denotes the m-th update of the tth E-step. The update of qvjl is obtained in a similar manner. The
+last term of the R.H.S. of (13) originates from the regularization
+P
+PL
+PI PJ
+term in (6), i.e., Eq [− 21 K
+k=1
+l=1 log(
+i=1
+j=1 uik vjl )].
+We obtain r̃kl = IJαk βl according to (14) and (15). Roughly
+speaking, the smaller αk is, the smaller quik becomes (and vice
+versa), and this induces sparseness of latent features (many αk s
+go zero during the EM iteration).
+
+A.2. FAB M-step
+
+i=1 quik
+,
+I
+
+(t)
+
+(t)
+
+PJ
+
+(t)
+
+PI
+
+r̃kl =
+
+(t)
+
+βl
+
+I X
+J
+X
+
+j=1 qvjl
+
+=
+
+(t)
+
+(t)
+
+quik qvjl
+
+(15)
+
+
+
+(t−1)
+F W−kl , q (t) , Ξ̃(t−1) , X
+(t)
+
+(t)
+
+quik qvjl
+
+i=1 j=1
+
++2
+
+I X
+J
+X
+
+X
+p6=k
+
+(t)
+
+(17)
+
+
+
+1
+xij −
+2
+
+(t)
+(t)
+(t−1)
+quik qvjl λ(ξ˜ij )
+
+i=1 j=1
+
++
+
+X
+
+(t)
+
+(t−1)
+
+qvjq wkq
+
+q6=l
+(t−1)
+
+quip wpl
+
+(t,m−1)
+
+qvj 0 l
+
+
+
+2
+
+(t−1)
+
+wkl
+
+(t,m−1)
+
+qvj 0 l
+
+(t−1)
+
+wkl
+
++
+
+XX
+q6=l p6=k
+
+(t,m−1)
+
+qvj 0 q
+
+(t,m−1)
+
+qui0 p
+
+qvj 0 l
+
+(t,m−1)
+
+(t−1)
+
+wkl
+
+(t−1)
+
+wkq
+
++2
+
+L X
+X
+
+qvj 0 l
+
+(t,m−1)
+
+(t−1)
+
+wkl
+
+(t−1)
+
+wpl
+
+l=1 p6=k
+
++2
+
+L XX
+X
+
+(t,m−1)
+
+qvj 0 l
+
+(t,m−1)
+
+qvj 0 q
+
+(t,m−1)
+
+qui0 p
+
+(t−1)
+
+wkl
+
+(t−1)
+wpq
+
+
+
+l=1 q6=l p6=k
+(t,m−1)
+L
+X
+qvj 0 l
+
+!
+
+(t−1)
+
+.
+
+2r̃kl
+
+where the superscription (t, m) denotes the m-th update of the
+t-th E-step. The update of qvj 0 l is obtained in a similar manner.
+
+A.4. sFAB M-step
+
+i=1 j=1
+
+I X
+J
+X
+
+1
+2
+
+(14)
+
+J
+
+Also, the update equation of weight matrix W is obtained as
+follows:
+
+
+(t−1)
+F W−kl , q (t) , Ξ̃(t−1) , X
+(t)
+,
+(16)
+wkl = − PI PJ
+(t)
+(t)
+(t−1)
+2 i=1 j=1 quik qvjl λ(ξ˜ij )
+
+=
+
+L X
+X
+
+l=1
+
+The update equations for α, β and R̃ are obtained as follows:
+(t)
+
+xi0 j 0 −
+
+l=1
+
+X
+L
+
+
+
+l=1 q<l
+
+−J
+
+αk =
+
++J
+
+L 
+X
+
+l=1
+
+.
+
+(t−1)
+2r̃kl
+
+1
+
+(19)
+(t−1)
+αk
+(t−1)
+− αk
+
+(t−1)
++ Jλ(ξ˜i0 j 0 )
+
+!
+(t,m−1)
+
+−
+
+=
+
+
+(t)
+(t) (t−1)
+quik qvjl wpq
+,
+
+We compute the intermediate model parameter P (t−1/2) by
+taking the noisy gradient of Li0 j 0 in (12) w.r.t. P and setting it
+to zero. As a result, the update equation of intermediate weight
+matrix W(t−1/2) is as follows:
+
+(t−1/2)
+
+wkl
+
+=−
+
+
+
+(t−1)
+(t)
+(t)
+(t−1)
+Fi0 j 0 W−kl , qui0 k , qvj 0 l , ξ˜i0 j 0 , xi0 j 0
+(t−1)
+(t)
+(t)
+2qui0 k qvj 0 l λ(ξ˜i0 j 0 )
+
+,
+
+(20)
+
+
+(t−1)
+(t)
+(t)
+(t−1)
+Fi0 j 0 W−kl , qui0 k , qvj 0 l , ξ˜i0 j 0 , xi0 j 0
+
+
+1
+(t)
+(t)
+(t)
+(t)
+(t−1)
+=qui0 k qvj 0 l xi0 j 0 −
++ 2qui0 k qvj 0 l λ(ξ˜i0 j 0 )
+2
+X
+X (t) (t−1)
+(t) (t−1)
+qvj 0 q wkq +
+qui0 p wpl
+q6=l
+
++
+
+XX
+q6=l p6=k
+
+p6=k
+(t)
+(t) (t−1)
+qui0 k qvj 0 l wpq
+
+
+.
+
+(21)
+
+Scalable Model Selection for Large-Scale Factorial Relational Models
+
+References
+Airoldi, E., Blei, D., Fienberg, S., and Xing, E. Mixed
+membership stochastic blockmodels. JMLR, 2008.
+Azizi, E., Airoldi, E., and Galagan, J. Learning modular
+structures from network data and node variables. In
+ICML, 2014.
+Eto, R., Fujimaki, R., Morinaga, S., and Tamano, H. Fullyautomatic bayesian piecewise sparse linear models. In
+AISTATS, 2014.
+Fujimaki, R. and Hayashi, K. Factorized asymptotic
+bayesian hidden markov models. In ICML, 2012.
+Fujimaki, R. and Morinaga, S. Factorized asymptotic
+bayesian inference for mixture modeling. In AISTATS,
+2012.
+Globerson, A., Chechik, G., Pereira, F., and Tishby, N.
+Euclidean embeddding of co-occurrence data. JMLR,
+2007.
+Gopalan, P. and Blei, D. Efficient discovery of overlapping
+communities in massive networks. PNAS, 2013.
+Gopalan, P., Mimno, D., Gerrish, S., Freedman, M., and
+Blei, D. Scalable inference of overlapping communities.
+In NIPS, 2012.
+Hayashi, K. and Fujimaki, R. Factorized asymproric
+bayesian inference for latent feature models. In NIPS,
+2013.
+Hayashi, K., Maeda, S., and Fujimaki, R. Rebuilding factorized information criterion: Asymptotically accurate
+marginal likelihood. In ICML, 2015.
+
+online inference for bayesian nonparametric relational
+models. In NIPS, 2013.
+Koutsourelakis, P. and Eliassi-Rad, T. Finding mixedmemberships in social networks. In AAAI, 2008.
+Lancichinetti, A. and Fortunato, S. Benchmarks for testing
+community detection algorithms on directed and weighted graphs with overlapping communities. Phys Rev E
+Stat Nonlin Soft Matter Phys, 2009.
+Long, B., Zhang, Z., and Yu, P. A probabilistic framework
+for relational clustering. In KDD, 2007.
+Meeds, E., Ghahramani, Z., Neal, R., and Roweis, S.
+Modeling dyadic data with binary latent factors. In
+NIPS, 2007.
+Miller, J. and Harrison, M. A simple example of dirichlet
+process mixture inconsistency for the number of components. In NIPS, 2013.
+Miller, J. and Harrison, M. Inconsistency of pitman-yor
+process mixtures for the number of components. JMLR,
+2014.
+Miller, K. Bayesian nonparametric latent feature models.
+PhD thesis, University of California, Berkeley, 2011.
+Miller, K., Griffiths, T., and Jordan, M. Nonparametric
+latent feature models for link prediction. In NIPS, 2009.
+Morup, M., Schmidt, M., and Hansen, L. Infinite multiple
+membership relational modeling for complex metworks.
+In Workshop of NIPS, 2013.
+Palla, K., Knowles, D., and Ghahramani, Z. An infinite
+latent attribute model for network data. In ICML, 2012.
+
+Hernández-Lobato, J., Houlsby, N., and Ghahramni, Z.
+Stochastic inference for scalable probabilistic modeling
+of binary matrices. In ICML, 2014.
+
+Palla, K., Knowles, D., and Ghahramani, Z. Relational
+learning and network modelling using infinite latent
+attribute models. IEEE Trans. PAMI, 2014.
+
+Hoffman, M., Blei, D., Wang, C., and Paisley, J. Stochastic
+variational inference. JMLR, 2012.
+
+Ranganath, R., Wang, C., Blei, D., and Xing, E. An adaptive learning rate for stochastic variational inference. In
+ICML, 2013.
+
+Hsu, W. Relational graphical models for collaborative filtering and recommendation of computational workflow
+components. In Workshop of IJCAI, 2005.
+
+Tamara, B., Nicholas, B., Andre, W., and Ashia, W.
+Streaming variational bayes. In NIPS, 2013.
+
+Jaakkola, T. and Jordan, M. A variational approach to
+bayesian logistic regression models and their extensions.
+In AISTATS, 1997.
+
+Wang, C. and Blei, D. Truncation-free online variational
+inference for bayesian nonparametric models. In NIPS,
+2012.
+
+Jaimovich, A., Eledan, G., Margalit, H., and Friedman,
+N. Towards an integrated protein-protein interaction
+network: a relational markov network approach. Journal
+of Computational Biology, 2006.
+
+Wipf, D. and Nagarajan, S. A new view of automatic
+relevance determination. In NIPS, 2007.
+
+Johnson, M. and Willsky, A. Stochastic variational inference for bayesian time series models. In ICML, 2014.
+
+Zachary, W. An information flow model for conflict and
+fission in small groups. Journal of Anthropological
+Research, 1977.
+
+Kim, D., Hughes, M., and Sudderth, E. The nonparametric
+metadata dependent relational model. In ICML, 2012.
+Kim, D., Gopalan, P., Blei, D., and Sudderth, E. Efficient
+
+Wong, R. Asymptotic Approximation of Integrals (Classics
+in Applied Mathematics). SIAM, 2001.
+
+Zhu, J. Max-margin nonparametric latent feature models
+for link prediction. In ICML, 2012.
+
+

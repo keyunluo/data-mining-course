@@ -1,0 +1,1302 @@
+Entropic Graph-based Posterior Regularization
+
+Maxwell W Libbrecht
+MAXWL @ CS . WASHINGTON . EDU
+Genome Sciences, Box 355065, Foege Building, S220B, 3720 15th Ave NE, Seattle, WA 98195-5065
+Michael M Hoffman
+MICHAEL . HOFFMAN @ UTORONTO . CA
+Princess Margaret Cancer Centre, Toronto Medical Discovery Tower 11-311, 101 College St, Toronto, ON M5G 1L7
+Jeffrey A Bilmes
+BILMES @ EE . WASHINGTON . EDU
+Department of Electrical Engineering, University of Washington, Seattle, Box 352500, Seattle, WA 98195-2500
+William S Noble
+WILLIAM - NOBLE @ U . WASHINGTON . EDU
+Genome Sciences, Box 355065, Foege Building, S220B, 3720 15th Ave NE, Seattle, WA 98195-5065
+
+Abstract
+Graph smoothness objectives have achieved great
+success in semi-supervised learning but have not
+yet been applied extensively to unsupervised generative models. We define a new class of entropic
+graph-based posterior regularizers that augment
+a probabilistic model by encouraging pairs of
+nearby variables in a regularization graph to
+have similar posterior distributions. We present a
+three-way alternating optimization algorithm with
+closed-form updates for performing inference on
+this joint model and learning its parameters. This
+method admits updates linear in the degree of the
+regularization graph, exhibits monotone convergence, and is easily parallelizable. We are motivated by applications in computational biology
+in which temporal models such as hidden Markov
+models are used to learn a human-interpretable
+representation of genomic data. On a synthetic
+problem, we show that our method outperforms
+existing methods for graph-based regularization
+and a comparable strategy for incorporating
+long-range interactions using existing methods
+for approximate inference. Using genome-scale
+functional genomics data, we integrate genome
+3D interaction data into existing models for
+genome annotation and demonstrate significant
+improvements in predicting genomic activity.1
+1
+
+Due to space constraints, this manuscript omits some proofs
+and experiments, as noted below. Please refer to the extended
+version (Libbrecht et al., 2015) for these sections.
+Proceedings of the 32 nd International Conference on Machine
+Learning, Lille, France, 2015. JMLR: W&CP volume 37. Copyright 2015 by the author(s).
+
+Graph-based methods have recently been successful in
+solving many types of semi-supervised learning problems
+(Chapelle et al., 2006; Das & Smith, 2011; Joachims,
+1999; Subramanya et al., 2010; ?; Subramanya & Bilmes,
+2011; Zhu et al., 2004; Zhu & Ghahramani, 2002). These
+methods assume that data instances lie in a low-dimensional
+manifold that may be represented as a graph. They
+optimize a graph smoothness criterion, which states that
+data instances nearby in the graph should be more likely
+to receive the same label. In a semi-supervised learning
+setting, optimizing this criterion has the effect of spreading
+labels from labeled to unlabeled instances.
+Despite the success of graph-based methods for semisupervised learning, there has not been as much study of
+the use of graph smoothness objectives in an unsupervised
+setting. In unsupervised problems, we do not have labels
+but instead have a generative model that is assumed to
+explain the observed data given the latent labels. While
+some types of relationships between instances (for example,
+the relationship between neighboring words in a sentence or
+neighboring bases in a genome) can easily be incorporated
+into the generative model, it is often inappropriate to encode
+a graph smoothness assumption into the model this way,
+for two reasons. First, in some cases, it is not clear what
+probabilistic process generated the labels with respect to
+the graph. Some objectives and distance measures that
+are successful for semi-supervised learning do not have
+probabilistic analogues. Second, large models must obey
+factorization properties (e.g., a tree or chain as in hidden
+Markov models) to facilitate the use of efficient dynamic
+programming algorithms such as belief propagation. Graphs
+representing similarity between variables do not in general
+satisfy these structure requirements because they tend to
+be densely clustered, leading to very high-order factors.
+
+Entropic Graph-based Posterior Regularization
+
+In this paper, therefore, we propose a new regularization
+approach for expressing a graph smoothness objective
+over a probabilistic model. We employ the posterior
+regularization (PR) framework of Ganchev et al. (2010), in
+which a probabilistic model is regularized through a term
+defined on an auxiliary posterior distribution variable. We
+define a powerful posterior regularizer which encourages
+pairs of variables to have similar posterior distributions
+by adding a penalty based on their Kullback-Leibler (KL)
+divergence. The pairs of penalized variables are encoded in
+a regularization graph which may be entirely different from
+the graphical model on which inference is performed. This
+regularizer graph need not have low treewidth and admits
+efficient optimization even when fully connected. We call
+our strategy of adding KL regularization penalties entropic
+graph-based posterior regularization (EGPR).
+We show that inference and learning using this regularizer
+can be performed efficiently using a three-way alternating
+optimization algorithm with closed-form updates. This
+algorithm alternates between (1) smoothing marginal
+posteriors according to a regularization similarity graph,
+(2) performing probabilistic inference in a graphical model
+with the same dependence structure as the unregularized
+model, and (3) updating model parameters. The updates
+are linear in the degree of the regularization graph and
+are easily parallelizable (?), in our experiments scaling to
+tens of millions of variables. We show that this procedure
+corresponds to a generalization of the EM algorithm.
+We apply this approach to improve existing methods for
+annotating the human genome (Day et al., 2007; Hoffman
+et al., 2012a; Ernst & Kellis, 2010). Methods for genome
+annotation distill genomic data into a human-interpretable
+form by simultaneously partitioning the genome into nonoverlapping segments and assigning labels to each segment.
+This type of analysis has recently had great success in interpreting the function of the human genome and formed an
+integral part of the analysis of the NIH-sponsored ENCODE
+project ((ENCODE Project Consortium, 2012; Hoffman
+et al., 2012b), http://www.nature.com/encode).
+However, exiting annotation methods use temporal models
+such as hidden Markov models and therefore cannot efficiently incorporate data on the genome’s 3D structure. This
+3D structure has been shown to play a key role in gene regulation and other genomic processes. In our experiments on
+synthetic data, a model using EGPR outperforms comparable models using either other regularization strategies (e.g.,
+squared error) or loopy belief propagation. On ENCODE
+data, a model using EGPR predicts genome activity much
+more accurately than the currently-used chain models as
+well as other forms of regularizer. Thus EGPR provides a
+method for jointly modeling genome activity and 3D structure.
+
+1. Proposed Method
+In an unsupervised learning problem, we are given a set
+of vertices V that index a set of n = |V | random variables
+XV = {X1 , . . . , Xn } and a conditional dependence graph
+G = (V, E). The graphical model describes a probability
+distribution parameterized by θ that can be factorized as
+Q
+(C)
+pθ (xV ) = Z1 C∈C φθ (xC ) where each C ⊆ V is a fully
+connected clique in G. We denote random variables with
+capital letters (e.g., XH ) and instantiations of variables with
+lower-case (e.g., xH ∈ domain(XH )). We also use capitals
+to denote sets and lowercase to denote set elements (e.g.,
+Xh for h ∈ H). Training graphical models involves a set
+of observed data x̄O , where a subset of variables O ⊆ V
+is observed and the remainder H = V \ O are hidden.
+When the probability distribution is governed by a set
+of parameters θ, penalized maximum likelihood training
+corresponds to the optimization
+J(θ) , L(θ) + R(θ)
+(1)
+X
+where L(θ) , log pθ (x̄O ) = log
+pθ (xH , x̄O ), (2)
+
+maximizeθ
+
+xH
+
+and where R(θ) is a regularizer that expresses prior
+knowledge about the parameters. Many regularizers
+are used in practice, such as the `2 or `1 norms, which
+encourage parameters to be small or sparse, respectively.
+Instead of placing a regularizer on the parameters themselves, it is often more natural to place a regularizer on the
+posterior distribution, a technique called posterior regularization (Ganchev et al., 2010). This is done by introducing
+an auxiliary joint distribution q(XH ), placing a regularizer
+on q(XH ), and encouraging q to be similar to pθ via a KL
+divergence penalty. The regularizer is
+RPR (θ) , max R0PR (θ, q)
+q
+
+R0PR (θ, q) , −D(q(XH )kpθ (XH |x̄O )) + PR(q),
+
+(3)
+(4)
+
+where
+D(·k·) is the KL divergence D(p(X)kq(X)) =
+P
+p(x)
+log(p(x)/q(x)) and PR(q) is a penalty term that
+x
+expresses some prior knowledge about the posterior distribution. For notational convenience, we also define J 0 (θ, q) ,
+L(θ) + R0 (θ, q). Ganchev et al. (2010) showed how to optimize this combined objective efficiently when PR(q) is
+a sum of terms over individual cliques in the model. Such
+regularizers can be used for constraining the posterior of individual variables in expectation, among other applications.
+However, graph smoothness objectives cannot be expressed
+this way, because they involve arbitrary pairs of variables.
+When we have a graph smoothness assumption, we are given
+a weighted, undirected regularization graph over the hidden
+variables GR = (H, ER ), where ER ⊆ H × H is a set of
+edges with non-negative similarity weights w : ER → R+ ,
+
+Entropic Graph-based Posterior Regularization
+
+such that a large w(u, v) indicates that we have strong belief
+that Xu and Xv should be similar. The regularization graph
+GR is entirely separate from the conditional dependence
+graph G and, in particular, need not obey any decomposition
+or factorization properties to admit efficient inference.
+He et al. (2013) introduced a regularizer of the following
+form. Let λG be a hyperparameter controlling the strength
+of regularization. The regularizer is
+PRGPR (q) , −λG
+
+X
+(u,v)∈ER
+
+w(u, v)kq(Xu ) − q(Xv )k22 .
+
+He et al. showed how to optimize this regularizer using an
+exponentiated gradient descent method.
+Although this regularizer shows good results for some problems, the use of squared error—or indeed any p-norm—to
+represent dissimilarity between probability distributions can
+be highly suboptimal, as we demonstrate empirically in
+Sections 5 and 6. Squared error is based on a Gaussian
+error model, which is not appropriate for probability values,
+and it under-penalizes differences between small probability
+values. p-norms are defined over all real numbers, while
+posteriors must lie within the range [0, 1] (and live in a
+simplex).
+A more justified way to measure divergence between probability distributions is to employ the KL divergence. The KL
+divergence measures the difference of exponents in the probability and so evaluates differences between small and large
+probabilities more uniformly. Also, Pinsker’s inequality
+(Csiszár & Tusnády, 1984) combined with the relationship
+of `-norms implies that D(pkq) ≥ 12 kp − qk21 ≥ 12 kp − qk2` ,
+for all ` ≥ 1, where k · k` is the `-norm. Hence, minimizing
+KL divergence minimizes an upper bound on all `-norms.
+As a concrete example, consider two pairs of probability
+distributions over two events: p1 = [0.55, 0.45] vs. q1 =
+[0.45, 0.55], and the second pair p2 = [0.1, 0.9] vs. q2 =
+[10−10 , 1 − 10−10 ]. The first pair of distributions (p1 , q1 )
+are fairly similar, with both events being roughly equally
+likely. The second pair (p2 , q2 ) is quite dissimilar, with the
+first event being reasonably likely in the first case p2 and
+astronomically unlikely in the second q2 . Squared error actually regards the first pair as more dissimilar than the second
+pair, while KL divergence identifies the second pair as much
+more dissimilar. Despite the advantages of KL divergence,
+although all posterior regularization objectives include a KL
+term binding q to be similar to pθ , to our knowledge, no
+existing methods define the posterior regularizer itself using
+KL. Results in Sections 5 and 6 will show, moreover, that KL
+significantly improves over squared error across the board.
+In this work, we propose such a posterior regularizer,
+which we term entropic graph-based posterior regulariza-
+
+tion (EGPR). The posterior regularizer is
+PREGPR (q) ,
+X
+− λG
+
+w(u, v)D(q(Xu )kq(Xv )),
+
+(5)
+
+(u,v)∈ER
+
+0
+JEGPR
+(θ, q)
+
+and
+and R0EGPR (θ, q) are defined according to
+Equations (2) and (4) respectively using the corresponding
+regularizers. That is,
+maximizeθ,q
+
+0
+JEGPR
+(θ, q) , L(θ) + R0EGPR (θ, q),
+
+R0EGPR (θ, q) , −D(q(XH )kpθ (XH |x̄O )) + PREGPR (q).
+The KL divergence in Equation 5 is symmetrized because GR is undirected—that is w(u, v) = w(v, u)—so
+D(qu kqv ) and D(qv kqu ) appear with the same weight in
+the regularizer.
+In the next section, we describe a novel alternating
+optimization algorithm for solving Equation (1) with an
+EGPR regularizer. Unlike other recent prominent examples
+of alternating optimization in machine learning (Wang
+et al., 2008), each update of this method has a closed-form
+solution. EGPR can be employed either as a regularizer
+for training the parameters or for inference directly. In the
+training case, an EM-like algorithm described in Section 2.3
+is used to compute and output θ, which can then be used
+for inference either with or without EGPR. In the inference
+case, q is computed and output as the posterior marginals,
+as described in Section 3.
+
+2. EGPR for Training
+0
+We first describe how to compute argmaxq JEGPR
+(θ, q),
+then describe how this algorithm can be used in combination
+with an EM-like algorithm for learning θ.
+
+2.1. Optimizing q
+The EGPR regularizer R0EGPR (θ, q) is convex in q; therefore,
+we could compute q using any convex optimization
+algorithm. However, general-purpose convex optimization
+algorithms do not scale to problems with millions or billions
+of variables such as those present in genomics. Therefore,
+we instead propose a novel alternating optimization strategy
+for performing this optimization more efficiently.
+To enable closed form updates for this objective, we refor0
+mulate JEGPR
+(θ, q) by introducing a new variable rM (XH ).
+M
+Like q, r is a distribution over XH , but we require
+that rM be factorizable
+as a product of marginals—that is
+Q
+rM (xH ) = h rhM (xh ). (In this manuscript, we use the notation pM (XH ) to indicate that p is a product of marginals.)
+We define the graph regularizer over rM and add an additional term λR1 D(q(XH )krM (XH )), which encourages q
+and rM to be similar. As we show below, restricting rM in
+
+Entropic Graph-based Posterior Regularization
+
+this way means that the reformulated objective is a lower
+bound on the original rather than being equivalent. We maximize this lower bound as an approximation to maximizing
+the original. The reformulated regularizer is
+PR0EGPR-R1 (q, rM ) , −λR1 D(q(XH )krM (XH ))
++ fR1 (rM )
+
+(6)
+
+and
+fR1 (rM ) ,
+X
+− λG
+
+w(u, v)D(rM (Xu )krM (Xv )),
+
+2.2. Optimizing rM
+
+0
+where JEGPR-R1
+(θ, q, rM ) and R0EGPR-R1 (θ, q, rM ) are defined according to Equations (2) and (4) respectively using
+the corresponding regularizers. That is,
+0
+JEGPR-R1
+(θ, q, rM ) ,
+
+L(θ) + R0EGPR-R1 (θ, q, rM ),
+
+R0EGPR-R1 (θ, q, rM ) ,
+
+− D(q(XH )kpθ (XH |x̄O )) + PREGPR-R1 (q, rM ).
+
+(8)
+(9)
+
+First, we show that rM ≈ q for large values of λR1 , so
+optimizing the reformulated regularizer is equivalent to optimizing a lower bound on the original.
+Lemma 2.1. For distributions p ∈ P and q ∈ Q
+where P ∩ Q 6= ∅ and a continuous function J(p, q),
+˜ q; λ) = J(p, q) − λD(pkq), and p∗ , q ∗ ∈
+let J(p,
+λ λ
+˜ q; λ). Then the following hold:
+argmaxp∈P,q∈Q J(p,
+
+While the last reformulation enabled closed form updates
+for q, the objective still does not admit closed-form updates
+for rM . This is due to the fact that an objective of the
+form D(pkq) + D(pkr) admits closed form updates for p,
+while D(pkq) + D(rkp) does not. Therefore, we again
+reformulate PREGPR-R1 (θ, q, rM ) by adding a new variable
+sM , where sM is also a distribution over XH restricted to
+be factorizable as a product of marginals. As before, we
+add a term λR2 D(sM (XH )krM (XH )), which encourages
+sM ≈ rM . We define the graph regularizer KL divergence
+terms to have sM on the left and rM on the right—that
+M
+is, in the form D(sM
+u (Xu )krv (Xv ))—which will enable
+efficient optimization for both variables.
+PR0EGPR-R2 (q, rM , sM ) , −λR1 D(q(XH )krM (XH ))
++ max fR2 (rM , sM )
+sM
+
+(14)
+M
+
+lim D(p∗λ kqλ∗ ) = 0,
+
+(10)
+
+lim kp∗λ − qλ∗ k` = 0
+
+(11)
+
+λ→∞
+λ→∞
+
+for any `, where k · k` is the `-norm, and
+˜ q; λ) ≤ max J(p, p).
+lim max J(p,
+
+λ→∞ p∈P,q∈Q
+
+This is identical to the original model pθ , but with one additional factor rhM (xh )λR1 /(1+λR1 ) over each label. Critically,
+because rM is factorizable such that each factor involves
+just one variable Xh , q ∗ (XH ) is factorizable in the same
+way as the unregularized model pθ (XH , x̄O ). For example,
+if the original model was an HMM, q still factors as a chain.
+Therefore, the normalization constant can be computed
+using any algorithm for exact or approximate probabilistic
+inference on factorized models, such as belief propagation,
+with similar computational cost as the unregularized model.
+
+(7)
+
+(u,v)∈FEGP R
+
+maximizeθ,q,rM
+
+Proof: See extended version (Libbrecht et al., 2015).
+
+p∈P
+
+(12)
+
+Proof: See extended version (Libbrecht et al., 2015).
+Therefore, for sufficiently large λR1 , optimizing Equation (7)
+is equivalent to optimizing a lower bound on Equation (5).
+This form allows us to compute q efficiently, which is shown
+as follows.
+Theorem
+2.2.
+Define
+q ∗ (XH )
+0
+M
+argmaxq JEGPR-R1 (θ, q, r ). Then,
+
+,
+
+q ∗ (xH ) =
+Q
+pθ (xH , x̄O )1/(1+λR1 ) h∈H rhM (xh )λR1 /(1+λR1 )
+P
+Q
+.
+0
+M
+0 λR1 /(1+λR1 )
+1/(1+λR1 )
+x0H pθ (xH , x̄O )
+h∈H rh (xh )
+(13)
+
+M
+
+M
+
+M
+
+fR2 (r , s ) , −λR2 D(s (XH )kr (XH ))
+X
+− λG
+w(u, v)D(suM (Xu )krvM (Xv )).
+(u,v)∈FEGP R
+
+0
+JEGPR-R2
+(θ, q, rM , sM ) and R0EGPR-R2 (θ, q, rM , sM ) are defined according to Equations (2) and (4) respectively using
+the corresponding regularizers. That is,
+
+maximizeθ,q,rM ,sM
+
+0
+JEGPR-R2
+(θ, q, rM , sM ) ,
+
+L(θ) + R0EGPR-R2 (θ, q, rM , sM ),
+
+(15)
+
+R0EGPR-R1 (θ, q, rM , sM ) ,
+
+− D(q(XH )kpθ (XH |x̄O )) + PREGPR-R2 (q, rM , sM ).
+(16)
+
+By Lemma 2.1, optimizing REGPR-R2 (q) is equivalent to
+optimizing REGPR-R1 (q) for large values of λR2 . This regularizer can be optimized in rM and sM using closed-form
+updates, shown as follows.
+Theorem 2.3. For notational simplicity, define a new
+regularization graph with self-edges of weight λR2 /λG ,
+
+Entropic Graph-based Posterior Regularization
+0
+EEGPR
+, ER ∪ {(h, h) | h ∈ H}, and
+0
+w (u, v) , w(u, v) + δ(u = v)λR2 /λG .
+Let
+∗
+0
+rM (XH ) ∈ argmaxrM JEGPR-R2
+(θ, q, rM , sM ) and
+∗
+0
+sM (XH ) ∈ argmaxsM JEGPR-R2
+(θ, q, rM , sM ). Then,
+
+rvM (xv ) =
+λR1 qvM (xv )
+
++ λG
+
+P
+
+λR1 + λG
+
+P
+
+0
+(u,v)∈EEGPR
+
+0
+(u,v)∈EEGPR
+
+w0 (u, v)sM
+u (xv )
+w0 (u, v)
+
+,
+
+∗
+
+(u,v)∈E 0
+P EGPR
+
+exp
+
+w0 (u,v) log rvM (xu )
+
+w0 (u,v)
+(u,v)∈E 0
+EGPR
+0 (u,v) log r M (x0 )
+w
+v
+u
+(u,v)∈E 0
+P EGPR
+w0 (u,v)
+(u,v)∈E 0
+EGPR
+
+P
+
+P
+
+x0u
+
+exp
+
+.
+
+✓
+
+✓⇤ (q)Update q
+
+(18)
+
+q ⇤ (✓, rM )
+
+q ⇤ (✓,Update
+r M ) r M , sM
+
+Update q
+
+(17)
+
+sM
+u (xu ) =
+P
+
+Update
+
+Update rM , sM
+
+(rM , sM )⇤ (q)
+
+M
+M M
+(rUpdate
+, srM),⇤s(q)
+
+(rM , sM )⇤ (q)
+
+Figure 1. Illustration of optimization algorithm. Solid ovals denote closed-form update steps. Dashed ovals with dotted expansion
+lines denote updates that are implemented by alternating optimization. Pairs of opposing arrows indicate alternating optimization
+implemented by iterating each update to convergence. See the
+extended version (Libbrecht et al., 2015) for the full algorithm.
+
+Proof: See extended version (Libbrecht et al., 2015).
+Proof: See extended version (Libbrecht et al., 2015).
+
+2.3. Updating θ
+The preceding section described an algorithm for computing
+argmaxq REGPR-R2 . This algorithm can be combined with
+an EM-like algorithm in order to learn a θ that (locally)
+optimizes JEGPR-R2 , as we describe in this section. We use
+an alternating EM-like algorithm to compute θ.
+E-step:
+0
+q (t+1) ∈ argmaxq,rM ,sM JEGPR-R2
+(θ(t) , q, rM , sM )
+
+0
+M-step: θ(t+1) ∈ argmaxθ JEGPR
+(θ, q (t+1) )
+
+The preceding section showed how to perform the E-step.
+To compute the M-step,
+0
+argmaxθ JEGPR
+(θ, q (t+1) )
+
+= argmaxθ Eq(t+1) (XH ) [log pθ (XH , x̄O ))]
+
+(19)
+
+The M-step takes the same form as the EM algorithm
+presented in (Neal & Hinton, 1999). The update for θ
+depends on the particular factorization and parameterization
+properties of the model. Because the posterior distribution
+q(XH ) obeys the same factorization properties as the
+unregularized model pθ (XH , XO ), the same closed-form
+updates for θ can be used.
+Therefore, the upper bound on the EGPR objective,
+JEGPR-R2 , can be minimized using a three-way alternating
+optimization algorithm, which proceeds by alternating
+closed-form updates to rM and rM to convergence, alternating this whole update of rM /sM with closed-form updates
+to q until convergence, then finally alternating updates to
+q and θ until convergence. A schematic of the algorithm
+is shown in Figure 1. The full algorithm in pseudocode is
+shown in the extended version (Libbrecht et al., 2015).
+Theorem 2.4. The modified EM algorithm monotonically
+increases the relaxed EGPR objective:
+JEGPR-R2 (θ(t) ) ≤ JEGPR-R2 (θ(t+1) ).
+
+(20)
+
+3. EGPR for Inference
+In addition to its use for regularized learning, EGPR can
+be used directly as an inference algorithm. To do this,
+0
+we compute q ∗ ← argmaxq JEGPR-R2
+(θ, q) and use this
+distribution as the posterior. As discussed above, q ∗ obeys
+the same factorization properties as pθ , so algorithms such
+as Viterbi and belief propagation can be used to compute the
+MAP solution and marginal distributions of q respectively.
+Using EGPR as an inference algorithm results in posteriors
+which are smooth with respect to the graph GR .
+
+4. Related work
+The most straightforward way to express similarity information in an unsupervised model is to encode it in the graphical
+model. For example, one might add a factor between Xu
+and Xv as in φ(xu , xv ) = λ1(xu = xv ). This form of
+interaction is quite different from EGPR, because adding
+factors changes the “implementation” of the model, while
+EGPR regularizes what the model does. Moreover, there are
+two problems with this approach. First, it is not always clear
+what form of interaction is most appropriate. In particular,
+although KL-based penalties have been very successful in
+graph-based semi-supervised learning, they cannot be converted to an equivalent set of probability factors. Second,
+adding similarity edges to the probabilistic model results
+in a model that does not, in general, have low tree-width,
+so efficient exact inference algorithms such as belief propagation cannot be used, and one must resort to approximate
+inference. As we show in Section 5.2, EGPR performs better than the loopy belief propagation (LBP) approximate
+inference algorithm on an augmented graph.
+Three methods take a similar approach to ours, by augmenting a probabilistic model with a graph regularizer. First,
+
+Entropic Graph-based Posterior Regularization
+
+Third, He et al. (2013) present an approach based on an
+exponentiated gradient descent algorithm. Like our approach, He’s approach exhibits monotone convergence. Although He’s work has many similarities with our approach,
+He’s work differs from ours in three important ways. First,
+He’s method uses a squared-error penalty, which, as argued
+above, is less appropriate for probability distributions than
+Kullback-Leibler divergence (Bishop, 1995, p. 226). As
+shown in Section 5.2, using squared error also results in
+worse performance in practice. Second, the exponentiated
+gradient descent method is applied to semi-supervised handwriting recognition and part-of-speech tagging, while we
+apply EGPR to an unsupervised genome annotation problem. Third, He et al. (He et al., 2013) use an exponentiated
+gradient descent strategy, while we use alternating optimization.
+Our alternating optimization approach has several benefits
+over the exponentiated gradient descent method of He et al.
+(He et al., 2013). First, the He et al. algorithm involves gradient calculations over each clique in the conditional dependence graph, with order O(k |C| ) for a variable of dimension
+k involved in cliques of size |C|. Our alternating minimization algorithm, by contrast, has closed-form updates
+of order O(k) for q, rM and sM . (Updates for θ can still
+involve O(k |C| ) calculations, but these are generally very
+fast). Therefore, the alternating optimization algorithm is
+more appropriate for extremely large models or models with
+large cliques or high-order factors. Second, empirical studies of KL-based graph smoothness objectives have shown
+that alternating optimization algorithms perform better than
+gradient-based methods for these objectives (Subramanya
+& Bilmes, 2011; ?). Finally, the alternating optimization
+strategy is parallelizable (?) and extremely simple to implement because the graph regularization step has simple,
+closed-form updates with no learning rate hyperparameters,
+and the posterior calculation can be performed using any
+probabilistic inference method on a model with the same
+conditional dependence graph as the unregularized model.
+
+Without EGPR
+●
+
+True
+class
+
+With EGPR
+
+● ●
+●
+●
+● ● ● ●
+●
+●● ●
+● ●●
+●
+
+●
+
+● ●
+●
+●
+● ● ● ●
+● ●
+●
+●
+
+X
+
+●
+●●
+●
+●
+●
+●● ●
+●●
+●
+●
+
+1
+2
+3
+4
+
+●●
+●
+
+Y
+
+●
+
+●
+
+● ●
+●
+●
+● ● ● ●
+●
+●● ●
+● ●●
+●
+
+●●
+
+Y
+
+Altun et al. (2005) describe a graph regularization for maxmargin models applied to pitch-accent prediction and optical
+character recognition. However, this method involves a matrix inversion step, and thus it cannot scale to large models.
+Second, Subramanya et al. (2010) combine a temporal conditional random field with a regularizer that expresses pairwise squared-error penalties derived from unlabeled data.
+They apply this method to the part-of-speech tagging task
+(Subramanya et al., 2010) and later to related problems in
+natural language (Das & Petrov, 2011; Das & Smith, 2011).
+That work, however, resorts to a purely heuristic update step
+and lacks any optimality guarantees.
+
+● ●
+●
+●
+● ● ● ●
+● ●
+●
+●
+
+●
+●●
+●
+●
+●
+●● ●
+●●
+●
+●
+
+X
+
+Predicted
+class
+●
+
+1
+
+●
+
+2
+
+●
+
+3
+
+●
+
+4
+
+Figure 2. Using EGPR to learn ambiguous clusters. Shape denotes
+true class, color denotes predicted class, and colored arrows denote
+cluster means as they evolve between iterations of EM.
+
+5. Simulations
+In addition to the results shown below, in the supplement
+(Libbrecht et al., 2015), we show results for an application of
+EGPR to genome physical interactions on real and simulated
+data. All implementations in the below use the GMTK, the
+graphical models toolkit (?), and its use of virtual evidence
+factors, for HMM and dynamic graphical model inference
+5.1. Learning a Gaussian Mixture on Poorly-Separated
+Data
+First, we consider a simple example that demonstrates the
+utility of EGPR (Figure 2). Suppose we wish to learn a mixture of four Gaussians on data lying in a circle in 2D, using
+EM training to find cluster centers. Clearly, the training
+problem is underspecified in this case, because any set of
+centers at 90 degrees from one another relative to the circle’s
+center represents an optimum of the model likelihood. However, suppose we additionally have pairwise information that
+certain slices of the circle should form clusters. To represent
+this additional information, we form a regularization graph
+that connects all pairs of positions within the same cluster
+and run EM with EGPR using this graph. EGPR finds the
+true cluster centers and recovers the true labels with 100%
+accuracy compared to 74% accuracy with EM alone. This
+example demonstrates how pairwise information can be integrated in the training process to produce a trained model
+that implicitly incorporates this information.
+5.2. Comparison with Related Inference Methods
+To evaluate the efficacy of EGPR, we compared EGPR
+to two related methods: 1) approximate inference on a
+graphical model with the same dependence structure, and 2)
+GPR using squared-error penalties. We compared to the approximate inference method loopy belief propagation (LBP)
+because it is one of the most widely used approximate inference methods. While we would have preferred to perform
+this comparison using our genomics data sets (see Section
+
+Entropic Graph-based Posterior Regularization
+
+0.4
+Method
+Independent
+
+Error
+
+0.3
+
+provement over the chain model, but has poor performance
+relative to KL penalties, consistent with previous work on
+semi-supervised methods (Subramanya & Bilmes, 2011; ?).
+
+Chain
+0.2
+
+Loopy BP
+SQGPR
+
+0.1
+
+EGPR
+0.0
+0.5
+
+1
+
+1.5
+
+2
+
+Noise level (sigma)
+
+Figure 3. Comparison of EGPR with related inference methods.
+The X axis shows σ, a hyperparameter controlling the difficulty
+of inference. The Y axis shows the average accuracy over 200
+simulations of MAP inference on the model in question (95%
+Wilcoxon test confidence intervals).
+
+6), due to the large size of the models and dense connectivity
+of the regularization graphs, it appeared that even our implementations of these methods would take months to converge.
+Therefore, we instead performed this comparison using synthetic data. We generated a chain of length n = 200, with
+(XH , XO ) = (Z1:200 , Y1:200 ), where Z1:200 ∈ {0, 1}n and
+Y1:200 ∈ Rn . We defined an HMM over this chain with
+transition probabilities Pr(Zi = Zi+1 ) = 0.9 and emission
+probabilities Yi ∼ N (Zi , σ), where we vary σ to control
+the difficulty of the problem—higher σ results in more
+challenging inference. We generated a graph W ∈ Rn×n
+over the vertices of the chain by setting wij = 1 with
+probability 0.4 if Zi = Zj , wij = 1 with probability 0.1
+if Zi =
+6 Zj , and wij = 0 otherwise. This model is meant
+to simulate the task of labeling a chain (such as a genomic
+sequence) where we have noisy information about which
+pairs of positions have the same label.
+We compared five methods of inference: 1) inference on
+each position independently, with no chain model; 2) inference on the chain alone, without using W ; 3) LBP on the
+chain plus extra factors of Pr(Xi = Xj ) = sigmoid(λwij ),
+where λ controls the strength of these factors; 4) GPR using
+the regularization graph W and a squared-error penalties as
+described in (He et al., 2013) (SQGPR); and 5) EGPR using
+the regularization graph W . We chose hyperparameters
+for each model (λG , λR1 and λR2 for GPR and λ for LBP)
+using a training set of 200 simulations. We evaluated results
+according to the average accuracy over 200 simulations of
+MAP inference on the model in question.
+EGPR significantly outperforms all other models for all
+experiments (Figure 3, providing nearly as much improvement in accuracy as does the chain model itself. The pattern
+of accuracy is instructive in understanding the properties
+of each model. LBP performs very well when there is little
+noise, but becomes easily stuck in local optima on harder
+problems. GPR with squared error provides a modest im-
+
+6. Application: Genome Annotation Using
+Physical Interaction Information
+Recently, many methods have been described that partition
+and label the human genome on the basis of a number of
+genome-wide real-valued signal tracks, generally employing
+temporal models such as HMMs (Day et al., 2007; Hoffman
+et al., 2012a; Ernst & Kellis, 2010; Filion et al., 2010;
+Thurman et al., 2007; Lian et al., 2008). Formally, these
+methods aim to learn a labeling XH 1:n ∈ {1..L}n which
+associates each position in the genome with one of L integer
+labels, such that positions that receive the same label exhibit
+similar patterns in the signal data. The input is comprised of
+a feature vector XO i ∈ RF at each position that represents
+the output of biological experiments that measure local
+properties of the DNA, including its interaction with binding
+proteins, its local structure, and various types of chemical
+modifications. The process is “semi-automated” because
+a human assigns a semantic interpretation of the integer
+labels subsequent to the unsupervised learning phase.
+However, existing genome annotation methods cannot
+incorporate the genome’s 3D conformation. The 3D arrangement of the genome in the nucleus plays a central role
+in gene regulation, chromatin state and replication timing
+(Misteli, 2007; Dekker et al., 2002; Ryba et al., 2010; Dixon
+et al., 2012). Genome conformation can be investigated
+using chromatin conformation capture experiments such as
+Hi-C (Lieberman-Aiden et al., 2009). A Hi-C experiment
+outputs a matrix of contact counts, where the number of
+contact counts of a pair of genomic positions is inversely
+proportional to the positions’ 3D distance in the nucleus
+(Lieberman-Aiden et al., 2009; Ay et al., 2014b). Existing
+genome annotation methods can incorporate any data set
+that can be represented as a vector defined linearly across
+the genome, but they cannot incorporate inherently pairwise
+Hi-C data without resorting to simplifying transformations
+such as principle component analysis.
+We therefore present a novel strategy for integrating
+3D conformation information using EGPR in which we
+encourage pairs of positions which interact in 3D to
+receive the same label in the annotation by connecting
+these positions with edges in an EGPR graph (Figure 5(a)).
+While the assumption that positions close in 3D space have
+similar regulatory state is not necessarily true at a small
+scale (∼1 thousand base pair elements), it does generally
+hold at a large scale (∼1 million base pair elements)
+(Lieberman-Aiden et al., 2009).
+
+Entropic Graph-based Posterior Regularization
+
+6.1. Synthetic Example
+
+A
+A
+B
+
+Chromatin 3D
+structure
+
+B
+
+C
+
+D
+
+A
+
+Hi-C
+
+B
+
+C
+
+C
+
+D
+
+D
+
+Hi-C contact
+matrix
+
+EGPR!
+graph
+K562
+Signal!
+tracks
+tracks
+
+(a) Without EGPR
+
+A
+
+(b) With EGPR
+
+B
+Segway
+
+C
+
+D
+
+(a)
+
+6.2. Real data
+Next, to evaluate the efficacy of our approach, we performed
+genome annotation of the human fibroblast cell line IMR90.
+We compared three models: (1) the chain model described
+in (Hoffman et al., 2012a), without 3D structure data,
+(2) the chain model augmented with 3D structure data
+expressed with squared-error GPR (SQGPR), and (3) the
+chain model augmented with 3D structure data expressed
+with EGPR. We would have liked to compare against loopy
+belief propagation as well, but as mentioned previously,
+it appeared that our fastest implementation of this method
+would take months to converge on this large data set. In
+order to evaluate our performance in a variety of conditions,
+we ran each model separately once for each of the 29
+available data sets in IMR90.
+For SQGPR and EGPR, we used a GBR graph based on 3D
+structure data. To generate the GBR graph representation of
+3D structure used by EGPR and SQGPR, we used the Hi-C
+data set of (Dixon et al., 2012) and processed the Hi-C data
+into a matrix of pairwise p-values using the Fit-Hi-C method
+(Ay et al., 2014a). To remove noise and decrease the degree
+of the graph, we removed all contacts with uncorrected
+p-value p > 10−6 and multiplied the remaining p-values
+by 106 , similar to a Bonferroni correction. We generated
+
+Chain RMSE − EGPR RMSE
+
+To motivate this approach, we first consider a simple synthetic model with 501 nodes and six EGPR edges. Let Yi ∈
+{0, 1} for i = 0 . . . 500. We assign Y1 = 0 and Y500 = 1.
+Q499
+1(Yi =Yi+1 )
+Let P (Y0:500 ) =
+0.11(Yi 6=Yi+1 ) . In
+i=0 0.9
+other words, the model places higher probability on neighboring positions taking the same label but provides no other
+information. We construct an EGPR graph with w0,200 =
+w0,400 = w200,400 = w100,300 = w100,500 = w300,500 = 1,
+corresponding to a hypothetical 2D arrangement of the
+chain. Without EGPR, the model learns a trivial labeling of
+the chain, whereas with EGPR, the model learns a labeling
+corresponding to the 2D arrangement (Figure 4).
+
+Segway + EGBR
+
+Construct
+EGBR graph
+
+Chain RMSE − GPR RMSE
+
+Figure 4. Synthetic model of genome spatial interactions. Color
+and labeled division lines indicate learned labels along the hypothesized 501 bp genome. Large filled circles indicate observed
+positions. Dotted lines indicate EGPR edges.
+
+●
+
+0.03
+
+0.02
+
+0.01
+
+0.00
+EGPR
+
+SQGPR
+
+Method
+
+(b)
+
+●
+
+0.03
+●
+●
+
+0.02
+
+●●
+
+● ●●
+●
+
+●
+●
+
+●
+
+0.01
+
+●
+
+●
+●
+●
+
+●
+●
+●
+
+●
+
+●
+
+●
+●
+●
+●
+
+0.00
+
+●
+
+●
+
+●
+
+0.000 0.005 0.010 0.015 0.020
+
+Chain RMSE − SQGPR RMSE
+
+(c)
+
+Figure 5. (a) Strategy for utilizing physical interaction information. (b) Improvement in RMSE over chain model for EGPR and
+SQGPR for 29 experiments. (c) Relative improvement in RMSE
+between EGPR and SQGPR for each of 29 experiments.
+
+the GPR graph by setting the weight between positions i
+and j, w(i, j), to w(i, j) , max(0, − loge (p(i, j)/106 )),
+where p(i, j) is the p-value of interaction between positions
+i and j. All annotations used four labels and binned the
+genome at 10,000 base pair resolution, comparable to the
+resolution of 40,000 bp used in (Dixon et al., 2012). We
+chose the best-performing hyperparameters for each GPR
+model using a validation set.
+To evaluate these annotations, we used the time during the
+cell cycle at which the DNA is replicated as a gold standard
+(Woodfine et al., 2004). Replication time is highly correlated
+with gene expression and chromatin state and therefore is a
+good proxy for domain type (Lieberman-Aiden et al., 2009).
+To evaluate the accuracy with which an annotation predicts
+replication time, we compute a prediction as follows. Let
+ai ∈ {1 . . . 4} and xi be the annotation label and replication
+time at position i, respectively. We compute the replication
+time mean over the positions assigned a given label ` as
+Pn
+1(ai = `)xi
+for ` ∈ {1 . . . 4}.
+(21)
+µ` , Pi=1
+n
+i=1 1(ai = `)
+We define a predicted replication time vector xpi = µai and
+compute the root mean
+pP squared perror (RMSE) of this predic2
+tion as RMSE =
+i (xi − xi ) . EGPR consistently outperforms both the chain model alone and SQGPR (Figure 5).
+
+Entropic Graph-based Posterior Regularization
+
+7. Acknowledgments
+This work was supported by NIH awards U41HG007000,
+R01ES024917, and R01GM103544 and by the Princess
+Margaret Cancer Foundation.
+
+References
+Altun, Yasemin, Belkin, Mikhail, and Mcallester, David A.
+Maximum margin semi-supervised learning for structured
+variables. In NIPS, pp. 33–40, 2005.
+Ay, F., Bailey, T. L., and Noble, W. S. Statistical confidence
+estimation for Hi-C data reveals regulatory chromatin
+contacts. Genome Research, 24:999–1011, 2014a.
+Ay, F., Bunnik, E. M., Varoquaux, N., Bol, S. M., Prudhomme, J., Vert, J.-P., Noble, W. S., and Le Roch, K. G.
+Three-dimensional modeling of the P. falciparum genome
+during the erythrocytic cycle reveals a strong connection between genome architecture and gene expression.
+Genome Research, 24:974–988, 2014b.
+Bishop, C. Neural Networks for Pattern Recognition. Oxford UP, Oxford, UK, 1995.
+Chapelle, O., Zien, A., and Schölkopf, B. (eds.). Semisupervised learning. MIT Press, 2006.
+Csiszár, I. and Tusnády, G. Information geometry and alternating minimization procedures. Statistics and decisions,
+pp. 205, 1984.
+Das, D. and Petrov, S. Unsupervised part-of-speech tagging
+with bilingual graph-based projections. In NAACL, pp.
+600–609, 2011.
+Das, D. and Smith, N.A. Semi-supervised framesemantic
+parsing for unknown predicates. In Proc. of ACL, 2011.
+Day, N., Hemmaplardh, A., Thurman, R. E., Stamatoyannopoulos, J. A., and Noble, W. S. Unsupervised segmentation of continuous genomic data. Bioinformatics,
+23(11):1424–1426, 2007.
+Dekker, J., Rippe, K., Dekker, M., and Kleckner, N. Capturing chromosome conformation. Science, 295(5558):
+1306–1311, 2002.
+Dixon, Jesse R, Selvaraj, Siddarth, Yue, Feng, Kim, Audrey,
+Li, Yan, Shen, Yin, Hu, Ming, Liu, Jun S, and Ren, Bing.
+Topological domains in mammalian genomes identified
+by analysis of chromatin interactions. Nature, 485(7398):
+376–380, 2012.
+ENCODE Project Consortium. An integrated encyclopedia
+of DNA elements in the human genome. Nature, 489:
+57–74, 2012.
+
+Ernst, J. and Kellis, M. Discovery and characterization of
+chromatin states for systematic annotation of the human
+genome. Nature Biotechnology, 28(8):817–825, 2010.
+Filion, G. J. et al. Systematic protein location mapping
+reveals five principal chromatin types in drosophila cells.
+Cell, 143(2):212–224, 2010.
+Ganchev, K., Graça, J., Gillenwater, J., and Taskar, B. Posterior regularization for structured latent variable models.
+Journal of Machine Learning Research, 11:2001–2049,
+2010.
+He, Luheng, Gillenwater, Jennifer, and Taskar, Ben. Graphbased posterior regularization for semi-supervised structured prediction. In CoNLL, 2013.
+Hoffman, M. M., Buske, O. J., Wang, J., Weng, Z., Bilmes,
+J. A., and Noble, W. S. Unsupervised pattern discovery
+in human chromatin structure through genomic segmentation. Nature Methods, 9(5):473–476, 2012a.
+Hoffman, M. M. et al. Integrative annotation of chromatin
+elements from ENCODE data. Nucleic Acids Research,
+41(2):827–41, 2012b.
+Joachims, T. Transductive inference for text classification
+using support vector machines. In ICML, pp. 200–209,
+1999.
+Lian, H., Thompson, W., Thurman, R. E., Stamatoyannopoulos, J. A., Noble, W. S., and Lawrence, C. Automated
+mapping of large-scale chromatin structure in encode.
+Bioinformatics, 24(17):1911–1916, 2008. PMC2519158.
+Libbrecht, Maxwell W, Hoffman, Michael M, Bilmes, Jeffrey A, and Noble, William S. Entropic graph-based
+posterior regularization: Extended version. Proceedings
+of the International Conference on Machine Learning,
+2015.
+Lieberman-Aiden, Erez, van Berkum, Nynke L, Williams,
+Louise, Imakaev, Maxim, Ragoczy, Tobias, Telling,
+Agnes, Amit, Ido, Lajoie, Bryan R, Sabo, Peter J,
+Dorschner, Michael O, et al. Comprehensive mapping of
+long-range interactions reveals folding principles of the
+human genome. Science, 326(5950):289–293, 2009.
+Misteli, T. Beyond the sequence: Cellular organization of
+genome function. Cell, 128(4):787–800, 2007.
+Neal, R.M. and Hinton, G.E. A view of the EM algorithm
+that justifies incremental, sparse, and other variants. In
+Learning in graphical models, pp. 355–368. MIT Press,
+1999.
+Ryba, Tyrone, Hiratani, Ichiro, Lu, Junjie, Itoh, Mari, Kulik, Michael, Zhang, Jinfeng, Schulz, Thomas C, Robins,
+
+Entropic Graph-based Posterior Regularization
+
+Allan J, Dalton, Stephen, and Gilbert, David M. Evolutionarily conserved replication timing profiles predict
+long-range chromatin interactions and distinguish closely
+related cell types. Genome research, 20(6):761–770,
+2010.
+Subramanya, A. and Bilmes, J. Semi-supervised learning
+with measure propagation. Journal of Machine Learning
+Research, 12(10):33113370, November 2011.
+Subramanya, A., Petrov, S., and Pereira, F. Efficient graphbased semi-supervised learning of structured tagging
+models. In Proc. of EMLNP 2010, pp. 167–176. Assoc.
+for Comp. Linguistics, 2010.
+Thurman, Robert E, Day, Nathan, Noble, William S, and
+Stamatoyannopoulos, John A. Identification of higherorder functional domains in the human encode regions.
+Genome Research, 17:917–927, 2007.
+Wang, Jun, Jebara, Tony, and Chang, Shih-Fu. Graph transduction via alternating minimization. In Proceedings of
+the 25th international conference on Machine learning,
+pp. 1144–1151. ACM, 2008.
+Woodfine, K., Fiegler, H., Beare, D. M., Collins, J. E.,
+McCann, O. T., Young, B. D., Debernardi, S., Mott, R.,
+Dunham, I., and Carter, N. P. Replication timing of the
+human genome. Human molecular genetics, 13(2):191–
+202, 2004.
+Zhu, Xiaojin and Ghahramani, Zoubin. Learning from
+labeled and unlabeled data with label propagation. Technical report, 2002.
+Zhu, Xiaojin, Kandola, Jaz S, Ghahramani, Zoubin, and
+Lafferty, John D. Nonparametric transforms of graph
+kernels for semi-supervised learning. In NIPS, volume 17,
+pp. 1641–1648, 2004.
+
+

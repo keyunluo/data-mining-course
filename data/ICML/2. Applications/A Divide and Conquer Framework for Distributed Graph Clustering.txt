@@ -1,0 +1,1534 @@
+A Divide and Conquer Framework for Distributed Graph Clustering
+
+Wenzhuo Yang
+A 0096049@ NUS . EDU . SG
+Department of Mechanical Engineering, National University of Singapore, Singapore 117576
+Huan Xu
+Department of Mechanical Engineering, National University of Singapore, Singapore 117576
+
+Abstract
+Graph clustering is about identifying clusters of
+closely connected nodes, and is a fundamental
+technique of data analysis with many applications including community detection, VLSI network partitioning, collaborative filtering, etc. In
+order to improve the scalability of existing graph
+clustering algorithms, we propose a novel divide
+and conquer framework for graph clustering, and
+establish theoretical guarantees of exact recovery
+of the clusters. One additional advantage of the
+proposed framework is that it can identify small
+clusters – √
+the size of the smallest cluster
+can be
+√
+of size o( n), in contrast to Ω( n) required
+by standard methods. Extensive experiments on
+synthetic and real-world datasets demonstrate the
+efficiency and effectiveness of our framework.
+
+1. Introduction
+Graph clustering is a widely-used tool for exploiting the
+relationships between nodes connected in a graph. Such
+graph usually consists of a large number of nodes, e.g., the
+friendship graph on Facebook, the co-author graph in bibliographic records. The pairwise connection between two
+nodes indicates their similarity or affinity, whereas the disconnection represents their dissimilarity or difference. The
+goal of graph clustering is to partition the nodes into clusters so that the nodes within the same cluster have more
+connections than those in different clusters, in other words,
+the closely connected nodes are grouped together.
+Various kinds of graph models have been proposed and
+studied in literature (e.g., Holland et al., 1983; Watts &
+Strogatz, 1998; Goldenberg et al., 2010), among which the
+stochastic block model (Holland et al., 1983), also known
+Proceedings of the 32 nd International Conference on Machine
+Learning, Lille, France, 2015. JMLR: W&CP volume 37. Copyright 2015 by the author(s).
+
+MPEXUH @ NUS . EDU . SG
+
+as the planted partition model (Condon & Karp, 2001), is
+arguably the most natural one for clustering. The stochastic block model assumes that the nodes are partitioned into
+several clusters and the probability of the connection between each pair of nodes depends on their cluster membership, i.e., an edge is generated with probability p if they
+are in the same cluster or with probability q if they are in
+different clusters with p > q, and the goal is to recover
+the ground truth clusters from the observed graph. Many
+graph clustering algorithms have been analyzed under this
+model. One of the most popular approaches is spectral
+clustering (Luxburg, 2007). Rohe et al. (2011) analyzed
+the performance of spectral clustering under the stochastic
+block model and provided an upper bound of the misclassified nodes. Another approach developed recently and has
+attracted great attention is based on convex optimization
+using trace-norm and l1 norm as a surrogate of the rank
+and sparsity functions respectively (e.g., Oymak & Hassibi, 2011; Jalali et al., 2011; Chen et al., 2014b; Ames &
+Vavasis, 2011; Chen et al., 2014a). The main advantages of
+the trace-norm based clustering are their theoretically guarantees for the exact recovery of the ground-truth clustering
+and their outstanding empirical performance. Indeed, one
+of them, proposed by Chen et al. (2014b), can provably recover the ground-truth clustering even in the face of outlier
+nodes (nodes that are not in any cluster) and can be used to
+solve planted clique and planted coloring problems.
+However, both spectral clustering and trace-norm based
+clustering algorithms have difficulties tackling very large
+graphs. Indeed, for a graph with n nodes, both approaches
+need to compute the spectral decomposition of a n × n matrix which requires O(n3 ) operations and O(n2 ) storage.
+Hence it is impractical to apply them even on mediumsized graphs with 10,000 nodes on a desktop PC. How
+to reduce the memory and computational cost of these
+methods to improve their scalability is undoubtedly a significant problem, as real-world applications often involve
+graphs with tens of thousands to even millions of nodes
+(Günnemann et al., 2010; Macropol & Singh, 2010; Whang
+et al., 2012). To address this, one approach is to perform
+
+A Divide and Conquer Framework for Distributed Graph Clustering
+
+a multilevel clustering that reduces the size of the graph
+by collapsing vertices and edges, partitions the smaller
+graph and then uncoarsens to recover clusters in the original graph (Karypis & Kumar, 1998a;b; Yan et al., 2009;
+Chen et al., 2011; Liu et al., 2013). Another approach is
+to apply the Nyström method to approximate the similarity matrix for acceleration (Fowlkes et al., 2004; Drineas
+& Mahoney, 2005). While these approaches are empirically evaluated by the experiments on synthetic or realworld datasets, it is not clear whether any theoretical guarantees on exact recovery of the ground truth can be obtained. Moreover, it is hard to extend them to improve the
+scalability of trace-norm based clustering algorithms.
+The goal of this paper is to make trace-norm based clustering algorithms applicable for clustering large graphs.
+Specifically, we develop and analyze a novel divide and
+conquer framework for improving the scalability of a wide
+range of graph clustering algorithms including spectral
+clustering and trace-norm based clustering. Our framework
+divides the original graph into several easily handled subgraphs, executes a selected graph clustering algorithm on
+the subgraphs in parallel, and then combines the results
+using a new algorithm called “graph clustering with high
+confidence nodes”. Our analysis provides sufficient conditions on when the proposed framework can exactly recover
+the ground-truth clustering. Moreover, applying our framework on trace-norm based clustering algorithms offers additional benefits for identifying small clusters – the
+√ size of
+the smallest cluster can in fact be smaller than O( n).
+Notations. We use lower-case boldface letters to denote
+column vectors and upper-case boldface letters to denote
+matrices. The minimum of an empty set is defined as +∞.
+Three matrix norms are used: ∥M∥2 is the spectral norm,
+∥M∥∗ is the nuclear norm, and ∥M∥1 is the element-wise
+ℓ1 norm. We use [r] to denote the set {1, 2, · · · , r} for
+integer r, and |S| to denote the cardinality of set S. For
+a set of matrix indices Ω, we let PΩ (X) be the matrix by
+setting the entries outside Ω to zero.
+
+2. Divide and Conquer for Graph Clustering
+We first provide a brief introduction about the generalized
+stochastic blockmodel (Chen et al., 2014b) which is an extension of the standard stochastic block model (Holland
+et al., 1983; Condon & Karp, 2001), and then present our
+graph clustering framework in details.
+2.1. Generalized Stochastic Blockmodel (GSBM)
+We consider a random graph with n nodes. These n nodes
+are divided into two sets V1 and V2 which have n1 inlier
+nodes and n2 outlier nodes, respectively. The n1 inlier
+nodes are partitioned into r disjoint clusters, which we will
+
+refer to as the true clusters. The sizes of these r clusters
+are K1 , · · · , Kr . Let K = mini∈[r] Ki , i.e., the minimum
+cluster size. The edges of the graph are generated as follows: For each pair of nodes i, j that belong to the same
+cluster, edge (i, j) exists with probability at least p; for
+each pair of nodes that are in different clusters the edge
+exists with probability at most q. The n2 outlier nodes are
+loosely connected to other nodes, namely, edge (i, j) exists
+with probability at most q for outlier node i and each node
+j ̸= i. The adjacency matrix of the graph is denoted by A.
+Our goal is to recover, from A, the adjacency matrix Y∗
+of the ground-truth clusters, i.e., 1) Yii∗ = 1 if node i is an
+inlier node and Yii∗ = 0 otherwise, 2) for i ̸= j, Yij∗ = 1 if
+i, j are in the same cluster and equals 0 otherwise.
+2.2. Intuition
+Before formally presenting the proposed framework, we
+explain its intuition first. Our framework involves three
+steps: 1) dividing step: uniformly randomly partition the n
+nodes into m groups and then construct the corresponding
+m subgraphs of A, 2) clustering step: recover clusters in
+each subgraph in parallel using some graph clustering algorithm, and 3) combining step: construct the final clustering by combining the recovered clusters in the subgraphs.
+We need to answer four questions to make the above procedure concrete: 1) How does m – the number of subgraphs
+– affect the performance of this framework? 2) How to
+choose the graph clustering algorithm used in the “clustering step”? 3) How to “combine” the recovered clusters
+from the subgraphs? 4) Under what conditions can we recover the ground-truth clustering via this framework?
+Question 1, 2 and 4 will be studied in Section 3. We now
+focus on Question 3. For convenience, we suppose that
+the nodes in the graph are labeled by consecutive integers
+{1, · · · , n}. We denote the m subgraphs by {g1 , · · · , gm }
+and the set of the clusters recovered in subgraph gi by Sgi .
+To illustrate our main idea, we take the graph shown in
+Figure 1 containing 12 nodes and two clusters as an example. Suppose that this graph is divided into two subgraphs g1 and g2 in the “dividing step” as shown in Figure
+1(b), and the clusters in each subgraph are recovered by
+a certain algorithm, i.e., Sg1 = {{1, 2, 3}, {7, 8, 9}} and
+Sg2 = {{4, 5, 6}, {10, 11, 12}}, in the “clustering” step.
+Now we discuss how to combine these clusters. For clusters U and V which may or may not belong to the same
+subgraph, let U ↔ V represent that the nodes in U and V
+belong to the same cluster, and U ̸↔ V denote otherwise.
+Under the GSBM, we observe that for the bipartite graph
+generated by nodes in U and in V, the expected edge density is at least p if U ↔ V, while it is at most q if U ↮ V.
+Therefore, if the edge density is greater than some threshold t where q ≤ t ≤ p, we have U ↔ V w.h.p. In our
+
+A Divide and Conquer Framework for Distributed Graph Clustering
+2
+
+1
+
+8
+
+7
+
+2
+
+1
+
+6
+
+4
+
+3
+
+6
+
+9
+
+12
+
+3
+
+8
+
+5
+
+12
+
+4
+
+5
+
+10
+
+11
+
+7
+
+9
+
+10
+
+11
+
+(a)
+1,2,3
+7,8,9
+
+(b)
+4,5,6
+
+1,2,3,4,5,6
+
+10,11,12
+
+7,8,9,10,11,12
+
+(c)
+
+(d)
+
+Figure 1. A simple graph with 12 nodes and two clusters YELLOW and PURPLE. (a) The observed graph. (b) Two subgraphs
+generated in the “dividing” step. (c) The fused graph. (d) The
+final recovered clusters.
+
+example, the edge density corresponding to {7, 8, 9} and
+{10, 11, 12} is 0.56, while the edge density corresponding to {7, 8, 9} and {4, 5, 6} is 0.11, so select t = 0.3
+and we conclude that w.h.p {7, 8, 9} ↔ {10, 11, 12} and
+{7, 8, 9} ↮ {4, 5, 6}. Of course, estimating ↔ and ↮ relationship based on edge density is not always correct, and
+may even lead to results contradicting each other. Therefore, instead of naively merging clusters based on the edge
+density, we build a new (meta-)graph whose nodes correspond to the clusters in Sg1 ∪ Sg2 and edges are formed
+according to the edge density between two clusters, i.e., an
+edge is constructed between them if their edge density is
+greater than threshold t. We call this graph “fused graph”
+and call its nodes “super nodes”, as shown in Figure 1(c).
+Then the final clustering result can be obtained by performing a certain graph clustering algorithm on this fused graph,
+which is shown in Figure 1(d).
+There is an interesting property of these super nodes: each
+edge/no-edge connecting with a super node is very likely to
+be correct, because it is estimated by averaging many edges
+in the original graph (recall that a super-node corresponds
+to a cluster in a subgraph). We call a node with such property a high confidence node, formally defined as follows:
+Definition 1. For a graph with n nodes, node i is called
+a high confidence node if 1) for each node j in the same
+cluster as i, edge (i, j) exists with probability at least τ1 ,
+and 2) for each node j in different clusters from i, edge
+(i, j) exists with probability at most 1 − τ2 , where τ1 , τ2
+satisfies min{τ1 , τ2 } ≥ 0.8 and 1 − min{τ1 , τ2 } ≤ cτ K
+n
+for some constant cτ . Node i is an ordinary node if it is a
+not high confident.
+To cluster the fused graph, we used a variant of the tracenorm based optimization approach for graph clustering. In
+particular, since we know that the super-nodes are of high
+confidence, we put more weights on the penalty of the edge
+disagreement related to high confidence nodes:
+min ∥Y∥∗ + cA ∥PA∩Cc S∥1 + cAc ∥PAc ∩Cc S∥1 + cC ∥PC S∥1
+Y,S
+
+s.t.
+
+Y + S = A, 0 ≤ Y ≤ 1,
+(1)
+
+where cA , cAc , cC , cC c are parameters whose values are determined later, A ≜ {(i, j) : Aij = 1} and C ≜ {(i, j) :
+i or j is a high confidence node}. The solution Y is the
+clustering relationship we recover, and S is the disagreement between the observation and the recovered clustering. Thus, when we set cC large, Y and A are less likely to
+disagree on edges/no-edges connecting to high confidence
+nodes. We analyze this formulation in Section 3 and show
+that it offers important benefits.
+2.3. Algorithm
+Based on the intuitive idea discussed in the previous section, we design the following framework shown in Algorithm 1 for distributed graph clustering. Clearly, if a clusAlgorithm 1 Large Graph Clustering
+Input: Graph clustering algorithm A, observed adjacency
+matrix A and parameter m, l, t, T .
+Procedure:
+1) Uniformly randomly partition the n nodes into m
+groups and then extract the corresponding m subgraphs
+{g1 , · · · , gm };
+2) Find clusters in each subgraph in parallel by applying
+A. Denote the set of the recovered clusters in gi by Sgi ;
+3) Build the fused graph G based on {Sg1 , · · · , Sgm } by
+Algorithm 2;
+4) Find clusters in G by solving (1). Denote the set of
+the recovered clusters by SG ;
+5) Merge {Sg1 , · · · , Sgm } based on SG .
+
+ter from a subgraph is too small, it may not be truly high
+confident. Hence, we break up the clusters with size less
+than some threshold T into single nodes, so that only the
+large clusters form high confidence nodes. Moreover, as
+we will show in the next section, high confidence nodes
+can assist in achieving the exact recovery of clustering, so
+we divide each large cluster recovered in subgraphs into l
+parts to generate more high confidence nodes for more help
+for recovering clusters in the fused graph.
+
+3. Theoretical Analysis
+In this section we establish the conditions under which the
+proposed framework provably recovers the ground truth.
+Indeed, even when the clusters in the subgraphs are partially recovered, we can still recover the correct clustering
+relationship of the entire graph. We first investigate the
+theoretical guarantee for the weighted clustering shown in
+Equation (1). Based on this, we then provide the performance guarantees of Algorithm 1. Along the way, we also
+provide answers to Question 1 and 2 mentioned in the previous section.
+
+A Divide and Conquer Framework for Distributed Graph Clustering
+
+Algorithm 2 Build a Fused Graph
+Input: Observed adjacency matrix A, the sets of the recovered clusters Sg1 , · · · , Sgm and parameter l, t, T .
+Procedure:
+1) Break up small clusters: For each g ∈ {g1 , · · · , gm }
+and each U ∈ Sg , if |U| < T , let Sg := (Sg \ U) ∪
+{{k} for each k ∈ U}. Otherwise, uniformly randomly
+partition the nodes in U into l clusters U1 , · · · , Ul and let
+Sg := (Sg \ U) ∪ {U1 , · · · , Ul };
+2) Create super nodes: Create∪ a corresponding super
+m
+node V for each cluster U in i=1 Sgi . This relationship is represented by V ∼ U;
+3) Build the fused graph G: For super nodes Vi and Vj
+where Vi ∼ Ui and Vj ∼ Uj , edge Eij that connects
+them is generated as follows: If |Ui | = |Uj | = 1, let
+Eij := Auv where u ∈ Ui and v ∈ Uj . Otherwise, we
+compute
+∑
+∑
+u∈Ui
+v∈U Auv
+∑ j
+Ê(Vi , Vj ) := ∑
+.
+u∈Ui
+v∈Uj 1
+Let Eij := 1 if Ê(Vi , Vj ) ≥ t or Eij := 0 otherwise;
+4) Construct the set of high confidence nodes: H ≜ {Vi :
+|Ui | > 1 for Vi ∈ V};
+5) Return G and H.
+
+3.1. Graph Clustering with High Confidence Nodes
+Let us consider a graph with high confidence nodes: more
+specifically, the graph is generated according to the GSBM
+which contains n nodes and r clusters, and its
+∑rith cluster
+contains si high confidence nodes. Let s ≜ i=1 si , i.e.,
+the total number of the high confidence nodes, K is the size
+of the smallest cluster, and K ∗ be the minimum size of the
+clusters containing at least one ordinary node. We have the
+following theorem:
+√
+c0
+1−t
+Theorem 1. Let λ = √
+,
+c
+=
+λ
+A
+t ,
+max{n−s,K ∗ } log n
+√
+t
+0
+cAc = λ 1−t
+and cC = √Kclog
+, where t satisfies 14 p +
+n
+≤ t ≤ 34 p + 14 q, then Y∗ is the unique optimal solution
+of (1) with high probability if K ≥ cK log n and
+{√
+}
+√
+(n − s) log n
+p−q
+log n
+√
+≥ c1 max
+,
+(2)
+K∗
+K∗
+p(1 − q)
+3
+4q
+
+hold for some universal constants cK , c0 and c1 . Furthermore, if there exist no outliers in the graph and λ =
+c
+√
+∑0
+, (2) can be replaced by
+∗
+max{K ,maxi {
+
+j̸=i (Ki −si )}} log n
+
+a milder condition
+
+√
+∑
+ maxi { j̸=i (Ki − si )} log n √ log n 
+√
+≥ c1 max
+,
+.
+
+K∗
+K∗ 
+p(1 − q)
+p−q
+
+Remark. This theorem makes no assumptions on how
+the confidence nodes are distributed over different clusters.
+Consider an extreme case: fix r = O(1) and let the r clusters have equal size nr and the nodes in the first 2r clusters
+are all highly confident while the nodes in the remaining
+r
+2 clusters are all ordinary. By an information-theoretic argument (Chen et al., 2014b;a), one can show that for any
+algorithm to correctly recover the clusters with probability
+at least 43 , the inequality
+p−q
+1
+√
+≥ c√ ,
+n
+p(1 − q)
+
+(3)
+
+should hold for some universal constant c. Theorem 1
+shows that in this case p, q should satisfy
+√
+p−q
+r log n
+√
+,
+≥ c1
+n
+p(1 − q)
+This matches the condition (3) up to a logarithmic factor,
+and thus cannot be substantially improved unless additional
+assumptions are made.
+3.2. Performance Guarantee of Algorithm 1
+Graph clustering algorithm A used to find clusters in subgraphs is crucial to our framework. Clearly, if A generates
+many misclassified nodes, it is impossible for Algorithm 1
+to correctly recover the true clusters. We now characterize
+two sets of algorithms used in our framework.
+Definition 2 (Workable Algorithm). For vector λ ∈ Rr
+and non-empty set I ⊆ [r], A is (λ, I)-workable if the
+followings hold with probability at least 1 − n−2 : when
+(p, q) is in a set C parameterized by (n, K1 , · · · , Kr , λ, I),
+A is able to recover a set of clusters RC satisfying 1) ∀i ∈
+I, ∃Ci ∈ RC so that Ci is a subset of the ith cluster and
+|Ci | ≥∪ λi Ki , and 2) |C| ≤ mini∈I ρλi Ki for any C ∈
+RC \ i∈I Ci , for some constant ρ < 1.
+Example 1. Most of the trace-norm based graph clustering algorithms (e.g., Oymak & Hassibi, 2011; Ames &
+Vavasis, 2011; Chen et al., 2014b; Jalali et al., 2011) are
+workable. For example, the algorithm proposed by Chen
+et al. (2014b) has a performance
+guarantee that when
+√
+√ p−q
+
+p(1−q)
+
+≥ c max{
+
+√
+
+n
+K ,
+
+log2 n
+K }
+
+for universal constant c,
+
+its output is the same as the true adjacency matrix Y∗ with
+probability at least 1 − n−8 , which means that it is (1, [r])workable. Ailon et al. (2013) provided a refined analysis
+of this algorithm showing that small clusters do not hinder
+recovery of sufficiently large ones under some mild conditions, i.e., it is (λ, [r])-workable where λi = 1 if the ith
+cluster is relatively large or 0 otherwise.
+Definition 3 (Pseudo-workable Algorithm). For vector
+λ, ϵ ∈ Rr and non-empty set I ⊆ [r], A is (λ, I, ϵ)pseudo-workable if the followings hold with probability at
+
+A Divide and Conquer Framework for Distributed Graph Clustering
+
+least 1 − n−2 : when (p, q) is in a set C parameterized by
+(n, K1 , · · · , Kr , λ, I, ϵ), A is able to recover a set of clusters RC satisfying 1) ∀i ∈ I, ∃Ci ∈ RC so that Ci contains at least λi Ki nodes in the ith cluster and at most ϵi Ki
+nodes not in the∪ith cluster, and 2) |C| ≤ mini∈I ρλi Ki for
+any C ∈ RC \ i∈I Ci , for some constant ρ < 1.
+Example 2. Rohe et al. (2011) analyzed the performance
+of spectral clustering under the standard stochastic blockmodel and provided an upper bound of the number of misclassified nodes. For clarity, we here present a specialized version of their theorem as shown in Proposition 1
+where the clusters are equal-sized, from which one can easily observe that spectral clustering is indeed (1 − ϵ, [r], ϵ)4
+2
+n
+1.
+pseudo-workable where ϵ = cr log
+n
+Proposition 1. Suppose that the graph has n nodes with
+r equal-sized clusters and satisfies that the probability of
+a connection between two nodes in the same cluster is p
+and the probability of a connection between two nodes in
+different clusters is q. If p and q do not vary as n and r =
+1
+O(n 4 log−1 n), then the size of the set of the misclassified
+nodes M after running spectral clustering on this graph is
+upper bounded by |M| ≤ cr3 log2 n for some constant c.
+We now present our main theorems, which establish the
+performance guarantee of Algorithm 1 when A used to
+find clusters in subgraphs is either workable or pseudoworkable, respectively.
+Theorem 2. If A is (λ, I)-workable, t ∈ ( 14 p + 34 q, 34 p +
+3ρ+ρ2
+1+3ρ
+( 2(1+ρ)m
+, 2(1+ρ)m
+),
+
+T
+and mini∈I
+then when
+λi Ki ∈
+(p, q) belongs to the set √
+C(n/m, K1 /m, · · · , Kr /m, λ, I),
+1
+4 q),
+
+c3 log n ≤ m ≤
+
+1−ρ
+4(1+ρ)
+
+K
+log n ,
+
+and
+
+{ √
+
+n
+(1 + ρ)ml log K
+,
+(1 + 3ρ) mini∈I λi Ki
+l̄≥l≥1
+√
+{√
+}}
+∑
+√
+(n − i∈I λi Ki ) log n
+log n
+c1 p(1 − q) max
+,
+,
+S(m, l)
+S(m, l)
+
+p − q ≥ min max c2
+
+with probability at least 1 − max{(mr)−10 , n−1 } the true
+clusters can be recovered by Algorithm 1, where S(m, l) =
+¯
+min{min
+i∈I:λi ̸=1 {ml + (1 − λi )Ki }, mini∈I c Ki }, l =
+}
+{ √
+(1+3ρ)
+min
+λ
+K
+i∈I i i
+max 14
+, 1 , and c1 , c2 , c3 are univer2(1+ρ)m log n
+sal constants.
+Remark. Our framework can guarantee exact recovery
+even when each cluster in the subgraphs is partially recovered. This happens especially when trace-norm based
+clustering algorithms are applied on a sparse graph where
+p − q < 0.2 as shown in the experiments in (Chen et al.,
+2014b) or spectral clustering runs with a relatively large
+cluster number. Parameter T and m are well defined when
+ρ < 1 and K = Ω(log3 n). Recall that m controls the number of the separated subgraphs. From the bound related to
+
+(p, q), we observe that increasing m leads to a smaller C
+which increases the difficulty of recovering the true clusters in subgraphs, but a larger S(m, l) which means that
+the difficulty of recovering clusters in the fused graph is
+reduced.
+Theorem 3. Suppose that A is (λ, I, ϵ)-pseudo-workable,
+T
+t ∈ ( 14 p + 43 q + φ, ( 34 p + 41 q)(1 − φ)), mini∈I
+λi Ki ∈
+2
+
+3ρ+ρ
+1+3ρ
+( 2(1+ρ)m
+, 2(1+ρ)m
+), then when (p, q) belongs to the set
+C(n/m,
+K
+/m,
+·
+·
+·
+, Kr /m, λ, I, ϵ), c3 log n ≤ m ≤
+1
+√
+1−ρ
+4(1+ρ)
+
+K
+log n ,
+
+and
+
+{ √
+
+n
+(1 + ρ)ml log K
+ϵi
+, 72 max ,
+i∈I λi
+(1 + 3ρ) mini∈I λi Ki
+√
+}}
+{√
+∑
+√
+(n − i∈I λi Ki ) log n
+log n
+,
+,
+c1 p(1 − q) max
+S(m, l)
+S(m, l)
+
+p − q ≥ max c2
+
+with probability at least 1 − max{(mr)−10 , n−1∑
+} the clusters recovered by Algorithm 1 contain at most i∈I ϵi Ki
+misclassified nodes, where
+{
+{ √
+}
+mini∈I λi Ki
+l ≤ min max 14 (1+3ρ)
+,
+1
+, p−q
+2(1+ρ)m log n
+72 mini∈I
+
+λi
+ϵi
+
+}
+,
+
+
+
+
+
+
+
+
+∑
+S(m, l) = min
+min
+ml + [(1 − λi )Ki −
+ϵj Kj ]+ ,
+i∈I:λi ̸=1 
+
+j∈I,j̸=i
+
+
+
+
+∑
+max minc Ki −
+ϵj Kj , 1
+,
+i∈I
+
+j∈I
+
+φ = 18 maxi∈I
+
+ϵi l
+λi ,
+
+and c1 , c2 , c3 are universal constants.
+
+Remark. Theorem 3 states the “error-tolerant” property of
+Algorithm 1. In particular, even when A does not guarantee
+exact recovery, the total number of the misclassified nodes
+in the clusters recovered by Algorithm 1 is still small as
+long as the recovered clusters in subgraphs do not contain
+too many misclassified nodes.
+We now specialize our main theorem. For simplicity, we
+set l = 1 in Algorithm 1. The following corollaries consider the case where A is the trace-norm based clustering
+algorithm proposed by Chen et al. (2014b), i.e., A solves
+the optimization problem shown in (1) with no high confidence nodes, i.e., C = ∅. We call this algorithm CSX
+following author acronym in the sequel.
+Corollary 1. If A is CSX, t ∈ ( 14 p + 34 q, 34 p + 14 q), 0 ≤
+√
+K
+i Ki
+, c3 log n ≤ m ≤ 14 log
+T ≤ min2m
+n , and
+{
+
+}
+√
+√
+p(1 − q)mn log n
+m log n
+p − q ≥ max c1
+, c2
+K
+K
+(4)
+where c1 , c2 , c3 are universal constants, then Algorithm
+1 recovers the true clusters with probability at least 1 −
+max{(mr)−10 , n−1 }.
+
+A Divide and Conquer Framework for Distributed Graph Clustering
+
+Remark. “Speedup is not a free lunch”: Increasing m reduces the computational time but requires stronger conditions to guarantee
+exact recovery, i.e., the lower bound of
+√
+p − q is m times greater than the one shown in (Chen
+et al., 2014b). In practice p − q can be smaller than (4)
+while exact recovery is still achieved, since the exact recovery of clusters in subgraphs is not necessary as stated in
+Theorem 1. More discussion can be found in Section 4.
+Our framework also offers benefits to dealing with small
+clusters. Most of graph clustering algorithms (Giesen &
+Mitsche, 2005; Shamir & Tsur, 2007; Chen et al., 2014b;
+Oymak & Hassibi, 2011;
+√ Ames, 2014; Chaudhuri et al.,
+2012) require K = Ω( n), but our algorithm
+√ requires a
+much weaker condition where K can be o( n).
+Corollary 2. If A is CSX, then there exist universal constants c0 , c1 , c2 , c3 , c4 such that the following holds with
+probability at least 1 − max{(mr)−10 , n−1 }: Let
+√
+√
+p(1 − q)mn
+p(1 − q)mn
+u = c1
+log2 n, and l = c2
+.
+p−q
+p−q
+if for all i ∈ [r], either Ki ≥ u or Ki ≤ l and if t ∈
+minKi ≥u Ki
+( 14 p + 34 q, 34 p + 14 q), 0 ≤ T ≤
+,
+2m
+c0 log n ≤ m ≤ min
+
+{ √
+}
+(p − q)2 minKi ≥u Ki
+1
+K
+, c4
+4 log n
+log n
+
+where c1 , c2 , c3 are universal constants, then Algorithm
+1 recovers the true clusters with probability at least 1 −
+(mr)−10 .
+3.3. Complexity
+The computational cost of our graph clustering framework
+can be much less than the trace-norm based clustering, e.g.,
+(Oymak & Hassibi, 2011; Ames & Vavasis, 2011; Chen
+et al., 2014b; Jalali et al., 2011) and spectral clustering
+(Luxburg, 2007).
+Theorem 4. If A is (λ, I)-workable or (λ, I, ϵ)pseudo-workable, and has computational complexity
+O(f (n)) and memory complexity O(g(n)), then the
+computational
+of Algorithm
+( nand memory complexity
+)
+∑
+3
+1 (are O f ( m
+)m + (mrl + n − i∈I
+λ
+K
+)
+, and
+i
+i
+)
+∑
+n
+2
+O g( m )m + (mrl + n − i∈I λi Ki ) , respectively.
+When we use CSX for A, and Algorithm 1 runs on a machine with B cores, we obtain the following corollary.
+Corollary 4. If A is CSX, then when the conditions in
+Corollary 1 are satisfied, the computational and memory complexity for Algorithm 1 running
+) on
+( 3 in parallel
+n
+3
+and
+a machine with B cores are O Bm2 + (mrl)
+( 2
+)
+2
+O Bn
+m + (mrl) , respectively.
+
+and
+
+}
+{ √
+∑
+p(1−q) K ≤l Ki log n 2 p(1−q) log n
+i
+, c3 (p−q)2
+,
+K ≥ max c3
+p−q
+
+Clearly, when r, l ≪ n, our algorithm is approximately
+Bm2 times faster than applying A on the entire graph.
+
+Algorithm 1 recovers the true clusters.
+
+4. Experiments
+
+Remark. We may observe that if the graph only has O(1)
+small clusters whose sizes have the same order of magnitude, then there exists a constant c so that K = c log3 n
+satisfies the conditions above. Note that the iterative algorithm proposed by Ailon et al. (2013) can recover almost
+all clusters via a so-called peeling strategy. But it has computational complexity O(n3 ) which becomes unaffordable
+when the number of nodes is large, say more than 5000.
+In contrast, as we show in Section 3.3, the computational
+complexity of our algorithm is much lower.
+
+We now investigate the performance of Algorithm 1 on a
+variety of simulated and real-world datasets, and compare
+it with other algorithms, e.g., spectral clustering (Luxburg,
+2007), Metis (Karypis & Kumar, 1998b), CSX (Chen et al.,
+2014b), and ESCG that is recently proposed by Liu et al.
+(2013) and is designed for large graph clustering based
+on spectral clustering. Except for Metis implemented by
+Karypis & Kumar (1998b), we implement the other algorithms in Python. The experiments are conducted on a
+desktop PC with an i7 3.4GHz CPU and 4GB memory.
+
+We now address clustering partially observed graph. The
+graph is first generated by the GSBM, and then Aij is set
+to ? (unknown) with probability 1 − µ for each (i, j) independently. Clearly, if we construct a new graph by setting
+Aij = 0 when Aij =?, we can convert it into the fully
+observed case. Based on Corollary 1, we have
+Corollary 3. If A is CSX, t ∈ ( 14 µp + 34 µq, 34 µp + 14 µq),
+√
+K
+i Ki
+0 ≤ T ≤ min2m
+, c3 log n ≤ m ≤ 14 log
+n and
+}
+{ √
+√
+pmn log n
+m log n
+√
+, c2
+,
+µ(p − q) ≥ max c1
+K
+K
+
+4.1. Simulations on Synthetic Data
+The simulated graphs are generated based on the standard
+stochastic blockmodel with n nodes, r clusters, and probabilities p and q. We select CSX – the trace-norm based
+algorithm proposed by Chen et al. (2014b) – as A. Given
+the output refined adjacency matrices generated by A or
+the clustering algorithm shown in (1), the clusters are constructed by simply finding the connected components. In
+the simulations, we repeat each test 10 times and use the
+averaged ratio of non-exact recovery (RNER) and the wallclock time to measure the performance of each algorithm.
+
+A Divide and Conquer Framework for Distributed Graph Clustering
+
+0 .5
+0 .4
+0 .3
+0 .1
+
+0 .2
+
+0 .3
+
+0 .4
+
+0 .5
+q
+
+0 .6
+
+0 .7
+
+0 .8
+
+0 .9
+
+80
+
+R NE R
+
+Tra c e -no rm
+D C: m = 4
+D C: m = 6
+D C: m = 8
+
+60
+40
+20
+0
+
+DC
+Tra c e -no rm
+
+0 .6
+0 .4
+0 .2
+
+DC
+Tra c e -no rm
+
+100
+80
+60
+40
+20
+
+0 .0
+
+Tra c e -no rm D C: m = 4
+
+D C: m = 6
+
+D C: m = 8
+
+Figure 2. Comparison between DC and Trace-norm when n =
+2000 and m = 4, 6, 8. (Left) Each curve presents the pairs of p
+and q for which a method succeeds. (Right) The running time.
+
+0
+
+5
+
+10
+15
+Number off clusters
+
+20
+
+0
+0
+
+25
+
+5
+
+10
+15
+Number off clusters
+
+(a)
+
+20
+
+25
+
+50
+
+1 .0
+
+DC
+Tra c e -no rm
+
+0 .8
+R NE R
+
+p
+
+0 .7
+0 .6
+
+120
+
+1 .0
+0 .8
+
+100
+
+R unni ng tim e ( s)
+
+120
+
+0 .8
+
+R unni ng tim e ( s)
+
+140
+R unni ng tim e ( s)
+
+1 .0
+0 .9
+
+0 .6
+0 .4
+0 .2
+
+DC
+Tra c e -n or m
+
+40
+30
+20
+10
+
+0 .0
+0
+
+RNER is the fraction of attempts where the output clustering is not exactly the same as the the ground truth.
+
+The first experiment compares the performance of DC and
+Trace-norm when m varies. Corollary 1 is established
+based on analyzing the conditions when the exact recovery
+of clustering for each subgraph is achieved,
+which leads
+√
+to a lower bound of p − q that is m times larger than
+that of Trace-norm. This lower bound is conservative since
+Theorem 1 shows that the it is possible to achieve exact recovery when A correctly classifies at least λi Ki nodes in
+the ith cluster, which means that empirically, DC can do
+better than predicted by Corollary 1. Figure 2 shows the
+comparison results. It can be observed that p − q is approximately 0.2 for Trace-norm, and 0.25 for DC when m = 4.
+Clearly, 0.25 for DC is less than 0.4 predicted by Corollary
+1. Figure 2 also shows their running time. We observe that
+DC is almost 7 times faster than Trace-norm when m = 4.
+Therefore, DC is able to recover clusters much faster that
+Trace-norm without much loss of performance.
+The second experiment compares the performance of DC
+and Trace-norm when small clusters exist. Figures 3(a) and
+(b) plot the ratio of exact recovery and running time of each
+algorithm against the number of clusters and the size of the
+smallest cluster, respectively. As shown in Corollary 2, DC
+requires a weaker condition on K than Trace-norm, which
+implies that DC will perform better than Trace-norm in the
+face of small clusters. The simulation results empirically
+
+0
+0
+
+40 60 80 100 120 140 160
+Sizef of the smallest cluster
+
+20
+
+40 60 80 100 120 140 160
+Sizef of the smallest cluster
+
+(b)
+
+Figure 3. The comparison between DC and Trace-norm (n =
+1000, p = 0.8, q = 0.2). (a) Nearly equal-sized clusters: the
+sizes of the first r − 1 clusters are [ nr ] while the size of the rth
+cluster is n − (r − 1)[ nr ]. (b) Small clusters: there exist three
+clusters whose sizes are 500, 500 − K and K, respectively.
+20
+18
+16
+14
+12
+10
+8
+6
+4
+0 .2
+
+600
+
+500
+
+0 .3
+
+0 .4
+
+0 .5
+
+0 .6
+
+0 .7
+
+p
+n = 1 0 0 0 0 , q = 0. 1
+50
+45
+40
+35
+30
+25
+20
+15
+10
+0 .2
+
+R unni ng tim e ( s)
+
+m
+
+n = 4 0 0 0 , q = 0. 1
+
+m
+
+We set l = 1, t = (p + q)/2 and T = 10 in the following
+experiments. When p and q are unknown, we use Algorithm 2 in Chen et al. (2014b) to estimate t. One can also
+apply the cross validation to determine t such that the incluster edge density of the recovered clusters is maximized.
+Parameter λ and cC in (1) are set to 1.6 and 5, respectively.
+For simplicity, we use DC, Trace-norm and Spectral to denote the proposed Algorithm 1, CSX, and spectral clustering, respectively. For small graphs with around 1000 to
+2000 nodes, Trace-norm has been extensively compared
+with Spectral, SLINK (Sibson, 1973), etc., (Chen et al.,
+2014b), and typically outperforms the others. Hence in the
+first two experiments, we mainly compare the performance
+of DC and Trace-norm.
+
+20
+
+400
+
+300
+
+200
+
+100
+0 .3
+
+0 .4
+
+0 .5
+
+0 .6
+
+0 .7
+
+10
+
+20
+
+30
+m
+
+40
+
+50
+
+p
+
+Figure 4. (Left) The fraction of successes for different m and p.
+(Right) The average running time.
+
+validate this conclusion, from which we observe that Tracenorm fails when K is less than 50 but DC still succeeds.
+Moreover, the running time of DC is again much shorter
+than that of Trace-norm. Interestingly, we observe form
+Figure 3(b) that the running time of Trace-norm has a sharp
+rise when K is about 40, because it appears more iterations
+needed to converge.
+In the third experiment, we investigate the performance of
+DC for different values of p, q and m. We repeat each
+test 10 times. Figure 4 displays the fraction of successes
+when p, m vary and the corresponding averaged running
+time for different m when n = 10000. Obviously, when
+the gap between p and q becomes larger, one can increase
+m to achieve more speedup without affecting the clustering
+performance. This agrees with our theoretic result shown in
+Corollary 1 and 4. Figure 5 shows the fraction of successes
+when p, q vary. We observe that in this case when p − q ≥
+0.15, DC works pretty well. In real applications, when the
+gap between p and q is large enough, one can try to apply
+DC with proper m instead of performing Trace-norm or
+Spectral on the entire graph.
+
+A Divide and Conquer Framework for Distributed Graph Clustering
+
+Table 1. Running time (second unit) of different clustering algorithms (“-” means “out of memory”).
+n
+DC
+Trace-norm
+Spectral
+ESCG
+
+500
+1.550
+3.419
+0.128
+9.176
+
+1000
+2.501
+21.072
+0.736
+12.391
+
+2000
+5.120
+177.752
+5.543
+24.747
+
+3000
+8.392
+3031.910
+18.142
+46.046
+
+4000
+13.036
+41.585
+74.940
+
+6000
+23.108
+165.108
+
+10000
+53.134
+376.787
+
+20000
+607.690
+1041.690
+
+50000
+2355.972
+6516.708
+
+100000
+10281.718
+26658.519
+
+Table 2. Running time (second unit) of different plant clique algorithms (“-” means “out of memory”).
+n
+DC
+(Ames & Vavasis, 2014)
+(Ames, 2014)
+
+500
+1.655
+116.2672
+1.8915
+
+600
+1.830
+244.4297
+49.5097
+
+700
+2.367
+490.5083
+113.5927
+
+800
+2.670
+819.0086
+150.8029
+
+1000
+2.445
+550.4
+
+2000
+5.099
+4485.0
+
+3000
+8.450
+15197.5
+
+q
+
+n = 4000, m = 4
+0 .8
+0 .7
+0 .6
+0 .5
+0 .4
+0 .3
+0 .2
+0 .1
+0 .2
+
+Table 3. The performance of different algorithms on the real
+world datasets MNIST, Arxiv and DBLP, which is measured by
+computing the in-cluster and cross-cluster edge densities.
+0 .3
+
+0 .4
+
+0 .5
+
+0 .6
+
+0 .7
+
+0 .8
+
+0 .9
+
+1 .0
+
+p
+
+q
+
+n = 1 0 0 0 0 , m = 10
+0 .8
+0 .7
+0 .6
+0 .5
+0 .4
+0 .3
+0 .2
+0 .1
+0 .2
+
+0 .3
+
+0 .4
+
+0 .5
+
+0 .6
+
+0 .7
+
+0 .8
+
+0 .9
+
+1 .0
+
+p
+
+Figure 5. The fraction of successes for different p and q.
+
+In the fourth experiment, we compare the running time of
+DC with other methods. Table 1 shows the running times of
+four algorithms, i.e., DC, Trace-norm, Spectral and ESCG.
+The simulated graphs are generated with different n but
+fixed p, q, r (p = 0.8, q = 0.2, r = 5). All these methods
+can recover the true clusters in this setting. Obviously, DC
+has the least running time when n ≥ 3000. Indeed, when
+n is relatively large,Trace-norm and Spectral break down
+due to high memory and computational demand. Since the
+plant clique model is a special case of the GSBM, we also
+compare DC with two recently proposed plant clique algorithms as shown in Table 2. The graphs are generated with
+p = 1.0, q = 0.2 and r = 5. The computational advantage
+of the proposed DC algorithm is obvious.
+4.2. Real-world Datasets
+We now evaluate DC on three real-world datasets, namely,
+MNIST (LeCun et al., 1995), Arxiv1 and DBLP2 . For
+MNIST, 10,000 samples were randomly selected from the
+digit images with label 0, 1, or 7, and the graph was generated by connecting each sample to its 1000-nearest neighbors where the distance measure is the Euclidean distance.
+For Arxiv, we used the texts from the years 1999-2003 to
+build the graph whose nodes and edges represent texts and
+1
+2
+
+http://www.cs.cornell.edu/projects/kddcup/datasets.html
+http://dblp.uni-trier.de/
+
+MNIST (10000 nodes, 13005198 edges)
+Algorithm
+DC
+Metis
+Spectral
+In-cluster (10−2 )
+35.00
+33.94
+34.94
+Cross-cluster (10−2 )
+1.77
+2.53
+1.81
+Arxiv (12480 nodes, 252906 edges)
+Algorithm
+DC
+Metis
+Spectral
+In-cluster (10−4 )
+114.46 106.22
+22.39
+Cross-cluster (10−4 )
+8.40
+9.73
+15.61
+DBLP (24599 nodes, 376711 edges)
+Algorithm
+DC
+Metis
+Spectral
+In-cluster (10−4 )
+14.53
+14.42
+7.55
+Cross-cluster (10−4 )
+5.63
+5.64
+6.07
+
+ESCG
+35.05
+1.74
+ESCG
+16.55
+0.22
+ESCG
+3.53
+44.30
+
+citations, respectively. For DBLP, we randomly selected
+a subset from it and constructed a co-author-graph where
+each node corresponds to an author and each edge corresponds to a co-authorship between two authors.
+The setting of Algorithm 1 is different from that in the simulations. We choose Spectral or Metis as A depending on
+whose result has a higher in-cluster edge density. Given
+the output of (1) performed on the fuse graph, we apply
+Metis to classify the nodes into a specific number of clusters. Due to the memory limitation, for two of the baseline
+algorithms, namely, Spectral and Metis, we apply a similar
+algorithm as Algorithm 1 but replacing (1) with Spectral
+and Metis respectively. For fair comparison, all the algorithms are forced to partition the nodes of MNIST into 3
+clusters and partition the nodes of Arxiv and DBLP into 15
+clusters. The performance of each algorithm is measured
+by computing the in-cluster and cross-cluster edge densities (Table 3). When the graph is dense (e.g., MNIST), DC
+and ESCG have similar performance. But when the graph
+is sparse (e.g., DBLP), Spectral and ESCG tend to classify
+most of the nodes into one big cluster, so that the corresponding in-cluster densities are low. In general, our algorithm DC outperforms all three baselines on these datasets.
+
+A Divide and Conquer Framework for Distributed Graph Clustering
+
+Acknowledgments
+This work is partially supported by the Ministry of Education of Singapore AcRF Tier Two grants R265000443112
+and R265000519112, and A*STAR Public Sector Funding
+R265000540305.
+
+References
+Ailon, N., Chen, Y., and Xu, H. Breaking the small cluster
+barrier of graph clustering. In ICML, 2013.
+Ames, Brendan P. W. Guaranteed clustering and biclustering via semidefinite programming. Mathematical Programming, 143(1-2):429–465, 2014.
+Ames, Brendan P. W. and Vavasis, Stephen A. Nuclear
+norm minimization for the planted clique and biclique
+problems. Mathematical Programming, 129(1):69–89,
+September 2011.
+Ames, Brendan P. W. and Vavasis, Stephen A. Convex
+optimization for the planted k-disjoint-clique problem.
+Mathematical Programming, 143(1-2):299–337, 2014.
+Chaudhuri, K., Graham, F. C., and Tsiatas, A. Spectral
+clustering of graphs with general degrees in the extended
+planted partition model. In COLT, 2012.
+Chen, W., Song, Y., Bai, H., Lin, C., and Chang, E. Y.
+Parallel spectral clustering in distributed systems. IEEE
+Transactions on Pattern Analysis and Machine Intelligence (TPAMI), 33(3):568–586, 2011.
+
+Goldenberg, A., Zheng, A. X., Fienberg, S. E., and Airoldi,
+E. M. A survey of statistical network models. Foundations and Trends in Machine Learning, 2(2):129–233,
+2010.
+Günnemann, S., Färber, I., Boden, B., and Seidl, T. Subspace clustering meets dense subgraph mining: A synthesis of two paradigms. In ICDM, 2010.
+Holland, P., Laskey, K., and Leinhardt, S. Stochastic blockmodels: Some first steps. Social Networks, 5:109–137,
+1983.
+Jalali, A., Chen, Y., Sanghavi, S., and Xu, H. Clustering
+partially observed graphs via convex optimization. In
+ICML, 2011.
+Karypis, G. and Kumar, V. A fast and high quality multilevel scheme for partitioning irregular graphs. SIAM
+Journal on Scientific Computing, 20(1):359–392, 1998a.
+Karypis, G. and Kumar, V. Multilevel k-way partitioning
+scheme for irregular graphs. Journal of Parallel and Distributed Computing, 48:96–129, 1998b.
+LeCun, Y., Jackel, L., Bottou, L., Brunot, A., Cortes,
+C., Denker, J., Drucker, H., Guyon, I., Müller, U.,
+Säckinger, E., Simard, P., and Vapnik, V. Comparison of
+learning algorithms for handwritten digit recognition. In
+International Conference on Artificial Neural Networks,
+pp. 53–60, 1995.
+Liu, J., Wang, C., Danilevsky, M., and Han, J. Large-scale
+spectral clustering on graphs. In IJCAI, 2013.
+
+Chen, Y., Lim, S. H., and Xu, H. Weighted graph clustering
+with non-uniform uncertainties. In ICML, 2014a.
+
+Luxburg, U. A tutorial on spectral clustering. Statistics and
+Computing, 17(4):395–416, 2007.
+
+Chen, Y., Sanghavi, S., and Xu, H. Improved graph clustering. IEEE Transactions on Information Theory, 60(10):
+6440–6455, 2014b.
+
+Macropol, K. and Singh, A. Scalable discovery of best
+clusters on large graphs. Proceedings of the VLDB Endowment, 3(1-2):693–702, 2010.
+
+Condon, A. and Karp, R. Algorithms for graph partitioning on the planted partition model. Random Structures
+Algorithms, 18(2):116–140, 2001.
+
+Oymak, S. and Hassibi, B. Finding dense clusters via ”low
+rank + sparse” decomposition. Arxiv preprint, 2011.
+
+Drineas, P. and Mahoney, M. W. On the Nyström method
+for approximating a gram matrix for improved kernelbased learning. Journal of Machine Learning Research,
+6:2153–2175, 2005.
+Fowlkes, C., Belongie, S., Chung, F., and Malik, J. Spectral
+grouping using the Nyström method. IEEE Transactions
+on Pattern Analysis and Machine Intelligence (TPAMI),
+26(2):214–225, 2004.
+Giesen, J. and Mitsche, D. Reconstructing many partitions
+using spectral techniques. Fundamentals of Computation Theory, pp. 433–444, 2005.
+
+Rohe, Karl, Chatterjee, Sourav, and Yu, Bin. Spectral clustering and the high-dimensional stochastic blockmodel.
+The Annals of Statistics, 39(4):1878–1915, 08 2011.
+Shamir, R. and Tsur, D. Improved algorithms for the random cluster graph model. Random Structures Algorithms, 31(4):418–449, 2007.
+Sibson, R. Slink: an optimally efficient algorithm for the
+single-link cluster method. The Computer Journal, 16
+(1):30–34, 1973.
+Watts, D. J. and Strogatz, S. H. Collective dynamics
+of ’small-world’ networks. Nature, 393(6684):409–10,
+1998.
+
+A Divide and Conquer Framework for Distributed Graph Clustering
+
+Whang, J. J., Sui, X., and Dhillon, I. S. Scalable and
+memory-efficient clustering of large-scale social networks. In ICDM, 2012.
+Yan, D., Huang, L., and Jordan, M. I. Fast approximate
+spectral clustering. In KDD, pp. 907–916, 2009.
+
+

@@ -1,0 +1,1185 @@
+Adaptive Belief Propagation
+
+Georgios Papachristoudis
+John W. Fisher III
+CSAIL, MIT, Cambridge, MA 02139, USA
+
+Abstract
+Graphical models are widely used in inference
+problems. In practice, one may construct a single large-scale model to explain a phenomenon
+of interest, which may be utilized in a variety of
+settings. The latent variables of interest, which
+can differ in each setting, may only represent
+a small subset of all variables. The marginals
+of variables of interest may change after the addition of measurements at different time points.
+In such adaptive settings, naı̈ve algorithms, such
+as standard belief propagation (BP), may utilize
+many unnecessary computations by propagating
+messages over the entire graph. Here, we formulate an efficient inference procedure, termed
+adaptive BP (AdaBP), suitable for adaptive inference settings. We show that it gives exact results for trees in discrete and Gaussian Markov
+Random Fields (MRFs), and provide an extension to Gaussian loopy graphs. We also provide
+extensions on finding the most likely sequence
+of the entire latent graph. Lastly, we compare
+the proposed method to standard BP and to that
+of (Sümer et al., 2011), which tackles the same
+problem. We show in synthetic and real experiments that it outperforms standard BP by orders
+of magnitude and explore the settings that it is
+advantageous over (Sümer et al., 2011).
+
+1. Introduction
+Many estimation problems can be cast as inference in
+graphical models, where nodes represent variables of interest and edges between them indicate dependence relations. Naı̈ve inference may have exponential complexity
+in the number of variables. Message passing algorithms,
+such as BP (Pearl, 1982) reduce the complexity significantly. Despite the fact that BP performs exact inference
+Proceedings of the 32 nd International Conference on Machine
+Learning, Lille, France, 2015. JMLR: W&CP volume 37. Copyright 2015 by the author(s).
+
+GEOPAPA @ MIT. EDU
+FISHER @ CSAIL . MIT. EDU
+
+only on trees, it is often applied to loopy graphs (for which
+it is approximate) due to its computational efficiency.
+We consider the problem of inference in large-scale models. Such models which arise, for example, in complex
+spatio-temporal phenomena, may be utilized in multiple
+settings. It is often the case that only a subset of latent
+variables is of interest for different applications which may
+vary from instance to instance (Rosales & Jaakkola, 2005;
+Chechetka & Guestrin, 2010; Wick & McCallum, 2011).
+Additionally, the set of available measurements may vary
+with use or become available at different points in time.
+The latter is common for any sequential estimation problem. In such situations, general-purpose inference algorithms, such as BP may utilize many unnecessary computations when only a small subset is desired. The complexity of such approaches becomes prohibitive as the size of
+graph increases, e.g., due to constant re-evaluation of messages. There exist several examples that fall into this category of problems. Patient monitoring provides one such
+practical example. Large-scale systems may monitor the
+health status of many patients; however, different physicians limit their interest to patients under their immediate
+care. Temperature monitoring sensors provide data over
+time and space, but sensitive areas (e.g., server room) may
+require more careful examination for the timely response in
+case of abnormal behavior. Lastly, in computational biology, the effects of mutations are explored (computational
+mutagenesis), with each putative mutation resulting in a
+very similar problem.
+This motivates methods for problems where measurements
+are added incrementally and the interest is in a subset of
+node marginals at a given time point or the MAP sequence
+of the full latent graph. This is the problem of adaptive inference, where the goal is to take advantage of previously
+computed quantities instead of performing inference from
+scratch. In these cases, standard BP results in many redundant computations. Consequently, we develop an adaptive
+inference approach which avoids redundant computations
+and whose average-case performance shows significantly
+lower complexity compared to BP. The main idea is to send
+only messages between the node where a measurement has
+
+Adaptive Belief Propagation
+
+been obtained from (w` ) and the node whose marginal is
+of interest (v` ).1 The correctness of this approach is guaranteed by propagating messages between consecutive measurement nodes w`−1 , w` at every iteration as shown in Fig.
+1. As a result, we only send the necessary messages to
+guarantee that the incoming messages to the node of interest v` are correct. We call this minimal messaging schedule
+adaptive BP. We show that it gives exact results on trees (as
+standard BP) and provide an extension for Gaussian loopy
+graphs that still guarantees exactness in the evaluation of
+marginals.
+The proposed method requires a preprocessing step of
+O(N log N ) time, where N is the number of latent nodes.
+In the worst case, when relative distance between consecutive “measurement” nodes is approximately the tree diameter and the diameter is on the order of N (highly unbalanced tree), the performance is comparable – yet still faster
+to– standard BP. However, for height-balanced trees worstcase performance results in O(log N ) messages per update
+as compared to O(N ) for standard BP. In the worst case, if
+distance of consecutive nodes is very small, the computation of the node marginal is obtained in constant time per
+iteration. We provide an extension of the method for MAP
+inference and for Gaussian loopy MRFs and show how it
+can be used to suggest nearly optimal measurement schedules. We compare the proposed method to (Sümer et al.,
+2011) and examine settings under one approach may have
+advantages over the other. Lastly, we empirically demonstrate the performance of our method in a variety of synthetic datasets, as well for two real applications.
+Related Work. Sümer et al. consider the same problem in
+the context of factor graphs (Sümer et al., 2011) utilizing
+the factor elimination algorithm to evaluate node marginals
+(Darwiche & Hopkins, 2001). They construct a balanced representation of the elimination tree in O(|X |3tw N )
+time, which allows for computation of a node marginal in
+O(|X |2tw log N ), where N is the number of nodes, tw is
+the elimination tree width (size of the largest clique in the
+chordal graph minus one) and |X | the alphabet size. However, the preprocessing step becomes prohibitive as |X |
+and tw grow large, thus making this method inappropriate for dense loopy graphs. For trees, the width of the
+elimination tree is one and the complexity of updating the
+model reduces to O(|X |3 log N ) as compared to O(|X |N )
+for standard BP. Note that they address the discrete case
+only. As we show later, the computational complexity is
+impacted significantly by not taking into account the relative distances between consecutive nodes of interest. (Wick
+& McCallum, 2011) consider the focused inference problem, where they propose a prioritized scheme of Metropolis
+Hastings algorithm that focuses on sampling variables from
+a set of interest. (Chechetka & Guestrin, 2010) examine the
+1
+
+We will refer to w` as “measurement” node for abbreviation.
+
+same problem. They create a prioritized message schedule
+weighted towards messages to which the set of interest is
+most sensitive. Their approach is limited to discrete graphs,
+the set of interest is fixed and the preprocessing time depends on the number of edges and neighbors of the nodes.
+In contrast, our proposed method extends to loopy Gaussian models, has a reduced pre-processing time, and allows
+for varying sets of interest.
+
+2. Problem Statement
+Consider the Markov Random Field (MRF) which represents a graph G = (V, E) of N latent variables, X =
+{X1 , . . . , XN }, whose direct dependencies are represented
+by edge set E. Let’s denote the neighbors of latent node
+Xk with N (k) and assume each latent node Xk is linked
+to mk measurements {Yk,1:mk }. The set {Yk,1:mk } will
+be called observation set and be denoted by Sk . In addition, each Xk ∈ X . A feedback vertex set (FVS) F, is a
+set of nodes whose removal results in a cycle–free graph
+T = V \ F (forest of trees). Obviously, F = ∅ in the
+case of trees. We denote |F| = K to be the size of FVS.
+We would also call all nodes in T that are neighbors to
+an FV node as anchors and denote them by A. That is,
+A = {i | i ∈ T , i ∈ N (p), ∀p ∈ F}.
+For the purpose of our analysis, we focus on discrete
+MRFs, but the proposed method generalizes straightforwardly to Gaussian MRFs (Weiss & Freeman, 2001).
+Lastly, a common assumption is that measurements are
+conditionally independent on X . We focus on pairwise
+MRFs since it can be shown that MRFs with larger cliques
+can be reduced to pairwise ones (Wainwright et al., 2005).
+We consider three types of potentials; node potentials of
+(0)
+latent variables, ϕk (xk ), pairwise potentials between latent and observed variables, χk` (xk , y` ), and pairwise potentials between latent variables, ψij (xi , xj ). In the gaussian case, we assume that the variables follow a multivariate Gaussian with parameters h, J, where h is the full potential vector and J the full precision (information) matrix. Absence of an edge between two nodes i, j implies
+that Jij = 0 and vice versa. We are interested in problems where a measurement is added at a time and only one
+or a few marginals are of interest at any point.
+PNThe total number of available measurements is M = k=1 mk .
+Lastly, we are given a measurement plan (order) w =
+{w1 , . . . , wM } = {w1:M }, which provides the order of
+taking measurements from each set. That is, a measurement is obtained from set Sw1 , then from Sw2 , and so on.
+We call marginal order, v = {v1:M }, the sequence of the
+latent nodes whose marginal is of interest at each step.
+Belief Propagation. Belief propagation is a message passing algorithm where two messages are propagated on each
+edge (i, j), one on each direction. A message from node i
+
+Adaptive Belief Propagation
+
+to node j essentially contains all the information from the
+subtree rooted at i. In its serial version, an arbitrary node is
+chosen as a root, then messages are passed from leaves to
+the root, and then back to the leaves. In the discrete case,
+messages and marginal
+of interest are computed
+as
+X
+Y
+mi→j (xj ) =
+ϕi (xi )ψij (xi , xj )
+mk→i (xi )
+xi
+
+k∈N (i)\j
+
+(1)
+pXi (xi ) ∝ ϕi (xi )
+
+Y
+
+mk→i (xi ),
+
+(2)
+
+k∈N (i)\j
+
+while in the gaussian case as
+−1
+−1
+hi→j = −Jji Ji\j
+hi\j
+Ji→j = −Jji Ji\j
+Jij
+(3)
+X
+X
+ĥi = hi +
+hk→i
+Jˆi = Jii + Jk→i , (4)
+k∈N (i)
+
+k∈N (i)
+
+P
+where hi\j = hi + k∈N (i)\j hk→i , Ji\j = Jii +
+P
+k∈N (i)\j Jk→i . Belief propagation is a dynamic programming algorithm that takes advantage of the tree structure to avoid recomputing recurring quantities. The complexity of sending a message in the discrete case is
+O(|X |2 ), where |X | is the alphabet size. It is O(d3 ) for the
+Gaussian case, where d is the dimension of the latent node.
+The overall complexity in its serial version is O(N |X |2 ).
+Updating node potentials. Observed nodes are essentially
+absorbed into the node potential of the latent node they link
+to. If a measurement Yw` ,u = yu is added at iteration `
+linking to node Xw` , it updates node Xw` potential as
+(`−1)
+ϕ(`)
+(xw` )χw` u (xw` , yu ),
+w` (xw` ) = ϕw`
+(`−1)
+
+where ϕw` (·) is the node potential before the incorporation of measurement yu . Updating the node potential requires O(|X |) time. In the Gaussian case, incorporating a
+measurement in node w` is as straightforward. It becomes
+clear that all the information about observed nodes is easily absorbed into the latent node potentials. Thus, we will
+henceforth only consider the graph of latent nodes.
+
+3. Method Description
+For the purposes of analysis, we would delay the discussion
+to general Gaussian MRFs until Sec. 5. We will consider
+trees here and show later an extension to Gaussian loopy
+graphs. As a reminder, we obtain one measurement at every step and are interested in finding the marginal at a given
+node. We show in the supplement how this can be extended
+to multiple measurements or nodes of interest at a time.
+The measurement order w = {w1 , . . . , wM } is the order
+that measurements are obtained, while the marginal order
+v = {v1 , . . . , vM } determines the marginals of interest at
+any time. Again, the key idea is to propagate messages in
+the paths (w`−1 , w` ) and (w` , v` ), ∀`. The path between
+any two nodes can be determined trivially if their lowest
+common ancestor (lca) is known. The problem of finding
+
+the lca of two nodes is well-studied and is related to the famous Range Minimum Query (RMQ) problem, which returns the index of the minimum element between two specified indices of an array A. This algorithm, as discussed
+in (Harel & Tarjan, 1984), requires the building of a structure M of size N × L, where L = dlog2 N e + 1, which
+returns the index of the minimum array element between
+two specified indices of A in constant time. It is extremely
+well-suited for problems with a large number of queries, R,
+where R  N , since it is linear in R. It turns out that the
+LCA can be reduced to the RMQ problem as shown below
+(Czumaj et al., 2007), (Fischer & Heun, 2007).
+Lowest Common Ancestor. For a specified root, each
+node is labeled in a breadth-first manner. That is, the root
+is assigned label 1, and all other nodes are labeled accordingly in a top-down, left-right approach (cf. Fig. 1). As
+we mentioned above, the index of the minimum element
+in the subarray A[i . . . j] is provided in constant time by
+building the RMQ structure. Now, suppose we recover the
+Euler tour E of the tree starting from the root. As a reminder, the Euler tour of a strongly connected, directed
+graph G is a cycle that traverses each edge of G exactly
+once, although it may visit a node more than once (Cormen et al., 2009). Since we are dealing with undirected
+graphs here, we assume for the purposes of analysis that
+each undirected edge is equivalent to two directed edges
+of opposing direction. The number of edges entering or
+exiting a node is called the in-degree or out-degree, respectively. Since by construction each node has equal out- and
+in-degree, the Euler tour is always a cycle, that is, it starts
+and ends on the same node (here, the root). If we denote by
+H the vector which stores the index of the first occurrence
+of each node in E, the lca of nodes w`−1 , w` would be
+somewhere in E[H w`−1 , . . . , H w` ] due to the way the Euler tour is constructed (depth-first manner). Since the nodes
+are labeled in a breadth-first manner, the lca of w`−1 , w`
+would be the one with the smallest label and hence the
+smallest depth in the range E[H w`−1 , . . . , H w` ]. It becomes apparent that we need to introduce a vector D e
+which would store the depth of the corresponding nodes
+in the Euler tour. For example, the depth of the first node
+in the Euler tour is [D e ]1 = 0, because it is the root. Since
+the lca of w`−1 , w` is the node with the smallest depth
+in E[H w`−1 , . . . , H w` ], the index of the minimum element of subarray D e [H w`−1 , . . . , H w` ] would give us the
+lca(w`−1 , w` ).
+It remains now to build a matrix M that would provide answers to queries of the type arg min D e [H w`−1 , . . . , H w` ]
+in constant time. The size of this matrix would be N × L,
+where L = dlog2 N e + 1, while element [M ]i,j would represent the index of the minimum element of the subarray
+
+Adaptive Belief Propagation
+
+D e that starts at i and has length 2j−1 :
+(
+[M ]i,j−1
+, [D e ][M ]i,j−1 ≤ [D e ][M ]r,j−1
+[M ]i,j =
+[M ]min{i+2j−2 ,N },j−1 , otherwise,
+j−2
+
+where i = 1, . . . , N , j = 1, . . . , L, r = min{i + 2 , N }
+and [M ]i,1 = i. The absolute index of the minimum value
+of D e [i, . . . , j] is(recovered in constant time as
+[M ]i,k+1 , [D e ][M ]i,k+1 ≤ [D e ][M ]s,k+1
+RMQDe (i, j) =
+[M ]j−2k +1,k+1 , otherwise,
+where k = blog2 (j − i + 1)c and s = j − 2k + 1. The lca
+of w`−1 and w` is(simply
+E RMQDe (H w`−1 ,H w` ) , H w`−1 < H w`
+lca(w`−1 , w` ) =
+E RMQDe (H w` ,H w`−1 ) , otherwise.
+(5)
+Adaptive BP. With a careful inspection, we observe that
+after the incorporation of a measurement at node Xw` , the
+evaluation of the messages along the unique path from node
+w` to node v` is sufficient for the determination of node
+v` ’s marginal. This is the key point of the adaptive BP
+algorithm. The above procedure guarantees to give the correct marginals along this path as long as all the incoming
+messages to node w` are correct. This is possible, if we
+additionally propagate messages from w`−1 to w` at every
+iteration. The algorithm is described as follows. During
+initialization, all node potentials we propagate messages
+along the entire graph in both directions. At this point,
+as a new measurement arrives from set Sw1 , the messages
+from w1 to v1 are computed. This way, the marginals of
+the nodes in the path that connects w1 , v1 (incl. w1 , v1 )
+are correctly updated. Then, we propagate messages from
+w1 to w2 , update the node potential of Xw2 and send messages from w2 to v2 . We continue with this procedure for
+each `. If w` = w`−1 , no messages are propagated from
+w`−1 to w` , while if w` = v`−1 , only the node potential
+Xw` is updated. Obviously, the path from node w`−1 to w`
+is directly related to the lca(w`−1 , w` ). Similarly, for the
+pair (w` , v` ). Therefore, at every iteration, we need to determine the lcas of these two pairs, which is accomplished
+in constant time, with the reduction to the RMQ problem.
+Once we find the lca of pair (w`−1 , w` ), we can trivially
+determine the directed path from w`−1 to w` by traversing
+from w`−1 up to lca(w`−1 , w` ) and then down to w` . We
+will denote the messages in this path by M(w`−1 → w` ).
+Similarly, we denote the messages of the directed path from
+w` to v` by M(w` → v` ). Note here that both of the above
+schedules contain only the single-direction messages from
+one node to another. The update is done in the same manner as in the serial version of BP, that is, we propagate messages from w`−1 to the lca(w`−1 , w` ) and then down to w` .
+The procedure is the same for the pair (w` , v` ). A flow of
+the algorithm and a detailed description are provided in Fig.
+1 and Alg. 1, respectively.
+
+w`
+v`
+
+?
+
+w`
+
+1
+
+(a) Messages from w`−1 to w`
+
+w`
+v`
+
+?
+
+w`
+
+1
+
+(b) Messages from w` to v`
+
+Figure 1. The bold node in black represents the current measurement node w` , while the bold node in gray the previous measurement node w`−1 . The node in question mark represents the node
+of interest v` . (a) In the first phase of an iteration, we propagate
+messages from w`−1 to w` (depicted in purple color). (b) In the
+second phase, we propagate messages from w` to v` (depicted in
+black color) after we have updated the node potential at w` , which
+has changed due to the addition of a new measurement.
+
+Messages are updated as
+X
+mi→j (xj ) =
+ϕi (xi )ψij (xi , xj )
+xi
+
+Y
+
+mk→i (xi ),
+
+k∈N (i)\j
+
+∀(i, j) ∈ M(w`−1 → w` ) and M(w` → v` ),
+while the marginal of node of interest v` , is computed from
+Eq. (2). If the latent graph is a chain, there is no need to
+find the lca: we simply propagate from w`−1 to w` , update
+the node potential of w` and propagate messages to v` .
+Proposition 1. Alg. 1 correctly updates the messages in
+path M(w`−1 → w` ), ∀`.
+(Proof of this and subsequent corollaries in the supplement)
+Corollary 1. Alg. 1 correctly updates the messages in path
+M(w` → v` ), ∀`.
+Corollary 2. Alg. 1 provides the exact marginals of all
+nodes in path M(w` → v` ), ∀`.
+Algorithm 1 A DAPTIVE BP
+Preprocessing
+Determine Euler tour E, depths of elements in the Euler
+tour D e , vector H which stores the index of the first
+occurrence of node i in E, and matrix M which stores
+the index of the minimum value of the subarray of D e
+starting at i and having length 2j−1 .
+Initialization
+Initialize the node, pairwise potentials and messages.
+Iteration
+for ` = 1, . . . , M do
+Find lca(w`−1 , w` ) from Eq. (5).
+Determine the schedule M(w`−1 → w` ).
+Compute messages mi→j (xj ) in M(w`−1 → w` ).
+Update the node potential at Xw` .
+Find lca(w` , v` ) from Eq. (5).
+Determine the schedule M(w` → v` ).
+Compute messages mi→j (xj ) in M(w` → v` ).
+Compute the marginal of interest pXv` (xv` ).
+end for
+
+Adaptive Belief Propagation
+
+Complexity. If the depth of each node (D) is not known in
+advance, it can be retrieved in O(N ) time, in a depth-first
+approach. Similarly, the Euler tour is also retrievable in linear time. The same holds for vectors D e and H. Lastly,
+the creation of matrix M , takes O(N log2 N ) time and
+space. Therefore, the overall complexity of preprocessing
+is O(N log2 N ). For adaptive BP, we only need to send
+messages along the directed paths M(w`−1 → w` ) and
+M(w` → v` ). The number of messages to be sent in step
+` is dist(w`−1 , w` ) + dist(w` , v` ).2 The overall complexPM
+ity is O( `=1 (dist(w`−1 , w` ) + dist(w` , v` ))|X |2 ). Compare this with standard BP, where 2(N − 1) messages are
+sent at each iteration resulting in an overall complexity of
+O(mN 2 |X |2 ), assuming that the number of measurements
+from each set is the same, mk = m, ∀k. As we see, the
+complexity of adaptive BP directly depends on the context
+of the measurement and marginal order, while standard BP
+has a fixed cost per iteration. We will analyze the worst,
+best and average complexity of adaptive BP for balanced
+and unbalanced trees. In the worst-case, when the tree is
+highly unbalanced (tree diameter on the order of N ) and
+the relative distance between (w`−1 , w` ), (w` , v` ) is comparable to the diameter for all `, we need to transmit O(N )
+messages at every iteration. In this case, the order of the
+number of messages to be sent is the same with standard
+BP. If, instead, the latent graph is a balanced tree, with
+ each
+node having approximately q children, O blogq N c messages are propagated at every iteration in the worst case. In
+the best-case scenario, if w`−1 , w` , v` are akin to each other
+(e.g., parent-child or siblings) for every `, then only one
+or two messages are propagated at every iteration, which
+reduces the overall complexity to just O mN |X |2 . As
+expected, when there is small distance between pairs of
+nodes (w`−1 , w` ), (w` , v` ), the complexity is substantially
+reduced. Complexity only depends on the relative distance
+between consecutive terms. Structure comes only into consideration, in the worst case, when the relative distance between (w`−1 , w` ) and (w` , v` ) are consistently comparable
+to the tree diameter.
+
+4. Extension to Max-Product
+In the case of max-product, we replace sum with max and
+introduce a new type of messages, called delta messages,
+that will be used for the recovery of the MAP sequence. A
+delta message indicates the value of the source node that
+corresponds to the MAP sequence of the subtree rooted
+at the source node (excl. the branch containing the target
+node) for a specific value of the target node. In order to recover the MAP sequence, we need to propagate delta messages from w`−1 to w` and then backtrack from w` down
+to the leaves (considering w` as the root).
+2
+The distance between nodes w, v is the length of the path
+connecting them and equals dist(w, v) = Dv + Dw − 2Dlca(w,v) .
+
+In general, obtaining the MAP sequence is a linear operation in the number of nodes. However, local changes in
+node potentials might induce only small changes in the
+MAP sequence. We should note that the only delta messages pointing towards the root w` that change, are the
+ones the path M(w`−1 → w` ), which are correctly updated during iteration `. A visualization of the algorithm
+is provided in the supplement. This observation can help
+us recover the MAP sequence in a more efficient way. We
+create an indicator sparse matrix, whose rows represent the
+source and columns the target of a delta message. We
+assign value 1 to any delta message that became “dirty”
+(changed) in the most recent iteration. That is, every message in M(w`−1 → w` ). Therefore, when we backtrack
+from w` down to the leaves, we must consider the effect
+that these changed messages have in the MAP sequence.
+Nevertheless, if a node’s maximizing value remains the
+same (with the previous iteration), then the MAP subsequences of the subtrees rooted at the neighbors of this node
+will also remain the same since the delta messages from
+these neighbors to the node stayed intact. Because of that,
+there is no need to backtrack further down to the subtrees
+of a node’s neighbors, if this node’s maximizing value did
+not change between consecutive iterations.
+
+5. Extension to Gaussian Loopy MRFs
+Adaptive BP can be extended to Gaussian loopy graphs by
+using the Feedback Message Passing (FMP) algorithm by
+(Liu et al., 2012). Their algorithm provides a way to evaluate the exact means and variances in loopy Gaussian MRFs.
+On the first step, an FVS F is determined from one of the
+existing algorithms. Then, the exact means and variances
+are obtained in two rounds. In the first round, BP runs on
+{hT , JT }, where hT , JT correspond to the part of full potential vector and block of full information matrix that contain only nodes in T . We also run BP |F| = K more
+times with parameters {hp , JT }p∈F , where hp = JT p . In
+other words, hp is the part of column of J that corresponds
+to node p and contains only the rows that correspond to
+nodes in T . This provides us with “partial” means and
+variances µ̂Ti , Σ̂Tii , ∀i ∈ V as well as “feedback gains”
+gip , ∀i ∈ V, p ∈ F that will be used in the second round
+of the method. In the second round, the means and variances in FVS F are evaluated by inverting JˆF and the exact
+means and variances are retrieved by running BP one more
+time and adding correction terms to the estimated variances
+from the first round, Σ̂Tii (see Alg. 2 for more details).
+After briefly outlining FMP, we move on by describing
+the extension of AdaBP to Gaussian loopy graphs. As a
+reminder, once we determine the FVS F, the remaining
+graph T is a tree. Let’s denote by w`T the node from T
+
+Adaptive Belief Propagation
+
+Algorithm 2 F EEDBACK M ESSAGE PASSING (FMP)
+p
+
+1. Construct K potential vectors: h = JT p , ∀p ∈ F.
+2. Run BP K + 1 times on T with parameters
+{hT , JT }, {hp , JT }p∈F , which will produce mesT
+sages hTi→j , hpi→j , Ji→j
+and marginals µ̂Ti , gip , Σ̂Tii .
+3. Obtain the K–sized graph with updated parameters
+ĥF , JˆF as
+X
+[JˆF ]pq = Jpq −
+Jpi g q , ∀p, q ∈ F (6)
+i
+
+i∈N (p)∩T
+
+[ĥF ]p = hp −
+
+X
+
+Jpi µ̂Ti , ∀p ∈ F
+
+(7)
+
+trieve the marginal from µF , ΣF as [µF ]v` , [ΣF ]v` v` . Otherwise, we revise the potential vectors according to Step 4
+of Alg. 2 and propagate messages hpi→j , ∀p from w`T to v` .
+Tables 1, 2, 3 summarize the messaging protocol for every
+iteration `. A more detailed discussion is provided in the
+supplement.
+Table 1. Messages between w`−1 , w`
+
+w`−1
+
+w` ∈ T
+T
+Send Ji→j
+, hTi→j , hpi→j
+∈ {F, T }
+T
+in M(w`−1
+→ w` )
+
+Table 2. First-round messages between w` , v`
+
+v` ∈ {F, T }
+
+i∈N (p)∩T
+
+and solve for ΣF = JˆF−1 and µF = ΣF ĥF .
+4. P
+Revise the potential vector in T as h̃i = hi −
+j∈N (i)∩F Jij [µF ]j , ∀i ∈ T and obtain the exact
+means by running BP one more time on the revised
+potential vector (the corresponding messages will
+be denoted by h̃Ti→j ).
+5. Correct the variances with
+XX p
+Σii = Σ̂Tii +
+gi [ΣF ]pq giq , ∀i ∈ T . (8)
+p∈F q∈F
+
+where a measurement (
+has been obtained most recently
+w`
+, if w` ∈ T
+w`T =
+T
+w`−1 , otherwise.
+Let’s further denote the subtrees of T rooted at w`T , v` ∈ T
+with the nodes in A as their leaves by T`w and T`v , respectively. Depending on the size of the anchor set A, and the
+allocation of its nodes inside T , subtrees T`w , T`v can be
+much smaller than T , |T`w |, |T`v |  |T |.
+As we see from steps 4 and 5 of Alg. 2, the evaluation
+of the marginal at v` requires the knowledge of µF , ΣF
+which in turn require the knowledge of “partial” means µ̂Ti
+and “feedback gains” gip at the anchors A, ∀p ∈ F. The
+quantities µ̂Ti , gip , ∀i ∈ A will be correct as long as the
+messages between w` and A are correct, which is guaranteed by sending messages between consecutive measurement nodes as we did in the tree case. The difference in the
+loopy case is that since some measurement nodes might
+belong to the FVS, we should always propagate messages
+from the most recent measurement node in T (that is, w`T ),
+to the next measurement node w` ∈ T to ensure consistency. If w` ∈
+/ T , propagation is not necessary. For the
+evaluation of v` ’s marginal, we further need to propagate
+from w`T to all nodes in A, which ensures the correctness
+of all incoming messages to nodes in A. After that, the potential vector ĥF and information matrix JˆF are updated
+correctly from Eqs. (6), (7) which leads to the right mean
+and covariance µF , ΣF of the FVS F. If v` ∈ F, we re-
+
+w` ∈ F
+–
+
+T
+w` ∈ {F, T } Send Ji→j
+, hTi→j , hpi→j in M(w`T → A)
+
+Table 3. Second-round messages between w` , v`
+
+w` ∈ {F, T }
+
+v` ∈ T
+
+v` ∈ F
+
+Send h̃Ti→j in M(A → v` )
+Send hpi→j in M(w`T → v` )
+
+–
+–
+
+In terms of complexity, we first need to determine the FVS.
+Even though, finding the minimum FVS is NP-complete,
+there are approximate algorithms that find an FVS with
+size comparable to the optimal. For example, (Bafna
+et al., 1999) provide a 2-approximation, which runs in
+O(min{|E| log N, N 2 }) time. At every iteration we need
+T
+T
+to send (K + 2)dist(w`−1
+, w` ) messages between w`−1
+and w` , if w` ∈ T and (K + 2)(|T`w | − 1) messages
+between w`T and nodes in A. If, in addition, v` ∈ T ,
+the propagation of (|T`v | − 1) h̃Ti→j messages between
+the anchors A and v` is necessary, plus Kdist(w`T , v` )
+hpi→j messages from w`T to v` . Therefore, we send
+T
+O(K(dist(w`−1
+, w` ) + dist(w`T , v` ) + |T`w |) + |T`v |) messages per iteration. Compare this to the O(K|T |) messages per iteration of standard FMP. To understand the difference in complexity, let’s assume for the shake of expoT
+sition that |T`w | ≥ dist(w`−1
+, w` ), dist(w`T , v` ), |T`v |. This
+means that the complexity of adaptive BP is O(K|T`w |),
+which results in a speedup on the order of O(|T |/|T`w |),
+since it always holds that |T`w | ≤ |T |. Therefore, adaptive
+BP is consistently faster than standard FMP.
+
+6. Experiments
+Henceforth, we refer to the proposed algorithm as AdaBP,
+the method of (Sümer et al., 2011) as RCTreeBP, and standard BP as BP. We use a publicly available version of RCTreeBP. In addition, when we make use of the term “consecutive elements”, we mean consecutive measurement elements w`−1 , w` and concurrent measurement and marginal
+
+Adaptive Belief Propagation
+
+2
+
+101
+100
+
+10
+
+1
+
+10
+
+2
+
+10
+
+3
+
+10
+
+3
+
+10 |X | = 2
+10
+
+2
+
+101
+100
+
+4
+
+10
+
+1
+
+10
+
+2
+
+N
+4
+
+10
+
+t(BP)/t(AdaBP)
+t(RCTreeBP)/t(AdaBP)
+
+Speedup ratio
+
+Speedup ratio
+
+10
+
+103 |X | = 10
+10
+
+2
+
+10
+
+1
+
+100
+
+10
+
+1
+
+10
+
+2
+
+10
+
+3
+
+10
+
+4
+
+N
+
+10
+
+3
+
+N
+
+(a) Unconstrained w
+
+10
+
+4
+
+4
+
+10
+
+1
+
+10
+
+0
+
+10
+
+-1
+
+10
+
+-2
+
+104
+
+t(BP)/t(AdaBP)
+t(RCTreeBP)/t(AdaBP)
+
+Speedup ratio
+
+10
+
+|X | = 2
+
+t(BP)/t(AdaBP)
+t(RCTreeBP)/t(AdaBP)
+
+Speedup ratio
+
+10
+
+3
+
+104
+
+t(BP)/t(AdaBP)
+t(RCTreeBP)/t(AdaBP)
+
+Speedup ratio
+
+Speedup ratio
+
+104
+
+10
+
+1
+
+10
+
+2
+
+10
+
+3
+
+10
+
+4
+
+N
+
+t(BP)/t(AdaBP)
+t(RCTreeBP)/t(AdaBP)
+
+(a) E{dist(w`−1 , w` )}∼ O(N )
+
+t(BP)/t(AdaBP)
+t(RCTreeBP)/t(AdaBP)
+
+103
+10
+
+2
+
+101
+10
+
+0
+
+10
+
+1
+
+10
+
+2
+
+10
+
+3
+
+10
+
+4
+
+N
+
+(b) E{dist(w`−1 , w` )} = 2
+
+103 |X | = 10
+10
+
+2
+
+10
+
+1
+
+100
+
+10
+
+1
+
+10
+
+2
+
+10
+
+3
+
+10
+
+4
+
+N
+
+(b) Constrained w
+
+Figure 2. Comparison of the total running times of AdaBP
+against standard BP (gray) and RCTreeBP (black) over different alphabet sizes, |X | ∈ {2, 10}. (a) Distance between consecutive elements E[dist(w`−1 , w` )] is unconstrained.
+(b) E[dist(w`−1 , w` )] ≤ |X | log N . For average distance
+E[dist(w`−1 , w` )] smaller than |X | log N , AdaBP is 1.3–4.7
+faster than RCTreeBP.
+
+elements w` , v` . Recall that updates per iteration in RCTreeBP have complexity O(|X |3 log N ) (for trees), while
+complexity is O(|X |2 (dist(w`−1 , w` ) + dist(w` , v` ))) for
+AdaBP. Our experiments demonstrate that AdaBP is consistently orders of magnitude faster than standard BP (except in the worst case), and outperforms RCTreeBP when
+the average distance between consecutive elements is less
+than |X | log N (see Fig. 2(b)). Conversely, if the tree
+diameter is much greater than |X | log N and the average distance between consecutive elements is comparable to the tree diameter, AdaBP yields worse performance
+than RCTreeBP. We consider the following synthetic experiment where we construct unbalanced trees of sizes
+N ∈ {10, 102 , 103 , 104 }. We repeat the above procedure
+R = 10 times for each N , by randomly constructing a new
+tree. For each tree, we randomly generate different w orders of size N and for simplicity of analysis we set v = w,
+so that only the distance between consecutive measurement
+nodes affects the computation. Figs. 2(a) and 2(b) compare
+the ratios of running times of AdaBP against standard BP
+and RCTreeBP (different rows correspond to different alphabet sizes). In all cases both AdaBP and RCTreeBP significantly outperform standard BP. Fig. 2(a) considers the
+case of randomly generated w. When there is no restriction
+on the distance between consecutive elements, both AdaBP
+and RCTreeBP are comparable. However, for average distance between consecutive elements less than |X | log N ,
+AdaBP is 1.3–4.7 times faster than RCTreeBP. Fig. 3(a)
+and 3(b) consider worst and best case performance of AdaBP, respectively. In the former, we generate several different instances of a Markov chain of varying sizes and con-
+
+Figure 3. (a) Worst case. Distance between consecutive elements
+is on the order of N . AdaBP is comparable to standard BP (still
+being 2–4 times faster) and orders of magnitude slower than RCTreeBP. (b) Best case. Consecutive elements are very close to
+each other. Only a constant number of updates is required per
+step for AdaBP.
+
+struct the measurement and marginal orders, w and v such
+that there is at least 2N/3 distance between consecutive elements. In the latter case, we consider different instances
+of a star graph (tree diameter: 2) of varying sizes and randomly create measurement and marginal orders (which by
+construction do not have consecutive elements of more than
+2 nodes apart). As expected, in Fig. 3(a), RCTreeBP outperforms AdaBP for worst-case w (that is, when there is
+large distance between consecutive elements), yet still outperforms BP by a factor of 2–4. However, in Fig. 3(b)
+we see that AdaBP is 4–49 times faster than RCTreeBP
+and up to thousand times faster than BP. Next, we consider
+application of AdaMP (MP denotes max-product) to biological data. Specifically, we explore the effects of pointwise mutations in DNA sequences to the birth or disappearance of CpG islands. CpG islands are regions of DNA with
+high percentage of cytosine (C) occurring next to guanine
+(G) nucleotides and are believed to be responsible for upstream gene regulation. Usually, CpG island detection is
+modeled as an HMM problem where hidden nodes are binary variables which indicate the presence (or absence) of
+a CpG region and observed variables correspond to the observed DNA sequence comprised of the four nucleotides
+{A,T,C,G}. The goal is to find the MAP sequence (CpG
+regions) that best explains the observed data (DNA sequence). In computational mutagenesis, changes in the location of CpG islands are of interest due to mutations in the
+DNA sequence (Acar et al., 2009). We compare AdaMP
+and RCTreeMP on varying-size stretches (102 –105 bp) of
+human chromosome 21 obtained from the NCBI database.
+We train the parameters of HMM with one of the standard
+CpG prediction tools, CpG Island Searcher (Takai & Jones,
+2002). We perform a mutation every other nucleotide for
+each DNA-pair stretch and compare the running times of
+both methods under different criteria in Fig. 4. In this
+experiment, v` = w` , ∀`. Fig. 4(a) shows the speedup
+of AdaMP over RCTreeMP for varying sizes of DNA sequence. For medium to large sequences, AdaMP exhibits
+
+6
+4
+2
+0
+10
+
+2
+
+3
+10 N
+
+(a)
+
+10
+
+4
+
+104 102
+100
+10-2
+2
+2 100
+10 10
+10-2
+1050
+100 10-5
+10
+1050
+10
+-2 10-5
+510
+100
+10
+
+101
+
+102
+
+(b)
+
+103
+
+104
+
+105
+
+RCTreeMP (ρ = 0.09)
+AdaMP
+(ρ = 0.14)
+
+25
+20
+15
+10
+5
+0
+
+200
+
+400
+
+600
+
+800
+
+t(KF)/t(AdaBP)
+
+30
+
+60
+
+Time (sec)
+
+RCTreeMP
+AdaMP
+
+Speedup ratio
+
+8
+
+Update time (sec)
+
+Adaptive Belief Propagation
+
+40
+20
+
+(c)
+
+Figure 4. (a) Speedups of AdaMP over RCTreeMP for varyingsize stretches of chr 21 (102 –105 bp). (a) Left y-axis shows the
+speedup over RCTreeMP, while right y-axis the actual running
+times in sec (represented as lines). (b) Ratios of update times of
+AdaMP over RCTreeMP for different values of dist(w`−1 , w` )
+(x-axis: dist(w`−1 , w` ), y-axis: speedup). The four log-log plots
+correspond to four different DNA stretches of 102 , 103 , 104 , 105
+bp size, respectively. For smaller distances, AdaMP outperforms,
+but for distances closer to the graph size N , RCTreeMP is preferable. Red line indicates ratio of 1. (c) Both methods are not very
+sensitive to changes in the MAP sequence between consecutive
+iterations (x-axis: # of bp that differ between consecutive MAP
+sequences).
+
+better performance, however, for very large sequences of
+size ∼ 105 , the computational cost of determining the MAP
+sequence is nearly linear with the graph size (even though
+the cost of updating the delta messages remains remarkably low). In contrast, RCTreeMP depends only on the
+number of variables which changed since the previous iteration. Fig. 4(b) examines the relationship in performance to the distance between consecutive elements for
+DNA stretches of varying size (102 –105 bp). As expected,
+AdaMP is very sensitive to the distance between consecutive elements dist(w`−1 , w` ). On the contrary, RCTreeMP
+depends only on the graph size N . AdaMP is preferred for
+measurement schedules with low average dist(w`−1 , w` )
+(points above the red line), while RCTreeMP average distance comparable to graph size (points below the red line).
+Lastly, Fig. 4(c) shows that both methods are not very sensitive to changes in the MAP sequence between consecutive iterations.
+As a second experiment, we analyzed temperature measurements collected from 53 wireless sensors at 30 sec intervals from the Intel Berkeley Research lab. We modeled
+the latent temperatures in the various locations of the lab
+as a grid graph. We assume that measurements obtained
+from a sensor are a noisy representation of the temperatures around its close vicinity. We further assume that
+temperatures evolve over time following linear dynamics
+as Xt = AXt−1 + Vt−1 , where Vt−1 ∼ N (0, Q) and Xt
+represents the temperatures of the lab at time t. We learn
+parameters A and Q by training the data between Feb 28
+and Mar 7, 2004 on a Normal-inverse-Wishart model. One
+of the primary goals in this setting is to estimate the covariance of the latent variables after the incorporation of
+measurements. Since the problem is modeled as a Gaussian HMM, we can use the Kalman filter/smoothing up-
+
+AdaBP
+KF
+
+25
+20
+15
+10
+5
+
+50
+
+100
+
+Iteration j
+
+(a)
+
+150
+
+200
+
+20
+
+40
+
+60
+
+80
+
+100 120 140 160 180
+
+dist(wℓ , wℓ−1 )
+
+(b)
+
+Figure 5. (a) This figure shows the speedup over Kalman filter
+(KF). AdaBP is 1–42 times faster than standard kalman filtering/smoothing techniques. (b) Running time per iteration of AdaBP and KF as a function of consecutive distance between elements. AdaBP is much more sensitive to dist(w`−1 , w` ) and as
+the figure suggests it is much faster than KF when dist(w` , w`−1 )
+is small. Dotted plots represents deviation due to different runs of
+the experiment.
+
+dates. We use measurements in a 6-hour window on Feb
+28, 2014 on a random order and compare the update times
+of AdaBP versus standard Kalman filter/smoothing updates
+(RCTreeBP is not included for comparison here, since it is
+not applicable to Gaussian models). We see in Fig. 5(a),
+that AdaBP is consistently (1–42 times) faster than Kalman
+filtering/smoothing. Also, in Fig. 5(b), we observe the direct dependence of AdaBP to distance between consecutive
+elements (w`−1 , w` ), (w` , v` ), which makes it more appropriate for problems with small average distance.
+
+7. Discussion
+We presented a new algorithm, AdaBP, which is particularly suited to sequential inference problems, when there is
+little or no knowledge of the measurement schedule in advance. In addition, when we can design the measurement
+order, we show in the supplement how to propose a nearly
+optimal schedule by casting it as a shortest Hamiltonian
+path problem. We compared the method to standard BP and
+RCTreeBP. In the case of trees, standard BP incurs a prohibitive cost (O(N ) messages per iteration), while AdaBP
+sends only the necessary messages between consecutive elements. We provided an extensive analysis of the algorithmic complexity with respect to the measurement w and
+marginal schedule v. We showed that when consecutive
+measurement and marginal elements w`−1 , w` , v` are akin
+to each other, the complexity per iteration is of order O(1)
+and hence the overall complexity is O(N ) (provided the
+sizes of w, v are close to N ). In addition, advanced knowledge of the measurement nodes allows for a nearly minimal schedule design. Lastly, we showed extensions of the
+algorithm to Gaussian loopy graphs and to the most likely
+sequence problem (which applies on the full latent graph).
+An implementation of this algorithm is publicly available
+at https://github.com/geopapa11/adabp
+
+Adaptive Belief Propagation
+
+Acknowledgments
+The authors would like to thank the reviewers for their valuable comments and suggestions. This work was partially
+supported by the Army Research Office (ARO) Multidisciplinary Research Initiative (MURI) program (Award number W911NF-11-1-0391), NSF/DNDO Collaborative Research ARI-LA (Award ECCS-1348328), and by the Department of Energy (NA-22) Consortium for Verification
+Technology.
+
+Pearl, J. Reverend Bayes on inference engines: A distributed hierarchical approach. In Proceedings of the
+American Association of Artificial Intelligence National
+Conference (AAAI), pp. 133–136, 1982.
+Rosales, R. and Jaakkola, T. S. Focused Inference. In Proceedings of the 10th International Conference on Artificial Intelligence and Statistics (AISTATS), pp. 317–324,
+January 2005.
+
+References
+
+Sümer, Ö., Acar, U. A., Ihler, A. T., and Mettu, R. R. Adaptive exact inference in graphical models. Journal of Machine Learning Research, 12:3147–3186, Nov 2011.
+
+Acar, U. A., Ihler, A. T., Mettu, R. R., and Sümer, Ö. Adaptive Updates for MAP Configurations with Applications
+to Bioinformatics. In IEEE/SP 15th Workshop on Statistical Signal Processing (SSP), August 2009.
+
+Takai, D. and Jones, P. A. Comprehensive analysis of CpG
+islands in human chromosomes 21 and 22. Proceedings of the National Academy of Sciences (PNAS), 99
+(6):3740–3745, March 2002.
+
+Bafna, V., Berman, P., and Fujito, T. A 2-Approximation
+Algorithm for the Undirected Feedback Vertex Set Problem. SIAM Journal on Discrete Mathematics, 12(3):
+289–297, Sep 1999. ISSN 0895-4801.
+
+Wainwright, M. J., Jaakkola, T. S., and Willsky, A. S. MAP
+estimation via agreement on trees: Message-passing and
+linear programming. IEEE Transactions on Information
+Theory, 51:2005, 2005.
+
+Chechetka, A. and Guestrin, C. Focused Belief Propagation
+for Query-Specific Inference. In Proceedings of the 13th
+International Conference on Artificial Intelligence and
+Statistics (AISTATS), May 2010.
+
+Weiss, Y. and Freeman, W. T. Correctness of belief propagation in gaussian graphical models of arbitrary topology. Neural Computation, 13:2173–2200, 2001.
+
+Cormen, T. H., Stein, C., Rivest, R. L., and Leiserson, C. E.
+Introduction to Algorithms. McGraw-Hill Higher Education, 3rd edition, 2009.
+Czumaj, A., Kowaluk, M., and Lingas, A. Faster algorithms for finding lowest common ancestors in directed
+acyclic graphs. Theoretical Computer Science, 380(1-2):
+37–46, July 2007.
+Darwiche, A. and Hopkins, M. Using recursive decomposition to construct elimination orders, jointrees, and dtrees.
+In Trends in Artificial Intelligence, Lecture Notes in AI,
+pp. 180–191. Springer-Verlag, 2001.
+Fischer, J. and Heun, V. A New Succinct Representation of
+RMQ-Information and Improvements in the Enhanced
+Suffix Array. In Proceedings of the 1st International
+Conference on Combinatorics, Algorithms, Probabilistic and Experimental Methodologies, ESCAPE’07, pp.
+459–470. Springer-Verlag, 2007.
+Harel, D. and Tarjan, R. E. Fast Algorithms for Finding
+Nearest Common Ancestors. SIAM Journal on Computing, 13(2):338–355, May 1984.
+Liu, Y., Chandrasekaran, V., Anandkumar, A., and Willsky,
+A. S. Feedback Message Passing for Inference in Gaussian Graphical Models. IEEE Transactions on Signal
+Processing, 60(8):4135–4150, Aug 2012.
+
+Wick, M. L. and McCallum, A. Query-Aware MCMC. In
+Advances in Neural Information Processing Systems 24,
+pp. 2564–2572, 2011.
+
+

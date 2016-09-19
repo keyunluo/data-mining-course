@@ -1,0 +1,1406 @@
+Exponential Integration for Hamiltonian Monte Carlo
+
+Wei-Lun Chao1
+WEILUNC @ USC . EDU
+Justin Solomon2
+JUSTIN . SOLOMON @ STANFORD . EDU
+Dominik L. Michels2
+MICHELS @ CS . STANFORD . EDU
+Fei Sha1
+FEISHA @ USC . EDU
+1
+Department of Computer Science, University of Southern California, Los Angeles, CA 90089
+2
+Department of Computer Science, Stanford University, 353 Serra Mall, Stanford, California 94305 USA
+
+Abstract
+We investigate numerical integration of ordinary
+differential equations (ODEs) for Hamiltonian
+Monte Carlo (HMC). High-quality integration is
+crucial for designing efficient and effective proposals for HMC. While the standard method is
+leapfrog (Störmer-Verlet) integration, we propose
+the use of an exponential integrator, which is
+robust to stiff ODEs with highly-oscillatory components. This oscillation is difficult to reproduce
+using leapfrog integration, even with carefully
+selected integration parameters and preconditioning. Concretely, we use a Gaussian distribution
+approximation to segregate stiff components of
+the ODE. We integrate this term analytically for
+stability and account for deviation from the approximation using variation of constants. We consider various ways to derive Gaussian approximations and conduct extensive empirical studies
+applying the proposed “exponential HMC” to several benchmarked learning problems. We compare to state-of-the-art methods for improving
+leapfrog HMC and demonstrate the advantages of
+our method in generating many effective samples
+with high acceptance rates in short running times.
+
+1. Introduction
+Markov chain Monte Carlo (MCMC) is at the core of many
+methods in computational statistics (Gelman et al., 2004;
+Robert & Casella, 2004) to sample from complex probability
+distributions for inference and learning.
+Metropolis-Hastings MCMC obtains such samples by constructing a Markov chain with help from proposal distriProceedings of the 32 nd International Conference on Machine
+Learning, Lille, France, 2015. JMLR: W&CP volume 37. Copyright 2015 by the author(s).
+
+butions that generate random walks in sample space. A
+fraction of these walks aligned with the target distribution is
+kept, while the remainder is discarded. Sampling efficiency
+and quality depends critically on the proposal distribution.
+For this reason, designing good proposals has long been a
+subject of intensive research.
+For distributions over continuous variables, Hamiltonian
+Monte Carlo (HMC) is a state-of-the-art sampler using classical mechanics to generate proposal distributions (Neal,
+2011). The method starts by introducing auxiliary sampling variables. It then treats the negative log density of
+the variables’ joint distribution as the Hamiltonian of particles moving in sample space. Final positions on the motion
+trajectories are used as proposals.
+The equations of motion are ordinary differential equations
+(ODEs) requiring numerical integration. Several factors
+affect the choice of integrators. Time reversibility is needed
+for the Markov chain to converge to the target distribution,
+and volume preservation ensures that the sample acceptance
+test is tractable. The acceptance rate of HMC is determined
+by how well the integrator preserves the energy of the physical system, and hence high-fidelity numerical solutions are
+preferable. In the rare case that the ODE can be integrated
+exactly, no samples would be rejected. More realistically,
+however, when the ODE is integrated approximately, especially over a long time period to encourage exploration
+of the sample space, integration error can impede energy
+conservation, slowing convergence. Thus, the time period
+for integration usually is subdivided into many shorter steps.
+Despite its relevance to sampling efficiency, investigation
+of sophisticated numerical integrators for HMC has been
+scarce in the current machine learning literature. The
+standard HMC integrator is the leapfrog (Störmer-Verlet)
+method. Leapfrog integration, however, is sensitive to
+stiff ODEs with highly-oscillatory dynamical components
+(Hairer et al., 2006). When the target density yields a stiff
+ODE, e.g. a multivariate Gaussian distribution with small
+variances in certain dimensions, the time step for leapfrog
+
+Exponential Integration for Hamiltonian Monte Carlo
+
+is limited to the scale of the stiff components to avoid perturbing the energy of the system and consequently lowering
+MCMC acceptance rates. This results in limited motion in
+sample space, requiring many integration steps to explore
+the space. More generally, stiff ODEs occur in HMC whenever target distributions tightly peak around their modes, further motivating the need for advanced integrators. Although
+preconditioning can reduce stiffness and partially alleviate
+this problem, it is often insufficient, as demonstrated in our
+empirical studies.
+In this paper, we address the challenge of simulating stiff
+ODEs in HMC using an explicit exponential integrator. Exponential integrators are known in simulation and numerics
+for their ability to take large time steps with enhanced stability. They decompose ODEs into two terms, a linearization
+solvable in closed form and a nonlinear remainder. For
+HMC, the linear term encodes a Gaussian component of the
+distribution; when the small variances in the distribution
+are adequately summarized by this part, exponential integration outperforms generic counterparts like leapfrog. Our
+exponential integrator (“expHMC”) is easily-implemented
+and efficient, with high acceptance rates, broad exploration
+of sample space, and fast convergence due to the reduced
+restriction on the time step size. The flexibility to choose
+filter functions in exponential integrators further enhances
+the applicability of our method.
+We validate the effectiveness of expHMC with extensive
+empirical studies on various types of distributions, including
+Bayesian logistic regression and independent component
+analysis. We also compare expHMC to alternatives, such
+as the conventional leapfrog method and the recently proposed Riemann manifold HMC, demonstrating desirable
+characteristics in scenarios where other methods suffer.
+We describe basic HMC in §2 and our approach in §3. We
+then review related work in §4, and report several empirical
+studies in §5. We conclude in §7.
+
+2. Hamiltonian Monte Carlo
+Suppose we would like to sample a random variable q ∈
+Rd ∼ p(q). Hamiltonian Monte Carlo (HMC) considers
+the joint distribution between q and an auxiliary random
+variable p ∈ Rd ∼ p(p) that is distributed independently of
+q. For simplicity, p(p) is often assumed to be a zero-mean
+Gaussian with covariance M .
+The joint density p(q, p) is used to define a Hamiltonian
+H(q, p) = − log p(q) − log p(p)
+1
+= U (q) + pT M −1 p + const.,
+(1)
+2
+where M is referred to as the (preconditioning) mass matrix.
+The dynamics governed by this Hamiltonian are given by
+
+function L EAPFROG((q0 , p0 ); h, L)
+p1/2 ← p0 − 12 h∇q U (q0 )
+for i ← 1, 2, . . . , L
+qi ← qi−1 + hM −1 pi−1/2
+if i 6= L then
+pi+1/2 ← pi−1/2 − h∇q U (qi )
+pL ← pL−1/2 − 21 h∇q U (qL )
+return (qL , pL ) as (q ∗ , p∗ )
+Figure 1. Leapfrog integrator.
+
+the following coupled system of ODEs:
+(
+q̇ = ∇p H = M −1 p
+ṗ = −∇q H = −∇q U (q),
+
+(2)
+
+where dots denote derivatives in time.
+The trajectories of q and p provide proposals to the
+Metropolis-Hastings MCMC procedure. Specifically, HMC
+applies the following steps: (i) starting from k =
+1, draw pk ∼ N (0, M ); (ii) compute the position
+(q ∗ , p∗ ) by simulating (2) for time t with initial conditions (qk−1 , pk ); (iii) compute the change in Hamiltonian
+δH = H(qk−1 , pk ) − H(q ∗ , p∗ ); (iv) output qk = q ∗ with
+probability min(eδH , 1).
+If (q ∗ , p∗ ) comes from solving (2) exactly, then by conservation of H, δH = 0 and the new sample is always
+accepted. Closed-form solutions to (2) rarely exist, however.
+In practice, t is broken into L discrete steps, and integration
+is carried out numerically in increments of h = t/L. This
+discretization creates a chance of rejected samples, as H
+is no longer conserved exactly. The constructed chain of
+{qk } still converges to the target distribution, so long as the
+integrator is symplectic and time-reversible (Neal, 2011).
+An integrator satisfying these criteria is the leapfrog
+(Störmer-Verlet) method in Figure 1. It is easily implemented and explicit—no linear or nonlinear solvers are
+needed to generate (qL , pL ) from (q0 , p0 ). For large h,
+however, it suffers from instability that can lead to inaccurate solutions. This restriction on h is problematic when
+the ODE (2) is stiff, requiring small h and correspondingly
+large L to resolve high-frequency oscillations of (q, p). We
+demonstrate this instability empirically in §5.
+
+3. Exponential HMC
+The idea behind exponential integration is to consider dynamics at different scales explicitly. This is achieved by
+decomposing the Hamiltonian into two terms. The first encodes high-frequency and numerically-unstable oscillation,
+while the second encodes slower dynamics that are robust
+to explicit integration. The insight is that the first part can
+be solved analytically, leaving numerical integration for the
+
+Exponential Integration for Hamiltonian Monte Carlo
+
+more stable remainder. Assembling these two parts will
+provide a stable solution to the original dynamics.
+Here, we introduce the basic idea first and then propose
+practical strategies for decomposition.
+3.1. Exponential Integrator
+We consider the following structure for U :
+∇q U (q) = Σ−1 q + f (q)
+
+(3)
+
+for some positive definite matrix Σ ∈ Rn×n and a possibly
+nonlinear function f : Rn → Rn . This form can originate
+from a density with “slow” portion f (q) modulated by a
+possibly stiff Gaussian distribution from Σ−1 , with stiffness
+from small variances.
+
+where Ω2 = M −1/2 Σ−1 M −1/2 and F (r)
+M −1/2 f (M −1/2 r).
+
+Figure 2. Exponential integrator.
+
+(4)
+
+(5)
+
+These conditions permit several choices of filters. We adopt
+two basic options:
+
+We substitute r = M 1/2 q and rewrite (4) as
+r̈ + Ω2 r + F (r) = 0,
+
+return (M −1/2 rL , M 1/2 ṙL ) as (q ∗ , p∗ )
+
+• Consistency and accuracy to second order: φ(0) =
+ψ(0) = ψ0 (0) = ψ1 (0) = 1
+• Reversibility: ψ(·) = sinc(·)ψ1 (·) and ψ0 (·) =
+cos(·)ψ1 (·)
+• Symplecticity: ψ(·) = sinc(·)φ(·)
+
+The dynamical equations (2) are equivalent to
+q̈ + M −1 (Σ−1 q + f (q)) = 0.
+
+function E XPONENTIAL -S TEP((q0 , p0 ); h, L)
+. Transform into the new variable
+(r0 , ṙ0 ) ← (M 1/2 q0 , M −1/2 p0 )
+. Precompute the following matrices & the filters
+(C, S) ← (cos(hΩ), sin(hΩ))
+for i ← 0, 1, . . . , L − 1
+ri+1 ← Cri + Ω−1 S ṙi − 21 h2 ψF (φri )
+ −ΩSri + C ṙi
+ṙi+1 ← 
+− 12 h(ψ0 F (φri ) + ψ1 F (φri+1 ))
+
+=
+
+When the nonlinear component f (·) (thus F (·)) vanishes, (5) is analytically solvable; in one dimension, the
+solution is r(t) = a cos(ωt + b) where a and b depend on
+the initial conditions. When the nonlinear component does
+not vanish, variation of constants shows
+
+ 
+
+
+r(t)
+cos tΩ
+Ω−1 sin tΩ
+r(0)
+=
+ṙ(t)
+−Ω sin tΩ
+cos tΩ
+ṙ(0)
+
+Z t  −1
+Ω sin(t − s)Ω
+−
+F (r(s)) ds. (6)
+cos(t − s)Ω
+0
+Cosine and sine here are matrix functions evaluated on
+eigenvalues with eigenvectors intact.
+The solution (6) can be seen as a perturbation of the analytic solution (the first term on the right hand side) due
+to the nonlinear component. Following Hairer & Lubich
+(2000), discretizing the integral leads to a class of explicit
+integrators advancing the pair (ri , ṙi ) forward for time h:
+
+ri+1 = cos(hΩ)ri + Ω−1 sin(hΩ)ṙi
+
+
+
+
+
+1
+
+
+− h2 ψ(hΩ)F (φ(hΩ)ri )
+
+
+2
+
+(7)
+ṙi+1 = −Ω sin(hΩ)ri + cos(hΩ)ṙi
+
+
+
+1
+
+
+− h(ψ0 (hΩ)F (φ(hΩ)ri )
+
+
+
+2
+
+
++ ψ1 (hΩ)F (φ(hΩ)ri+1 ))
+These integrators are parameterized by the filter functions
+φ, ψ, ψ0 , ψ1 : Rn×n → Rn×n . For HMC to converge, we
+enforce the following criteria on the filters:
+
+Simple filters (Deuflhard, 1979):
+φ = 1, ψ = sinc(·), ψ0 = cos(·),
+
+ψ1 = 1
+
+Mollified filters (Garcı́a-Archilla et al., 1998):
+φ = sinc(·),
+ψ = sinc2 (·),
+ψ0 = cos(·)sinc(·), ψ1 = sinc(·)
+The mollified filters promote smooth evolution of the
+Hamiltonian. In contrast, the simple filters do not filter the
+argument of the nonlinearity. In this case, numerical error
+can oscillate with an amplitude growing with the step size,
+increasing the likelihood for rejected HMC samples.
+Figure 2 lists the steps of our proposed exponential integrator for HMC—it is a drop-in replacement for leapfrog in
+Figure 1. The integrator is explicit and with many operations precomputable, so iterations are comparable in speed
+to those from leapfrog. See the supplementary material for
+more details. This method is stable, however, when F (r) is
+small relative to Ω2 r. Correctness is given by the following
+proposition, proved in the supplementary material:
+Proposition 1. HMC using the integrator in Figure 2 is
+convergent with equilibrium distribution p(q).
+3.2. Strategies for Decomposing
+U (q) = − log p(q) may not be given in form (3) naturally.
+In this case, we separate out the Σ−1 q term by approximating p(q) with a Gaussian N (µ, Σ). Without loss of
+generality, we assume µ = 0 by shifting the distribution by
+µ to achieve so. Our decomposition then becomes
+∇q U (q) = Σ−1 q + (−∇q log p(q) − Σ−1 q) .
+´¹¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¸¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¹ ¶
+f (q)
+
+(8)
+
+Exponential Integration for Hamiltonian Monte Carlo
+
+Gaussian approximation provides a natural decomposition
+for our integrator. The integrator is exact when f (q) = 0,
+implying that HMC for Gaussian distributions using this integrator never rejects a sample. Even if Σ−1 q invokes highfrequency oscillatory behavior, e.g. when p(q) is sharply
+peaked, the numerical drift of this integrator is only a function of its behavior on f (q).
+We consider a few Gaussian approximation strategies:
+Laplace approximation Let θ ∗ be a local maximum (i.e.,
+a mode) of p(θ). Then we can write
+1
+− log p(θ) ≈ − log p(θ ) + (θ − θ ∗ )T Hθ∗ (θ − θ ∗ )
+2
+∗
+
+where H is the Hessian of − log p(θ). Hence, we can approximate p(θ) with a Gaussian N (θ ∗ , Hθ−1
+∗ ). The inverse
+Hessian can then be used in our decomposition.
+Empirical statistics We run a probing MCMC sampler,
+such as HMC with leapfrog, to generate preliminary samples θ1 , θ2 , . . . , θm . We then use the sample mean and
+covariance to form a Gaussian approximation to kickstart
+exponential HMC. We then accumulate a few more samples
+to refine our estimate of the mean and covariance and form
+a new approximating Gaussian. The process can be iterated
+and converges asymptotically to the true distribution.
+Manifold structures Inspired by Riemann Manifold
+HMC (RMHMC) in (Girolami & Calderhead, 2011), we can
+leverage geometric properties of the sample space. Similar
+to the strategy above using empirical statistics, we update
+our mean and covariance estimates after every m samples.
+We take the sample mean of the m samples as the updated
+mean and exploit the location-specific Fisher-Rao metric
+defined in (Girolami & Calderhead, 2011) to update the
+covariance. Namely, we set the covariance to be the inverse
+of the average of the metrics corresponding to the m samples. Note that if the distribution is Gaussian, this average
+simplifies to the inverse covariance matrix.
+In contrast to the Laplace approximation, which provides a
+global approximation centered at a mode θ ∗ of p(θ), manifold structures incorporate local information: Each FisherRao metric defines a local Gaussian approximation.
+In §5, we extensively study the empirical effectiveness of
+our exponential integrator with these strategies.
+
+4. Related Work
+Obtaining a high number of effective samples in a short
+amount of computation time is a core research problem in
+Hamiltonian Monte Carlo. Girolami & Calderhead (2011)
+adapts the mass matrix M to the manifold structure of the
+
+sample space, performing location-specific preconditioning.
+Hoffman & Gelman (2014) and Wang et al. (2013) automatically choose steps h and iteration counts L. Sohl-Dickstein
+et al. (2014) extend trajectories to accepting states to avoid
+rejection. For large datasets, Chen et al. (2014) formulate
+HMC using stochastic gradients to reduce computational
+cost. Many those approaches treat the numerical integrator
+as a black box, often using the simple leapfrog method. Our
+aim is to establish the benefits of more sophisticated and
+computationally efficient integrators. As such, the integrator
+we propose can be substituted into any of those approaches.
+Splitting is a common alternative that bears some similarity
+to our work (Hairer et al., 2006). It separates Hamiltonians
+into multiple terms and alternating between integrating each
+independently. In statistical physics, splitting is applied in
+lattice field theory (Kennedy & Clark, 2007; Clark et al.,
+2010) and in quantum chromodynamics (Takaishi, 2002). In
+statistics, Neal (2011) and Shahbaba et al. (2014) split over
+data or into Gaussian/non-Gaussian parts. The latter strategy, also used by Beskos et al. (2011), has similar structure
+to ours, never rejecting samples from Gaussians. Our approximations (§3.2) can be used in such splittings. But while
+their integrator for the non-Gaussian part has no knowledge of the Gaussian part, we use a stable, geometricallymotivated combination. Blanes et al. (2014) also split using
+Gaussian model problems; while they provide theoretical
+groundwork for stability and accuracy of HMC, they study
+variations of leapfrog. Pakman & Paninski (2014) report exact HMC integration for Gaussians and truncated Gaussians
+but do not consider the general case.
+Our proposed exponential integrator represents a larger departure from leapfrog and splitting integrators. Exponential integration was motivated by the observation that traditional integrators do not exploit analytical solutions to
+linear ODEs (Hersch, 1958; Hochbruck et al., 1998). We
+employ a trigonometric formula, introduced by Gautschi
+(1961). This was combined with the trapezoidal rule (Deuflhard, 1979) and extended using filters (Garcı́a-Archilla
+et al., 1999). There exist many variations of the proposed
+exponential integrator; the one in this paper is chosen for its
+simplicity and effectiveness in HMC.
+
+5. Experiments
+We validate the effectiveness of exponential HMC on both
+synthetic and real data and compare to alternative methods.
+All the algorithms are implemented in Matlab to ensure
+a fair comparison1 , especially when we evaluate different
+approaches for their computational cost.
+We present major results in what follows. Additional empirical studies are described in the supplementary material.
+1
+
+Code: https://github.com/pujols/Exponential-HMC
+
+Exponential Integration for Hamiltonian Monte Carlo
+leapfrogHMC
+
+5.1. Setup
+
+For expHMC, we directly use the parameters of Gaussian
+distributions on synthetic data, and apply the Laplace approximation on real data. For ed
+xpHMC, we run HMC with
+leapfrog for burn-in and use the last N1 burn-in samples to
+estimate µ and Σ. Both are updated after sampling every
+N2 samples. rmExpHMC follows a similar procedure to
+ed
+xpHMC, yet in updating, it uses information only from the
+N2 new samples.
+
+4
+
+4
+
+3
+
+3
+
+3
+
+2
+
+2
+
+2
+
+1
+
+1
+
+1
+
+0
+
+0
+
+0
+
+−1
+
+−1
+
+−1
+
+−2
+
+−2
+
+−4 −2
+
+0
+
+2
+
+4
+
+−2
+
+−4 −2
+
+0
+
+2
+
+4
+
+−4 −2
+
+0
+
+2
+
+4
+
+AR = 0.445
+AR = 1
+AR = 0.939
+(a) Accepted (blue) and rejected (red) proposals of each method
+1
+
+Acceptance rate
+
+Variants of exponential integrators We use expHMC
+to denote the exponential integrator where the mean µ and
+covariance Σ are computed from parameters of the distribution, ed
+xpHMC for integration with empirically estimated µ
+and Σ, and rmExpHMC for those obtained from manifold
+structures; see §3.2 for details. We only consider mollified
+filters (§3.1) in this section and defer comparison to the simple filters to the supplementary material. We take M = I
+for the mass matrix in (1), unless stated otherwise.
+
+c
+expHMC
+
+expHMC
+
+4
+
+0.8
+0.6
+0.4
+
+leapfrogHMC
+expHMC
+c
+expHMC
+
+0.2
+0
+0
+
+200
+
+400
+
+600
+
+800
+
+1000
+
+number of samples
+
+Evaluation criteria We evaluate performance by computing acceptance rates (AR) and the minimum effective
+sample sizes (min ESS). The min ESS, suggested by Girolami & Calderhead (2011), measures sampling efficiency.
+To take computation time into consideration, we report min
+ESS/sec and the relative speed (RS) to the leapfrog method.
+5.2. Synthetic Example: Gaussian Distribution
+As a sanity check and to illustrate the basic properties of
+exponential integration, we first compare the proposed exponential integrator to the leapfrog (leapfrogHMC) integrator
+on the 2D Gaussian distribution N (µg , Σg ), where Σg has
+eigenvalues {1, 0.1}. We run 200 iterations for burn-in and
+collect 1000 samples, with (h, L) = (0.6, 8) for all methods, a fairly large step to encourage exploration of sample
+space. For ed
+xpHMC, we set (N1 , N2 ) = (50, 20).
+Samples and acceptance rates are shown in Figure 3. As
+expected, expHMC accepts samples unconditionally. The
+acceptance rate of ed
+xpHMC increases as it updates the Gaussian approximation, since the sample statistics begin to estimate the mean and covariance accurately.
+Next, we examine how the eigenvalues of Σg affect acceptance. We construct Σg with eigenvalues {1, λ}, using
+identical parameters as above except (h, L) = (0.12, 10);
+smaller h increases leapfrog acceptance rates. We vary
+λ ∈ [2−8 , 20 ], showing the acceptance rate of each method
+in Figure 4a. Again, expHMC maintains acceptance rate 1,
+while the leapfrog acceptance degrades as λ shrinks. The acceptance rate of ed
+xpHMC is also affected by λ. As the sample size increases, however, the acceptance rate of ed
+xpHMC
+increases and converges to 1, as in Figure 4b.
+
+(b) The accumulated acceptance rate
+Figure 3. On a 2D Gaussian, expHMC always accepts proposals,
+outperforming leapfrog under identical (h, L). The acceptance
+d
+rate (AR) of e
+xpHMC increases as samples are collected.
+
+Preconditioning One way to mitigate stiffness in ODEs
+of HMC (e.g., small λ in the previous example) is to adjust
+the mass matrix M (Neal, 2011). HMC with M = Σ−1
+g
+is equivalent to sampling from a homogeneous Gaussian.
+However, even with preconditioning, leapfrogHMC has
+time step restrictions on Gaussian distributions. We further
+demonstrate in §5.3 that preconditioning alone is insufficient
+to deal with stiff ODEs on more complicated distributions.
+We include more experiments on synthetic examples (e.g.,
+mixtures of Gaussians) in the supplementary material.
+5.3. Real Data: Bayesian Logistic Regression
+We apply the proposed methods to sampling from the posterior of Bayesian logistic regression (BLR), comparing
+to leapfrogHMC and Riemann manifold HMC (RMHMC)
+by Girolami & Calderhead (2011). We also compare to an
+accelerated version of RMHMC using Lagrangian dynamics
+(e-RMLMC), by Lan et al. (2012).
+Model Given a dataset {xi , yi }N
+i=1 with N instances,
+where xi ∈ Rd is a feature vector and yi ∈ {−1, 1} is
+a binary label, the posterior distribution p(θ) of Bayesian
+logistic regression is defined as
+p(θ) ∝ π(θ)
+
+N
+Y
+i=1
+
+σ(yi (θ T xi )),
+
+Exponential Integration for Hamiltonian Monte Carlo
+−8
+
+leapfrogHMC
+
+0.8
+0.6
+0.4
+
+leapfrogHMC
+expHMC
+c
+expHMC
+
+0.2
+0
+−8
+
+−6
+
+−4
+
+log λ
+2
+
+−2
+
+0
+
+RMHMC
+
+0.6
+0.4
+0.2
+0
+0
+
+expHMC
+
+c
+expHMC
+
+expHMC(4h)
+
+1
+0.8
+
+leapfrogHMC
+expHMC
+c
+expHMC
+1000 2000 3000 4000 5000
+
+number of samples
+
+Figure 4. (a) On a 2D Gaussian, expHMC has acceptance rate
+1 under varying λ (with h fixed). (b) The acceptance rate of
+d
+e
+xpHMC (at λ = 2−8 ) continuously increases as more samples
+are collected.
+
+where π(θ) is a prior on θ and σ(z) = (1 + e−z )−1 .
+Dataset We consider five datasets from the UCI repository (Bache & Lichman, 2013): Ripley, Heart, Pima Indian,
+German credit, and Australian credit. They have 250 to
+1000 instances with feature dimensions between 2 and 24.
+Each dimension is normalized to have zero mean and unit
+variance to ensure that M = I is a fair choice for leapfrog
+and exponential integration.
+Experimental setting We consider the homogeneous
+Gaussian prior N (0, σI) with σ ∈ {0.01, 1, 100}. We take
+L = 100 and manually set h in leapfrogHMC to achieve
+acceptance rates in [0.6, 0.9] for each combination of dataset
+and σ, as suggested by Betancourt et al. (2014a). The same
+(h, L) is used for expHMC, ed
+xpHMC, and rmExpHMC,
+along with (2h, L/2) and (4h, L/4) to test larger steps. We
+use parameters for RMHMC and e-RMLMC from their
+corresponding references. We set (N1 , N2 ) = (500, 250)
+for ed
+xpHMC and apply the same location-specific metric defined by Girolami & Calderhead (2011) along with
+(N1 , N2 ) = (500, 500) for rmExpHMC. For expHMC,
+(µ, Σ) come from the Laplace approximation. We collect
+5000 samples after 5000 iterations of burn-in as suggested
+in previous work, repeating for 10 trials. To ensure high
+effective sample size (ESS), for all the compared methods
+we uniformly sample L from {1, . . . , L} in each iteration,
+as suggested by Neal (2011).
+Experimental results We summarize results on the Pima
+Indian dataset in Table 1; remaining results are in the
+supplementary material. Our three methods expHMC,
+ed
+xpHMC, and rmExpHMC outperform leapfrogHMC in
+terms of min ESS and acceptance rate, with similar speed as
+leapfrogHMC. RMHMC and e-RMLMC have the highest
+min ESS but execute much slower than leapfrogHMC, leadxpHMC,
+ing to poor relative speeds. Besides, expHMC, ed
+and rmExpHMC achieve acceptance rate > 0.8 under the
+cases (2h, L/2) and (4h, L/4). The high acceptance rates
+under larger step sizes allow them to take fewer steps during
+
+min ESS/Time(s)
+
+1
+
+Acceptance rate
+
+Acceptance rate
+
+(a) Acceptance rate under varing λ (b) Accumulated AR under λ = 2
+
+(a) σ = 100
+
+800
+
+(b) σ = 1
+
+800
+
+600
+
+600
+
+400
+
+400
+
+200
+
+200
+
+c
+expHMC(4h)
+(c) σ = 0.01
+
+2500
+2000
+1500
+1000
+
+0
+0.8
+
+0.9
+
+1
+
+Acceptance rate
+
+500
+
+0
+0.8
+
+0.9
+
+1
+
+Acceptance rate
+
+0
+
+0.7
+
+0.8
+
+0.9
+
+1
+
+Acceptance rate
+
+Figure 5. Acceptance rate and min ESS/sec of each method on the
+five datasets, with σ ∈ {0.01, 1, 100} (the variance of the prior in
+d
+BLR). As illustrated, expHMC and e
+xpHMC achieve both higher
+acceptance rate and/or higher min ESS/sec. Best viewed in color.
+
+Table 1. Pima Indian dataset (d = 7, N = 532, and 8 regression
+coefficients). “AR” denotes acceptance rate, and “RS” denotes
+relative speed.
+M ETHOD
+T IME ( S ) MIN ESS S / MIN ESS
+σ = 100
+leapfrogHMC
+6.3
+3213
+0.0019
+RMHMC
+28.3
+4983
+0.0057
+e-RMLMC
+19.8
+4948
+0.0040
+expHMC (h, L)
+7.8
+3758
+0.0021
+expHMC (2h, L/2)
+4.1
+2694
+0.0015
+expHMC (4h, L/4)
+2.2
+2555
+0.0008
+c
+7.7
+3876
+0.0020
+expHMC
+(h, L)
+c
+expHMC
+(2h, L/2)
+4.0
+3025
+0.0013
+c
+expHMC
+(4h, L/4)
+2.1
+2845
+0.0008
+rmExpHMC (h, L)
+7.8
+4143
+0.0019
+rmExpHMC (2h, L/2)
+4.1
+3229
+0.0013
+rmExpHMC (4h, L/4)
+2.2
+3232
+0.0007
+σ = 0.01
+leapfrogHMC
+6.0
+3865
+0.0015
+RMHMC
+28.3
+4987
+0.0057
+e-RMLMC
+20.2
+4999
+0.0040
+expHMC (h, L)
+7.3
+4239
+0.0017
+expHMC (2h, L/2)
+3.8
+4164
+0.0009
+expHMC (4h, L/4)
+2.0
+4226
+0.0005
+c
+7.1
+4141
+0.0017
+expHMC
+(h, L)
+c
+3.7
+3771
+0.0010
+expHMC
+(2h, L/2)
+c
+2.0
+3540
+0.0006
+expHMC
+(4h, L/4)
+rmExpHMC (h, L)
+7.3
+4316
+0.0017
+rmExpHMC (2h, L/2)
+3.8
+4284
+0.0009
+rmExpHMC (4h, L/4)
+2.0
+3758
+0.0005
+
+RS
+
+AR
+
+1
+0.34
+0.48
+0.94
+1.29
+2.30
+0.98
+1.47
+2.58
+1.00
+1.49
+2.78
+
+0.82
+0.95
+0.95
+0.95
+0.88
+0.88
+0.95
+0.89
+0.85
+0.97
+0.91
+0.90
+
+1
+0.27
+0.38
+0.89
+1.69
+3.21
+0.90
+1.57
+2.79
+0.89
+1.68
+2.80
+
+0.89
+0.95
+0.95
+0.99
+0.97
+0.97
+0.98
+0.93
+0.90
+0.99
+0.97
+0.93
+
+sampling, raising the relative speed. Enlarging the steps in
+leapfrogHMC, RMHMC, and e-RMLMC, however, leads
+to a significant drop in acceptance and thus is not presented.
+As σ shrinks, the ODE becomes stiff and the relative speeds
+of all our methods improve, demonstrating the effectiveness of exponential integration on stiff problems. This
+is highlighted in Figure 5, where we plot each method
+by acceptance rate and min ESS/sec on the five datasets;
+each point corresponds to a method-dataset pair. expHMC
+and ed
+xpHMC achieve high acceptance rates and high
+min ESS/sec (top right) compared to leapfrogHMC and
+RMHMC, especially for small σ. For clarity, rmExpHMC
+and e-RMLMC are not shown; they perform similarly to
+ed
+xpHMC and RMHMC, respectively.
+
+Exponential Integration for Hamiltonian Monte Carlo
+Table 2. MNIST dataset with digit 7 and 9 (d = 100, N = 12214).
+“AR” denotes acceptance rate, and “RS” denotes relative speed.
+M ETHOD
+T IME ( S ) MIN ESS S / MIN ESS
+σ = 0.01
+leapfrogHMC
+1215
+22164
+0.055
+expHMC (h, L)
+1413
+23720
+0.060
+expHMC (2h, L/2)
+750
+16643
+0.045
+c
+expHMC
+(h, L)
+1437
+23080
+0.062
+c
+expHMC
+(2h, L/2)
+779
+11919
+0.065
+rmExpHMC (h, L)
+1450
+24347
+0.060
+rmExpHMC (2h, L/2)
+781
+19623
+0.040
+
+RS
+
+AR
+
+1
+0.92
+1.22
+0.88
+0.84
+0.92
+1.38
+
+0.88
+0.96
+0.87
+0.94
+0.73
+0.97
+0.90
+
+Table 3. MEG dataset (d = 5, N = 17730, and 25 sampling
+dimensions). “AR” denotes acceptance rate, and “RS” denotes
+relative speed.
+M ETHOD
+T IME ( S ) MIN ESS S / MIN ESS
+σ = 100
+leapfrogHMC (h, L)
+196
+2680
+0.073
+leapfrogHMC (2h, L/2)
+109
+498
+0.220
+c
+expHMC
+(h, L)
+207
+3256
+0.063
+c
+109
+2579
+0.042
+expHMC
+(2h, L/2)
+c
+62
+1143
+0.054
+expHMC
+(4h, L/4)
+
+RS
+
+AR
+
+1
+0.33
+1.15
+1.73
+1.34
+
+0.85
+0.26
+0.95
+0.82
+0.64
+
+Scalability Sophisticated integrators, like that for
+RMHMC, lose speed when dimensionality increases. To
+investigate this effect, we sample from the BLR posterior
+on digits 7 and 9 from the MNIST dataset (12214 training instances); each instance is reduced to 100 dimensions
+by PCA. We set (h, L) = (0.013, 30), with (N1 , N2 ) =
+xpHMC and (N1 , N2 ) = (2000, 2000) for
+(2000, 500) for ed
+rmExpHMC. The prior σ = 0.01. Performance averaged
+over 10 trials is summarized in Table 2, for 30000 samples
+after 10000 iterations of burn-in.
+
+We do not compare to RMHMC and e-RMLMC as these
+methods do not scale well to this problem.
+
+expHMC, ed
+xpHMC, and rmExpHMC have runtimes comparable to leapfrogHMC, scaling up well. High acceptance
+rates and better relative speed under larger step sizes also
+suggest a more efficient sampling by our methods. RMHMC
+and e-RMLMC are impractical on this task as they take
+around 1 day to process 30000 samples. Specifically, the
+speed improvement of e-RMLMC over RMHMC diminishes for large-scale problems like this one, as shown by
+Lan et al. (2012) and analyzed by Betancourt et al. (2014b).
+
+where we use a Gaussian prior over W , with wjT the jth
+row of W . We set pj (yij ) = {4 cosh2 ( 12 yij )}−1 with yi =
+W xi , as suggested by Korattikara et al. (2014).
+
+Preconditioning In BLR, a suitable choice of (constant)
+M is the Hessian of − log p(θ) at MAP, i.e., Σ−1 by
+Laplace approximation. We precondition both our method
+and leapfrog for fair comparison.2 With step sizes so that
+preconditioned leapfrog PLHMC has > 0.85 acceptance,
+expHMC still always results in a higher acceptance rate.
+Further increasing the step sizes, acceptances of PLHMC
+drop significantly while ours does not suffer as strongly.
+More importantly, as σ shrinks (the ODE becomes stiffer),
+we observe the same performance gain as in Figure 5. These
+demonstrate the advantage of our method even with preconditioning. Details are in the supplementary material.
+5.4. Real Data: Independent Component Analysis
+Given N d-dimensional observations X = {xi ∈ Rd }N
+i=1 ,
+independent component analysis (ICA) aims to find the demixing matrix W ∈ Rd×d so as to recover the original d
+mutually independent sources {yi ∈ Rd }N
+i=1 . We take the
+formulation introduced by Hyvärinen & Oja (2000) that defines a posterior distribution p(W |X). We then compare our
+methods to leapfrogHMC in sampling from the posterior.
+2
+
+Both solve the same ODE (2), using different integrators.
+
+Model
+
+The joint probability of (X, W) is
+p(X, W ) =| det(W )|N
+
+N Y
+d
+Y
+{
+pj (wjT xi )}
+i=1 j=1
+
+×
+
+Y
+
+N (Wkl ; 0, σ),
+
+(9)
+
+kl
+
+Dataset We experiment on the MEG dataset (Vigário
+et al., 1997), which contains 122 channels and 17730 timepoints. We extract the first 5 channels for our experiment
+(i.e, W ∈ R5×5 ), leading to samples with 25 dimensions.
+Experimental setting We set σ = 100 for the Gaussian prior (9). We set L = 50 and manually adjust h in
+leapfrogHMC to achieve acceptance rates in [0.6, 0.9]. The
+same (h, L) is used for our methods, along with (2h, L/2)
+and (4h, L/4) to test larger steps. We only examine
+ed
+xpHMC, given its tractable strategy for Gaussian approximation. The parameters are set to (N1 , N2 ) = (500, 250).
+We collect 5000 samples after 5000 iterations of burn-in, repeating for 5 trials. In each iteration, we sample L uniformly
+from {1, ..., L} to ensure high ESS, as in §5.3.
+Experimental results We summarize the results in Table
+3. With comparable computational times, ed
+xpHMC produces a much higher min ESS and acceptance rate than
+leapfrogHMC. As the step size increases, acceptances
+of leapfrogHMC drop drastically, yet ed
+xpHMC can still
+maintain high acceptance and ESS, leading to better relative
+speed for efficient sampling.
+
+6. Comparison to Splitting
+We contrast our approach with the Gaussian splitting
+by Shahbaba et al. (2014). After applying the Laplace
+approximation, they integrate by alternating between the
+
+Exponential Integration for Hamiltonian Monte Carlo
+
+nonlinear and linear terms. The linear part is integrated in
+closed form, while the nonlinear part is integrated using a
+“forward Euler” step. In the notation of Figure 2, we can
+write an iteration of their integrator as:
+
+
+(a)
+
+=
+
+1
+0
+ṙi+1
+ ← ṙ
+i − 2 hF (ri )
+
+
+ri+1
+cos hΩ
+Ω−1 sin hΩ
+ri
+←
+1
+0
+ṙi+1
+−Ω sin hΩ
+cos hΩ
+ṙi+1
+1
+1
+ṙi+1 ← ṙi+1 − 2 hF (ri+1 )
+
+The nonlinearity vanishes when f (·) = 0, providing exact
+integration for Gaussians.
+The key difference between our integrator and theirs is in the
+treatment of f (·). Their integrator treats f (·) independently
+from the Gaussian part, stepping variables using a simple
+explicit integrator. Variation of constants (6), on the other
+hand, models the deviation from Gaussian behavior directly
+and steps all variables simultaneously.
+Figure 6 illustrates with a simple setting where this difference leads to significant outcomes. Here, we show paths
+corresponding to a single iteration of HMC with L = 1 for
+a Gaussian. For leapfrog integration these paths would be
+straight lines, but both splitting and exponential integration
+follow elliptical paths. We estimate the mean incorrectly,
+however, so f (·) is a constant but nonzero function. Splitting provides a velocity impulse and then follows an ellipse
+centered about the incorrect mean. Our integrator handles
+constant functions f (·) exactly, recovering the correct path.
+This example illustrates the robustness we expect from exponential integration. For nonlinear distributions, we can
+use the “empirical” approach in §3.2 to determine a Gaussian approximation. Empirical means and covariances likely
+are inexact, implying that even for Gaussian distributions,
+splitting with this approximation may reject samples. Our
+integrator better handles the coupling between the Gaussian and non-Gaussian parts of p(q) and hence can be more
+robust to approximation error.
+A more extensive empirical comparison to splitHMC is
+given in the supplementary material. In general, splitHMC
+performs similarly to our methods with simple filters
+(cf. §3.1), as discussed in §7. Our methods with mollified
+filters, however, handle departure from Gaussian approximation more stably, outperforming splitHMC.
+
+7. Discussion and Conclusion
+The integrator for HMC has a strong effect on acceptance
+rates, ESS, and other metrics of convergence. While large integration times encourage exploration, numerically solving
+the underlying ODE using leapfrog requires many substeps
+to avoid high rejection rates. Although RMHMC deals with
+this issue by locally adjusting the mass matrix M , it suffers
+from significantly increased computation costs and poor
+
+Σ−1 q
+
+∇q U (q)
+
+f (q)
++
+
+Splitting
+Exponential
+
+(b)
+q(t), estimated
+Figure 6. Comparison between splitting and exponential integration. (a) The acceleration vector field corresponding to a Gaussian
+distribution is shifted, leading to a nonzero f (q); (b) this simple
+but nonzero f (q) is enough to perturb the initial velocity (0, 1) of
+the elliptical path for splitting, shearing to the right.
+
+scalability. In contrast, our method is based on an efficient
+explicit integrator that is robust to stiffness, even without
+preconditioning.
+The choice of numerical integrators is a “meta” parameter
+for HMC, since each integrator discretizes the same dynamical equations. Our extensive studies have revealed,
+
+• When the step size is small, leapfrog suffices.
+• When the step size is large enough that acceptance
+for leapfrog declines, splitting and exponential integration with simple filters maintain stability. In this case,
+mollification sacrifices too much accuracy for stability.
+Details are in the supplementary material.
+• For large step sizes, exponential HMC with mollified
+filters avoids degrading performance.
+• Empirical means and covariances yield stable Gaussian
+approximations for exponential integrators.
+
+While our experiments focus on basic HMC, future studies
+can assess all options for HMC, accounting e.g. for extensions like (Hoffman & Gelman, 2014) and (Sohl-Dickstein
+et al., 2014). Additional research also may reveal better
+integrators specifically for HMC. For instance, the exponential integrators introduced by Rosenbrock (1963) use local
+rather than global approximations that may be suitable for
+distributions like the mixture of Gaussians, whose Gaussian
+approximation should change depending on locations; the
+challenge is to maintain symplecticity and reversibility. Exponential integration also can be performed on Lie groups,
+providing avenues for non-Euclidean sampling. Regardless,
+exponential integrators remain practical, straightforward,
+and computationally inexpensive alternatives for HMC with
+the potential to improve sampling.
+
+Exponential Integration for Hamiltonian Monte Carlo
+
+Acknowledgments
+F. S. and W. C. are supported by ARO Award # W911NF12-1-0241, ONR # N000141210066, and Alfred P. Sloan
+Fellowship. D. M. is supported by the Max Planck Center
+for Visual Computing and Communication.
+
+References
+Bache, K. and Lichman, M. UCI machine learning
+repository, 2013. URL http://archive.ics.uci.
+edu/ml.
+Beskos, A., Pinski, F. J., Sanz-Serna, J. M., and Stuart,
+A. M. Hybrid Monte Carlo on Hilbert spaces. Stochastic
+Processes and their Applications, 121(10):2201–2230,
+2011.
+Betancourt, M. J., Byrne, S., and Girolami, M. Optimizing
+the integrator step size for Hamiltonian Monte Carlo.
+arXiv preprint arXiv:1411.6669, 2014a.
+Betancourt, M. J., Byrne, S., Livingstone, S., and Girolami,
+M. The geometric foundations of Hamiltonian Monte
+Carlo. arXiv preprint arXiv:1410.5110, 2014b.
+Blanes, S., Casas, F., and Sanz-Serna, J. M. Numerical
+integrators for the Hybrid Monte Carlo method. SIAM
+Journal on Scientific Computing, 36(4):A1556–A1580,
+2014.
+Chen, T., Fox, E. B., and Guestrin, C. Stochastic gradient
+Hamiltonian Monte Carlo. In Proc. ICML, June 2014.
+Clark, M. A., Joó, B., Kennedy, A. D., and Silva, P. J. Better
+HMC integrators for dynamical simulations. In Proc.
+International Symposium on Lattice Field Theory, 2010.
+Deuflhard, P. A study of extrapolation methods based on
+multistep schemes without parasitic solutions. Journal of
+Applied Mathematics and Physics, 30:177–189, 1979.
+Garcı́a-Archilla, B., Sanz-Serna, J. M., and Skeel, R. D.
+Long-time-step methods for oscillatory differential equations. SIAM Journal on Scientific Computing, 20(3):
+930–963, 1998.
+Garcı́a-Archilla, B., Sanz-Serna, J. M., and Skeel, R. D.
+Long-time-step methods for oscillatory differential equations. SIAM Journal on Scientific Computing, 20:930–
+963, 1999.
+
+Girolami, M. and Calderhead, B. Riemann manifold
+Langevin and Hamiltonian Monte Carlo methods. Journal of the Royal Statistical Society: Series B, 73(2):123–
+214, 2011.
+Hairer, E. and Lubich, C. Long-time energy conservation of
+numerical methods for oscillatory differential equations.
+SIAM J. Numer. Anal., 38(2):414–441, July 2000.
+Hairer, E., Lubich, C., and Wanner, G. Geometric numerical
+integration: structure-preserving algorithms for ordinary
+differential equations, volume 31. Springer Science &
+Business Media, 2006.
+Hersch, J. Contribution à la méthode des équations aux
+différences. Zeitschrift für Angewandte Mathematik und
+Physik, 9:129–180, 1958.
+Hochbruck, M., Lubich, C., and Selfhofer, H. Exponential
+integrators for large systems of differential equations.
+SIAM Journal on Scientific Computing, 19(5):1552–1574,
+1998.
+Hoffman, M. D. and Gelman, A. The No-U-Turn sampler:
+Adaptively setting path lengths in Hamiltonian Monte
+Carlo. J. Mach. Learn. Res., 15(1):1593–1623, January
+2014.
+Hyvärinen, A. and Oja, E. Independent component analysis:
+algorithms and applications. Neural networks, 13(4):
+411–430, 2000.
+Kennedy, A. D. and Clark, M. A. Speeding up HMC with
+better integrators. In Proc. International Symposium on
+Lattice Field Theory, 2007.
+Korattikara, A., Chen, Y., and Welling, M. Austerity in
+MCMC land: Cutting the Metropolis-Hastings budget. In
+Proc. ICML, pp. 181–189, 2014.
+Lan, S., Stathopoulos, V., Shahbaba, B., and Girolami,
+M. Lagrangian dynamical Monte Carlo. arXiv preprint
+arXiv:1211.3759, 2012.
+Neal, R. M. MCMC using Hamiltonian dynamics. In
+Brooks, Steve, Gelman, Andrew, Jones, Galin, and Meng,
+Xiao-Li (eds.), Handbook of Markov Chain Monte Carlo.
+CRC Press, 2011.
+
+Gautschi, W. Numerical integration of ordinary differential equations based on trigonometric polynomials. Numerische Mathematik, 3:381–397, 1961.
+
+Pakman, A. and Paninski, L. Exact Hamiltonian Monte
+Carlo for truncated multivariate Gaussians. Journal of
+Computational and Graphical Statistics, 23(2):518–542,
+2014.
+
+Gelman, A., Carlin, J., Stern, H., and Rubin, D. R. Bayesian
+Data Analysis. Chapman and Hall, CRC, 2004.
+
+Robert, C. and Casella, G. Monte Carlo Statistical Methods.
+Springer, 2004.
+
+Exponential Integration for Hamiltonian Monte Carlo
+
+Rosenbrock, H. H. Some general implicit processes for
+the numerical solution of differential equations. The
+Computer Journal, 5(4):329–330, 4 1963.
+Shahbaba, B., Lan, S., Johnson, W. O., and Neal, R. M. Split
+Hamiltonian Monte Carlo. Statistics and Computing, 24
+(3):339–349, 2014.
+Sohl-Dickstein, J., Mudigonda, M., and Deweese, M. Hamiltonian Monte Carlo without detailed balance. In Proc.
+ICML, pp. 719–726, 2014.
+Takaishi, T. Higher order hybrid Monte Carlo at finite
+temperature. Physics Letters B, 540(1–2):159–165, 2002.
+Vigário, R., Särelä, J., and Oja, E.
+MEG data
+for studies using independent component analysis,
+1997. URL http://research.ics.aalto.fi/
+ica/eegmeg/MEG_data.html.
+Wang, Z., Mohamed, S., and Nando, D. Adaptive Hamiltonian and Riemann manifold Monte Carlo. In Proc. ICML,
+volume 28, pp. 1462–1470, May 2013.
+
+

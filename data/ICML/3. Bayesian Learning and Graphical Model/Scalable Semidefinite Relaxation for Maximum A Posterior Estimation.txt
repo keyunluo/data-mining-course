@@ -1,0 +1,1419 @@
+Scalable Semidefinite Relaxation for Maximum A Posterior Estimation
+Qixing Huang
+Department of Computer Science, Stanford University, Stanford, CA 94305, USA
+Yuxin Chen
+Department of Electrical Engineering, Stanford University, Stanford, CA 94305, USA
+Leonidas Guibas
+Department of Computer Science, Stanford University, Stanford, CA 94305 USA
+
+Abstract
+Maximum a posteriori (MAP) inference over discrete Markov random fields is a fundamental task
+spanning a wide spectrum of real-world applications, which is known to be NP-hard for general
+graphs. In this paper, we propose a novel semidefinite relaxation formulation (referred to as SDR)
+to estimate the MAP assignment. Algorithmically,
+we develop an accelerated variant of the alternating direction method of multipliers (referred to
+as SDPAD-LR) that can effectively exploit the
+special structure of the new relaxation. Encouragingly, the proposed procedure allows solving
+SDR for large-scale problems, e.g., problems on
+a grid graph comprising hundreds of thousands of
+variables with multiple states per node. Compared
+with prior SDP solvers, SDPAD-LR is capable of
+attaining comparable accuracy while exhibiting
+remarkably improved scalability, in contrast to
+the commonly held belief that semidefinite relaxation can only been applied on small-scale MRF
+problems. We have evaluated the performance
+of SDR on various benchmark datasets including
+OPENGM2 and PIC in terms of boththe quality of
+the solutions and computation time. Experimental
+results demonstrate that for a broad class of problems, SDPAD-LR outperforms state-of-the-art algorithms in producing better MAP assignments
+in an efficient manner.
+
+1. Introduction
+Computing the maximum a posteriori (MAP) assignment in
+a graphical model is a central inference task spanning a wide
+scope of scenarios (Wainwright & Jordan, 2008), ranging
+Proceedings of the 31 st International Conference on Machine
+Learning, Beijing, China, 2014. JMLR: W&CP volume 32. Copyright 2014 by the author(s).
+
+HUANGQX @ STANFORD . EDU
+
+YXCHEN @ STANFORD . EDU
+
+GUIBAS @ CS . STANFORD . EDU
+
+from traditional applications in graph matching, stereo reconstruction, object detection, error-correcting codes, gene
+mapping, etc., to a more recent application in estimating
+consistent object orientations from noisy pairwise measurements (Crandall et al., 2011). For general graphs, this problem is well-known to be NP-hard (Shimony, 1994). However, due in part to its importance in practice, a large body
+of algorithms have been proposed to approximate MAP estimates by solving various convex relaxation formulations.
+Among those methods based on convex surrogates, semidefinite relaxation usually strictly dominates other formulations
+based on linear programming or quadratic programming in
+terms of solution quality. Despite its superiority in obtaining more accurate estimates, however, the most significant
+challenge that limits the applicability of any semidefinite
+relaxation paradigm on real problems is efficiency. So far
+existing general-purpose SDP solvers can only handle problems with small dimensionality.
+In this paper, we propose a novel semidefinite relaxation approach (referred to as SDR) for second-order MAP inference
+in pairwise undirected graphical models. Our key observation is that the marginalization constraints in a typical linear
+programming relaxation (c.f.(Kumar et al., 2009)) can be
+subsumed by combing a semidefinite conic constraint with
+a small set of linear constraints. As a result, SDR admits a
+concise set of nicely decoupled constraints, which allows us
+to develop an accelerated variant (referred as SDPAD-LR)
+of the alternating direction method of multipliers method
+(ADMM) that is scalable to very large-scale problems.
+On a standard PC, we have successfully applied SDR on
+dense problems of dimensions of (#states × #variables) up
+to five thousand, and on grid-structured problems up to 105
+variables each with dozens of states per node.
+Practically, SDPAD-LR performs remarkably well on a variety of problems. We have evaluated SDPAD-LR on two
+collections of benchmark datasets: OPENGM2 (Kappes
+et al., 2013a) and a probabilistic inference challenge (PIC,
+2011). Each benchmark consists of multiple categories of
+
+Semidefinite Relaxation for MAP Estimation
+
+problems derived from various MAP estimation tasks. Experimental results demonstrate that SDPAD-LR outperforms
+the state-of-the-art algorithms in computational speed, while
+often obtaining better MAP estimates.
+
+set of N × M matrices with nonnegative entries, and (·)+ :
+×M
+×M
+RN ×M → RN
+the projection operator onto RN
+. For
++
++
+any symmetric matrix M , we use M 0 to represent the
+projection of M onto the positive semidefinite cone. Finally,
+we denote by kXkF the Frobenius norm of a matrix X.
+
+1.1. Background
+There is a vast literature concerning MAP estimation over
+discrete undirected graphical models and it is beyond the
+scope of this paper to discuss all existing algorithms. Interested readers are referred to (Wainwright & Jordan, 2008)
+for an in-depth introduction to this topic. In the following,
+we focus on methods that involve convex relaxation, which
+are the most relevant to our approach.
+Many prior convex relaxation techniques are derived from
+the original graph structure underlying the MAP estimation problem, among which linear programming relaxation (LPR) methods (Chekuri et al., 2004; Wainwright
+et al., 2005) are the most popular. In addition to LPR, researchers have considered alternative convex relaxations,
+e.g., quadratic relaxation (QP-RL) (Ravikumar et al., 2010)
+and second-order cone relaxation (SOCP-MS) (Kumar et al.,
+2009). In the seminal work of (Kumar et al., 2009), the authors evaluate various convex relaxation approaches, and
+assert that LPR dominates QP-RL and SOCP-MS. However,
+as will be shown later, LPR is further dominated by a standard SDP relaxation (Wainwright & Jordan, 2008), which
+is one of the main foci of this paper.
+A recent line of approaches have aimed at obtaining tighter
+convex relaxations by incrementally adding higher-order interactions to enforce proper marginalization over groups of
+variables (Sontag et al., 2012; Komodakis & Paragios, 2008;
+Batra et al., 2011). Despite the practical success of these
+approaches, it remains an open problem to analyze their
+behavior — for example, to decide whether a polynomial
+number of clusters are sufficient.
+There have been several attempts in applying semidefinite
+relaxation to obtain MAP assignment (Torr, 2003; Olsson
+et al., 2007; Wang et al., 2013; Peng et al., 2012). However, most of these methods are primarily designed for binary MAP estimation problems. In a recent work, (Peng
+et al., 2012) considered a general MAP estimation problem, where each variable has multiple states. The key
+difference between the proposed formulation and that of
+(Peng et al., 2012) is that we utilize the semidefinite cone
+constraint to prune redundant linear marginalization constraints. This leads to a concise set of loosely decoupled
+constraints, which is important in developing effective optimization paradigms.
+1.2. Notation
+Before proceeding, we introduce a few notations that will be
+used throughout the paper. For any linear operator A, we let
+×M
+A? represent its conjugate operator. Denote by RN
+the
++
+
+2. MAP Estimation and SDP Relaxation
+We start with state configurations over n discrete random
+variables X = {x1 , · · · , xn }. Without loss of generality, assume that each xi takes values in a discrete state
+set {1, · · · , m}. Consider a pairwise Markov random field
+(MRF) G parameterized by the potentials (or sufficient statistics) wi (xi ) for all vertices and wij (xi , xj ) for all edges
+(i, j) ∈ G. The energy (or log-likelihood) associated with
+this MRF is given by
+f (X ) =
+
+n
+X
+
+wi (xi ) +
+
+i=1
+
+X
+
+wij (xi , xj ).
+
+(1)
+
+(i,j)∈E
+
+The goal of MAP estimation is then to compute the configuration of states that maximizes the energy – the most
+probable state assignment XM .
+2.1. Semidefinite Programming Relaxation (SDR)
+MAP estimation over discrete sets is an NP-hard combinatorial problem, and can be cast as an integer quadratic program (IQP). Denote by xi = (xi,1 , · · · , xi,m )> ∈ {0, 1}m
+a binary vector such that xi,j = 1 if and only if xi = j.
+Then MAP estimation is equivalent to the following integer
+program.
+(IQP):
+
+maximize
+
+x∈{0,1}nm
+
+n
+X
+
+hwi , xi i +
+
+i=1
+>
+
+subject to 1 xi = 1,
+
+X 
+
+
+W ij , xi x>
+j
+
+
+
+(i,j)∈G
+
+1 ≤ i ≤ n,
+
+(2)
+
+where wi and W ij encode the corresponding potentials.
+The hardness of the above IQP arises in two aspects: (i)
+x are binary-valued, and (ii) the objective function is a
+quadratic function of these binary variables. These motivate
+us to relax the constraints in some appropriate manner, leading to our semidefinite relaxation. In the sequel, we present
+the proposed relaxation in a step-by-step fashion.
+1) In the same spirit as existing convex formulations
+(e.g., (Kumar et al., 2009; Peng et al., 2012)), we introduce a binary block matrix X := xx> ∈ {0, 1}nm×nm
+to accommodate quadratic objective terms:
+
+
+Diag(x1 )
+X 12
+···
+X 1n
+..
+..
+
+
+
+
+X>
+Diag(x2 )
+.
+.
+12
+
+,
+X=
+
+..
+.
+..
+..
+
+
+.
+.
+···
+>
+X 1n
+···
+· · · Diag(xn )
+
+Semidefinite Relaxation for MAP Estimation
+
+2.2. Comparison with Prior Relaxation Heuristics
+
+which apparently exhibits the following properties:
+X ii = xi x>
+i = Diag(xi ),
+
+1 ≤ i ≤ n.
+
+2.2.1. Superiority over LP relaxations.
+(3)
+
+2) The non-convex constraint X = xx> is then relaxed
+and replaced by X  xx> , which by Schur complement condition is equivalent to the following semidefinite conic constraint :
+
+
+1 x>
+ 0.
+(4)
+x X
+3) The binary constraints x ∈ {0, 1}nm and X ∈
+{0, 1}nm×nm are replaced by weaker linear constraints
+X ≥ 0.
+Note that the constraints 0 ≤ x ≤ 1 and X ≤ 1 · 1> are
+essentially subsumed by the constraints (2), (3), and (4)
+taken together. For the sake of numerical efficiency, we
+further relax the non-negative constraint X ≥ 0 to be
+X ij ≥ 0,
+
+(i, j) ∈ G.
+
+(5)
+
+As we will see later, this relaxation is crucial in accelerating SDP solvers for large-scale problems.
+Remark 1. The non-negativity constraints described in
+(5) are necessary since otherwise SDR becomes loose for
+submodular functions. Below is an example in the presence
+of 2 variables each having 2 states:
+ 
+
+
+
+
+2
+−3
+0 2
+w1 =
+, w2 =
+, W 12 =
+.
+0
+0
+2 0
+It is clear that W 12 satisfies the submodular property. However, the optimizer of SDR after dropping the constraint
+X ij ≥ 0 is given by
+ 
+ 
+
+
+1 1
+1 8
+1 4 −1
+x1 =
+, x2 =
+, X 12 =
+,
+3 2
+9 1
+9 4 2
+which does not obey the non-negativity constraint on X.
+
+Careful readers will remark that there might exist other convex constraints on X and x that we can enforce to tighten
+the proposed semidefinite relaxation. One alternative is
+the following marginalization constraints, which have been
+widely invoked in LP relaxation for MAP estimation:
+X ij 1 = 1,
+
+X>
+ij 1 = 1,
+
+X ij 1 = 1,
+
+X>
+ij 1 = 1,
+
+(SDR): maximize
+x,X
+
+hwi , xi i +
+
+i=1
+
+
+subject to
+
+1
+x
+
+X
+
+hW ij , X ij i
+
+(i,j)∈G
+>
+
+x
+X
+
+1 ≤ i < j ≤ n.
+
+Intuitively, this property arises from the following features
+of x and X ii :
+x>
+i · 1 = 1,
+
+X ii 1 = xi , X >
+ii 1 = 1,
+
+2.2.2. Invariance under variable reparameterization.
+Pioneered by the beautiful relaxation proposed for the MAXCUT problem (Goemans & Williamson, 1995), many SDP
+approaches developed for combinatorial problems employ
+the integer indicator y = 21 (1 + x) to parameterize binary variables (e.g., (Torr, 2003; Kumar et al., 2009)). If
+one applies matrix lifting Y = yy > and follows a similar
+relaxation procedure, the resulting semidefinite relaxation
+(referred to as SDR2) can be derived as follows
+
+maximize
+y,Y
+
+n
+P
+
+hwi , y i i +
+
+i=1
+
+subject to
+
+1
+y
+
+1
+2
+
+P
+
+y>
+Y
+
+
+ 0,
+
+1> y i = 2 − m,
+y>
+j
+
+(7)
+
+1> xi = 1,
+X ij ≥ 0,
+
+(8)
+(9)
+
+1 ≤ i ≤ n,
+(i, j) ∈ G.
+
+hW ij , Y ij i
+
+(i,j)∈G
+
+1 ≤ i ≤ n,
+>
+
++ y i · 1 + 1 · 1> ≥ 0,
+
+(i, j) ∈ G,
+1·1> +y i ·1> +1·y >
+i +Y ii
+2
+
+= Diag(1 + y i ),
+
+1 ≤ i ≤ n,
+
+(6)
+
+X ii = Diag(xi ), 1 ≤ i ≤ n,
+
+1 ≤ i ≤ n.
+
+These intrinsic properties are then propagated to all offdiagonal blocks by the semidefinite constraint.
+
+
+ 0,
+
+(11)
+
+Proof. See the supplemental material.
+
+Y ij + 1 ·
+n
+X
+
+(10)
+
+Somewhat unexpectedly, these constraints turn out to be
+redundant, as asserted in the following theorem.
+Theorem 1. Any feasible solution X to SDR (i.e. any
+X obeying the feasibility constraints of SDR) necessarily
+satisfies
+
+
+The feasibility constraints (2),(3), (4) and (5) taken collectively give rise to the following semidefinite relaxation
+(SDR) formulation for MAP estimation:
+
+1 ≤ i < j ≤ n.
+
+where wi are defined as
+
+1 X
+wi = wi +
+2
+
+j:(i,j)∈G
+
+
+W ij 1 +
+
+X
+j:(j,i)∈G
+
+.
+W>
+ji 1
+
+(12)
+
+Semidefinite Relaxation for MAP Estimation
+
+In fact, SDR2 is identical to SDR, as formally stated below.
+?
+
+?
+
+Theorem 2. (x , X ) is the solution to SDR if and only if
+y?
+Y?
+
+:= 2x? − 1,
+
+:= 4X ? − 2 x? · 1> + 1 · x?> + 1 · 1>
+
+and rewrite SDR in the operator form:
+
+
+
+minimize
+C, X
+dual variables
+
+subject to A X = b,
+y
+
+P X ≥ 0,
+z≥0
+X  0,
+
+is the solution to SDR2.
+Proof. See the supplemental material.
+Despite the theoretical equivalence between SDR2 and SDR,
+from a numerical perspective, solving SDR2 is much harder
+than solving SDR. The difficulty arises from the complicated
+form of the linear constraints enforced by SDR2 (i.e., (12)).
+Note that the advantage of SDR2 is that all diagonal entries
+of Y are equal to 1 as follows
+diag(Y ii ) = 2(1 + y i ) − 1 − y i − y i = 1,
+
+( 1 ≤ i ≤ n).
+
+Nevertheless, none of prior SDP algorithms takes full advantage of this property in accelerating the algorithm.
+
+3. Scalable Optimization Algorithm
+The curse of dimensionality poses inevitable numerical challenges when applying general-purpose SDP solvers to solve
+SDR. Despite their superior accuracy, primal-dual interior
+point methods (IPM) like SDPT (Toh et al., 1999) are limited
+to small-scale problems (e.g. nm < 150 on a regular PC).
+More scalable solvers such as CSDP (Helmberg & Rendl,
+2000) and DSDP (Benson & Ye, 2008) propose to solve the
+dual problem. However, since the non-negativity constraints
+X ij ≥ 0 produce numerous dual variables, these solvers
+are still far too restrictive for our program — none of them
+can solve SDR on a standard PC when nm exceeds 1000.
+The limited scalability of interior point methods has inspired a flurry of activity in developing first-order methods,
+among which the alternating direction method of multipliers
+(ADMM) (Wen et al., 2010; Boyd et al., 2011) proves well
+suited for large-scale problems. In this section, we propose
+an efficient variant of ADMM – referred to as SDPAD-LR
+(SDP Alternating Direction method for Low Rank structure),
+which is tailored to the special structure of SDR (including
+low rank and sparsity) and enables us to solve problems
+with very large dimensionality.
+3.1. Alternating Direction Augmented Lagrangian
+Method (ADMM)
+For convenience of presentation, we denote
+
+X :=
+
+1
+x
+
+x>
+X
+
+S0
+
+(13)
+
+where C encodes all wi and W ij , A(X) = b collects the
+equality constraints, and P(X) gathers element-wise nonnegative constraints. We let variables y, z, and S represent
+the corresponding dual variables for respective constraints.
+In the sequel, we will start by reviewing SDPAD, i.e., the
+original alternating direction method introduced in (Wen
+et al., 2010), and then present the key modification underlying the proposed efficient variant SDPAD-LR.
+3.1.1. SDPAD: Procedures and Convergence
+SDPAD considers the following augmented Lagrangian:
+
+
+
+L(y, z, S, X) = hb, yi + P ? (z) + S − C − A? (y), X
+2
+
++ (2µ)−1 kP ? (z) + S − C − A? (y)kF ,
+where the penalty parameter µ controls the strength of the
+quadratic term. As suggested by (Boyd et al., 2011), we
+initialize µ with a small value, and gradually increase it
+throughout the optimization process.
+Let superscript (k) indicate the variable in the kth iteration.
+Each iteration of the SDPAD consists of a dual optimization
+step, followed by a primal update step given as follows
+X
+
+(k)
+
+=X
+
+(k−1)
+
++
+
+P ? (z (k) ) + S (k) − C − A? (y (k) )
+. (14)
+µ
+
+Instead of jointly optimizing all dual variables, the key idea
+of SDPAD is to decouple the dual optimization step into several sub-problems or, more specifically, to optimize y, z, S
+in order with other variables fixed. This leads to closed-form
+solutions for each sub-problem as follows
+
+
+(k−1) 
+− µb ,
+y (k) = (AA∗ )−1 A S (k−1) − C + µX
+
+
+(k−1)
+z (k) = P C − S (k−1) − µX
+,
++
+
+
+(k−1)
+S (k) = C + A? (y (k) ) − P ? (z (k) ) − µX
+
+.
+0
+
+Similar to that considered in (Wen et al., 2010), our stopping criterion involves measuring of both primal feasibility
+(k)
+(k)
+(k−1)
+kA(X ) − bk and dual feasibility µ(X − X
+).
+Convergence property. In general, convergence properties of SDPAD are known when only equality constraints
+are present (Wen et al., 2010). However, the inequality
+constraints of SDR are special in the following two aspects:
+
+
+,
+
+(i) They are element-wise non-negativity constraints;
+
+Semidefinite Relaxation for MAP Estimation
+
+Algorithm 1 SDPAD for solving SDR
+input: kmax = 1000,  = 10−4 , µmin = 10−3 , ρ =
+1.005.
+(0)
+(−1)
+= 0, y (0) = 0, z (0) = 0
+initialize: X = X
+repeat
+(k)
+
+X temp = 2X
+(k)
+
+ttemp =
+y (k) =
+z (k) =
+
+(k−1)
+
+−X
+
+Algorithm 2 SDPAD-LR for solving SDR
+input: kmax = 5000,  = 10−4 , µmin = 10−3 , ρ =
+1.005, δ = 1e − 2, rmax = 32, r = 4.
+(0)
+(−1)
+= 0, y (0) = 0, z (0) = 0
+initialize: X = X
+repeat
+
+(k−2)
+
+(k)
+
+X temp = 2X
+
+(k)
+(AA? )−1 (A(X temp ) − b)
+(k)
+y (k−1) + µttemp
+
+
+(k)
+z (k−1) − µP(X temp )
++
+
+(k−1)
+
+−X
+
+(k−2)
+(k)
+
+(k)
+
+ttemp = (AA? )−1 (A(X temp ) − b)
+(k)
+y (k) = y (k−1) + µttemp
+
+
+(k)
+z (k) = z (k−1) − µP(X temp )
++
+
+(k)
+
+X
+
+(k)
+
+ (k−1) C + A? (y (k) ) − P ? (z (k) ) 
+= X
+−
+µ
+0
+(15)
+
+k ← k + 1; µ = µρ
+(k)
+(k−1)
+(k)
+until min(µkX − X
+kF , kA(X ) − bk) ≤  or
+k > kmax
+
+(ii) They are essentially decoupled from other linear constraints.
+Property (ii) arises as all equality constraints are concerned
+with diagonal blocks of X, while all linear inequality constraints are only enforced on its off-diagonal blocks. Such
+special structure leads to theoretical convergence guarantees
+for SDPAD, as stated in the following theorem.
+Theorem 3. The SDPAD method presented above converges to the optimizer of SDR.
+Proof. See the supplemental material.
+3.1.2. SDPAD-LR: Accelerated Method
+Apparently, the most computationally expensive step of
+SDPAD is the update of S, which involves the eigendecomposition of an nm × nm matrix. This limits the applicability of SDPAD to large-scale problems (e.g. nm > 104 ).
+To bypass this numerical bottleneck, we modify SDPAD
+and present an efficient heuristic called SDPAD-LR, which
+exploits the low-rank structure of X.
+First, we observe that S can be alternatively expressed as
+ (k)
+
+(k−1)
+S (k) = C + A? (y (k) ) − P ? (z (k) ) − µ X − X
+.
+
+This allows us to present SDPAD without invoking S. The
+detailed steps of SDPAD can now be summarized as in
+Algorithm 1.
+It is straightforward to see that the bottleneck of Algorithm 1
+lies in how to compute and store the primary variable X.
+To derive an efficient solver, we make the assumption that
+?
+the optimal solution X is low-rank. This is motivated by
+the empirical evidence that for a variety of problems (see
+the experimental section for details), SDR is exact, meaning
+
+Compute X according to (16)
+k ← k + 1; µ = ρµ
+(k)
+(k)
+if mod (k, 1000) = 0, λmin (X ) > δλmax (X )
+then
+r = min(rmax , 2r); µ = µmin
+end if
+(k)
+(k)
+until k > kmax or λmin (X ) ≤ δλmax (X ) and
+(k)
+(k−1)
+(k)
+min(µkX − X
+kF , kA(X ) − bk) ≤ 
+?
+
+rank(X ) = 1. Moreover, in the general case, the rank of
+?
+X is expected to be much small than its dimension (e.g.
+(Burer & Monteiro, 2003)), i.e.,
+
+ ? 
+?
+rank X
+rank(X ) + 1 ≤ 2M,
+where M is the number of constraints.1 of SDPR.
+Based on this assumption, the key idea of SDPAD-LR is to
+invoke a low-rank matrix Y ∈ R(nm+1)×r for some small
+r and encode X = Y Y > throughout the iterative process.
+This allows us to keep all the variables in memory even for
+large-scale problems.
+1
+
+In this case, (15) is modified as Y (k) = U (k) Σ+2 , where
+Σ = Diag(σ1 , · · · , σr ) and U = (u1 , · · · , ur ) represent
+the top r eigenvalues and respective eigenvectors of
+V (k) = Y (k−1) Y (k−1)> −
+
+C + A? (y (k) ) − P ? (z (k) )
+. (16)
+µ
+
+Although V (k) is a dense matrix, its top eigenvectors can
+be efficiently computed using the Lanczos process (Cullum
+& Willoughby, 2002), whose efficiency is dictated by the
+complexity of the matrix multiplication operator V (k) : u ∈
+Rnm+1 → V (k) u ∈ Rnm+1 . As SDR only involves the
+constrains X ij ≥ 0, (i, j) ∈ E, the matrix C + A? (y (k) ) −
+P ? (z (k) ) turns our to share the same sparsity pattern with
+G. Thus, the complexity of computing V (k) u is at most
+O(nmr2 + m2 |E|).
+Theoretically, it is extremely challenging to derive an upper
+bound on r to ensure the exactness of the modified algorithm.
+To address this issue, we thus design SDPAD-LR so that it
+iteratively doubles the value of r and reapplies the modified
+1
+
+Practically, many negativity constraints are redundant.
+
+Semidefinite Relaxation for MAP Estimation
+
+algorithm until it returns the optimal solution. For most of
+our experiments, we found that r = 8 is sufficient.
+The pseudo-code of SDPAD-LR is summarized in Algorithm 2.
+3.2. Iterative Rounding
+Similar to other ADMM methods (Boyd et al., 2011),
+SDPAD-LR converges rapidly to moderate accuracy within
+the first 400 iterations, and significantly slows down afterwards. Thus, rather than continuing until SDPAD-LR
+converges, it would be more efficient to shrink the problem size by fixing those variables whose optimal states are
+likely to have been revealed. Specifically, after each round
+of SDPAD-LR, we fix the optimal state j of a variable
+xi if xi,j > tmax (tmax = 0.99 for all the examples) or
+xi,j = max1≤i≤n,1≤j≤m xi,j . We then reapply the iterative procedures on the reduced problem. In practice, we find
+that due to the tightness of SDR, the size of the reduced
+problems are significantly smaller than the original problem,
+and one iterative rounding procedure is usually sufficient.
+
+ation is not tight. PIC comprises 10 categories of MAP
+inference problems of various structure. As we already include sparse MAP inference problems from OPENGM2,
+we pick 3 representative dense categories from PIC: Object
+Detection(PIC-Object), Image Alignment (PIC-Align) and
+Folding (PIC-Folding).
+4.2. SDP Solver Evaluation
+Baseline algorithms. We evaluate the proposed SDPADLR against the following existing large-scale SDP solvers.
+• SDPAD — the original ADMM method presented
+in (Wen et al., 2010).
+• SDPNAL — the Newton-CG (conjugate gradient) augmented method proposed in (Zhao et al., 2010).
+• IPM-NC — the nonconvex interior point method which
+attempts to solve a direct relaxation of the MAP inference problem (Burer & Monteiro, 2003):
+minimize hC, xx> i
+subject to 1> xi = 1, xi ≥ 0,
+
+4. Experimental Results
+In this section, we evaluate SDPAD-LR on several benchmark data sets and compare its performance against existing
+SDP solvers and state-of-the-art MAP inference algorithms.
+4.1. Benchmark Datasets
+categories
+PIC-Object
+PIC-Folding
+PIC-Align
+GM-Label
+GM-Char
+GM-Montage
+GM-Matching
+ORIENT
+
+G
+
+n
+
+m
+
+probs
+
+t
+
+full
+mixed
+dense
+sparse
+sparse
+grid
+dense
+sparse
+
+60
+2K
+30-400
+1K
+5K-18K
+100K
+19
+1K
+
+11-21
+2-503
+20-93
+7
+2
+5,7
+19
+16
+
+37
+21
+19
+324
+100
+3
+4
+10
+
+5m32s
+21m42s
+37m63s
+6m32s
+1h13m
+9h32m
+2m21s
+10m21s
+
+Table 2. Statistics of the datasets evaluated in this paper. G: graph
+structure of the MAP problem in each category; n: number of
+variables; m: number of states; probs: number of instances; t:
+average running time of SDPAD-LR.
+
+We perform experimental evaluation on MAP estimation
+problems from three popular benchmark data sets (See Table 2), i.e., OPENGM2 (Kappes et al., 2013a), PIC (PIC,
+2011), and a new data set ORIENT for the task of estimating consistent camera orientations (Crandall et al., 2011).
+OPENGM2 comprises 19 categories of mostly sparse MAP
+problems. We choose four representative categories for evaluation: Geometric Surface Labeling (GM-Label), Chinese
+Characters (GM-Char), MRF Photomontage (GM-Montage)
+and Matching (GM-Matching). The first three categories
+GM-Label, GM-Character and GM-Montage are sparse
+MAP estimation problems with increasing scales. GMMatching is a special category where our convex relax-
+
+1≤i≤n
+
+This method serves as an alternative low-rank heuristic
+for the proposed SDPAD-LR. With losing generality,
+1
+1, 1 ≤ i ≤ n.
+we set the initial values of xi = m
+• MOSEK — the cutting-edge interior point method. To
+apply it on large-scale SDRs, we add the nonnegativity
+constraints in an incremental fashion, i.e., at each iteration, we detect the 100 smallest negative entries and
+add them to the constraint set.
+• MUL-Update — an approximate on-line SDP solver
+that is based on multivariate weight updates (Arora
+et al., 2012).
+Problem sets. For evaluation, we consider four categories,
+on which most baseline algorithms are applicable: PIC-OBJ,
+PIC-Align, PIC-Folding and GM2-Label. For simplicity, we
+pick a representative problem from each category. The dimensions of these problem sets range from 600 to 5000, and
+they contain both dense and sparse problems (See Table 1).
+Evaluation protocol. Following the standard protocol for
+assessing convex programs, we evaluate the duality gap and
+the primal/dual infeasibility of each algorithm:
+|hb, yi − hC, Xi|
+,
+1 + |hb, yi| + |hC, Xi|
+n kA(X) − bk + k min(P(X), 0)k
+2
+2
+inf = max
+,
+1 + kbk2
+kC + A∗ (y) − P ∗ (z) − SkF o
+1 + kCkF
+
+gap =
+
+As IPM-NC solves a different optimization problem, we
+report the gap between its optimal solutions with the groundtruth optimal solutions.
+
+Semidefinite Relaxation for MAP Estimation
+Table 1. Comparison of SDP Solvers on Representative Problems. N : dimension of the matrix. M : number of constraints.
+Method
+SDPAD-LR
+SDPAD
+SDPNAL
+IPM-NC
+MOSEK
+MUL-Update
+
+deer 0034.K10.F100 (dense)
+N = 661, M = 218791
+
+file 30markers (sparse)
+N = 862, M = 218791
+
+folding 2BE6 (dense)
+N = 3836, M = 218791
+
+gm275 (sparse)
+N = 5201, M = 218791
+
+cpu
+4:33
+8:29
+10:55
+1:27
+21:33:10
+6:13:56
+
+cpu
+7:33
+10:33
+9:42
+2:37
+
+cpu
+2:44:36
+25:56:37
+18:33:11
+10:23
+
+cpu
+21:33
+41:33:21
+21:34:35
+21:56
+
+ORIENT
+PIC-Object
+PIC-Folding
+PIC-Align
+GM-Label
+GM-Char
+GM-Montage
+GM-Matching
+
+gap
+7.2e-4
+8.2e-5
+8.1e-5
+2.3e3
+2.3e-6
+8.1e-3
+
+SDPAD-LR
+-7834.6
+100%
+-19316.12
+97.3%
+-5963.68
+100%
+2285.23
+100%
+-476.95
+100%
+-59550.67
+86.1%
+168298.00
+66.3%
+44.19
+0%
+
+inf
+1.3e-6
+4.3e-7
+1.3e-6
+na
+1.3e-9
+2.7e-5
+
+gap
+2.2e-4
+9.4e-5
+6.2e-5
+4.1e-7
+na
+na
+
+inf
+5.3e-6
+1.3e-7
+2.1e-6
+na
+
+gap
+2.3e-4
+2.3e-4
+5.2e-5
+4.5e2
+na
+na
+
+Table 3. Results on benchmark datasets.
+BRAOBB
+α-expand
+TRWS-LF2
+-3059.2
+-7695.4
+-7592.4
+na
+0%
+0%
+0%
+-19308.94
+-19113.87
+-10106.8
+-19020.82
+91.9%
+24.3%
+0%
+59.5%
+-5963.68
+-5927.01
+-5652.76
+-5905.01
+100%
+42.9%
+14.2%
+38.1%
+2285.34
+2285.34
+2285.34
+2286.64
+90%
+90%
+90%
+80%
+-476.95
+-476.95
+na
+na
+100%
+99.67%
+-49519.44
+na
+na
+na
+11%
+168220.00
+735193.0
+na
+na
+33.3%
+0%
+21.22
+32.38
+na
+na
+100%
+0%
+Ficolofo
+
+Analysis of results. We run each algorithm until the duality
+gap is below 1e − 4 or the maximum number of iterations
+is reached. Table 1 shows the running time, duality gap
+and maximum primal/dual infeasibility of each algorithm
+on each problem. We can see that SDPAD-LR generates
+results that are comparable to SDPAD and SDPNAL. However, SDPAD-LR turns out to be remarkably more efficient
+than SDPAD and SDPNAL on large-scale or sparse datasets.
+This is due to the fact that SDPAD-LR only requires computing the top eigenvalues, which is both memory and computationally efficient.
+Both interior point methods (i.e., IPM-NC and MOSEK)
+have provable guarantees to generate more accurate results
+than other methods. However, MOSEK is not scalable to
+large data sets, as reported in Table 1. IPM-NC is scalable to large-scale problems, as the number variables involved is small. However, as IPM-NC solves a non-convex
+optimization problem, it may easily get trapped into local minimals (e.g., on deer 0034.K10.F100 30markers and
+folding 2BE6).
+Finally, the multivariate weight update method MULUpdate turns out be inefficient on solving SDRs of MAP
+inference problems. This is due to the fact that MUL-Update
+is an approximate solver and it requires a lot of iterations to
+obtain an accurate solution.
+
+inf
+5.3e-7
+3.7e-6
+4.7e-7
+na
+
+ogm-TRBP
+-7553.8
+0%
+-18900.81
+32.2%
+-5907.24
+42.9%
+2289.12
+70%
+486.42
+40%
+-49507.98
+6%
+235611.00
+0%
+5.5e10
+0%
+
+gap
+5.1e-4
+1.2e-4
+9.7e-5
+3.5e-6
+na
+na
+
+inf
+1.3e-6
+3.1e-6
+4.5e-7
+na
+
+MCBC
+
+A-star
+
+na
+
+na
+
+na
+
+na
+
+na
+
+na
+
+na
+
+na
+
+na
+
+na
+
+-49550.10
+89.1%
+
+na
+
+na
+
+na
+
+na
+
+21.22
+100%
+
+4.3. MAP Inference Evaluation
+Experimental setup. We compare SDR with the topperforming algorithms from OPENGM2 (Kappes et al.,
+2013a). These algorithms include (i) BRAOBB (Otten &
+Dechter, 2012), which is based on combinatorial search, (ii)
+α-expansion (Szeliski et al., 2008)–a move making method,
+(iii) MCBC (Kappes et al., 2013b), which is based on a
+highly optimized max-cut solver, (iv) TRWS-LF2 (Kolmogorov, 2006)– Tree-reweighted message passing, (vi)
+ogm-TRBP— Tree-reweighted belief propagation (Szeliski
+et al., 2008) and (vii) ficolofo (Cooper et al., 2010)– the top
+performing method on dense problems of PIC.
+We use two measures to assess the performance of each
+method. The first measure evaluates for each method the
+mean objective values f of the resulting MAP assignments
+on each category. For the consistency with (Kappes et al.,
+2013a), we report −f , meaning that the smaller the value,
+the better the algorithm. The second measure reports the percentage that each method achieves the best solution among
+all existing methods (not necessarily the global optimal).
+The higher the percentage, the better the algorithm.
+Performance. Table 3 summarizes the performance of
+SDPAD-LR v.s. state-of-the-art MAP inference algorithms
+on each type of problems. In each block, the top element
+(which is tilted) describes −f of each method on each cat-
+
+Semidefinite Relaxation for MAP Estimation
+
+egory, and the bottom block describes the percentage of
+obtaining the best solution. We can see that the overall performance of SDPAD-LR is superior to each other individual
+algorithm. Except on GM-Matching, SDPAD-LR is the top
+performing on each other dataset. In contrast, each existing
+method either does not apply or generates poor results on
+one or several datasets. This shows the advantage of solving
+a strong convex relaxation of the MAP inference problem.
+Below we break down the performance on each benchmark.
+• ORIENT. SDPAD-LR is the leading method on ORIENT. The problems in ORIENT exhibit specific structures, i.e, the pair-wise potentials consist of approximately shifted permutation matrices. Experimentally,
+we found that SDR is usually tight on these problems.
+This explains the superior performance SDPAD-LR.
+In contrast, linear programming relaxations are not
+tight on ORIENT, and thus TRBP and TRWS only deliver moderate performance. Moreover, this structural
+pattern leads to huge search spaces for combinatorial
+algorithms (e.g., BRAOBB), and they can easily get
+stuck in local optimums.
+• Dense problems. SDPAD-LR also outperforms other
+methods on three dense categories from PIC. It
+achieves the best mean energy value as well as the
+highest percentage of obtaining the best solution. This
+again arises since SDR is tight on these problems.
+• Sparse problems. SDR yields comparable results with
+state-of-the-art algorithms on the three sparse categories from OPENGM2. GM-Label consists of problems where the standard LP relaxation is tight. On
+GM-Char which consists of large-scale binary problems, SDR is comparable to MCBC in the sense that
+SDR achieves a better mean energy value while MCBC
+attains a higher percentage of being the best solution.
+This arises because MCBC is a highly optimized solver
+designed for binary quadratic problems. On the other
+hand, SDPAD-LR is only an approximate SDP solver
+which, in some cases, may not converge to the global
+optimum due to numerical issues.
+• GM-Matching. SDR only yields moderate results on
+GM-Matching. This occurs because SDR is not tight
+on GM-Matching. In contrast, as GM-Matching is a
+small-scale problem, combinatorial optimization techniques such as BRAOBB and A-star are capable of
+finding globally optimal solutions.
+Running Times. The running time of SDPAD-LR (including the rounding procedure) is of the same scale as other
+convex relation techniques. As shown in Table 2, our preliminary Matlab implementation takes less than 10 mins
+on small-scale problems (i.e. those in PIC-Object, GMMatching and PIC-Label). On medium size problems, i.e.,
+those in PIC-Folding, PIC-Align, GM-Char and ORIENT,
+the running time of SDPAD-LR ranges from 20 minutes to 1
+
+hour. On large-scale problems from GM-Montage, SDPADLR takes around 8 hours on each problem. However, there
+is still huge room for improvement. One alternative is to
+use the eigenvalues computed in the previous iteration to
+accelerate the eigen-decomposition at the current iteration,
+which is left for future work.
+
+5. Conclusions
+In this paper, we have presented a novel semidefinite relaxation for second-order MAP estimation and proposed
+an efficient ADMM solver. We have extensively compared
+the proposed SDP solver with various state-of-the-art SDP
+solvers. Experimental results confirm that our SDP solver
+is much more scalable than prior approaches when applied
+to various MAP estimation problem, which enables us to
+apply SDR on large-scale datasets. Owing to the power
+of semidefinite relaxation, SDR proves superior to other
+top-performing MAP inference algorithms on a variety of
+benchmark datasets.
+There are plenty of opportunities for future research. First,
+we would like to extend SDR to higher-order MAP problems.
+Moreover, it would be interesting to integrate SDR and combinatorial optimization techniques, which has the potential
+to boost the power of both. From the theoretical side, theoretical support for exact estimation with SDR would be one
+exciting direction for investigation. This would offer justification of the presented low-rank heuristic. On the other
+hand, as many combinatorial optimization problems can be
+formulated as MAP inference problems, such exact estimation conditions can shed light on the original combinatorial
+optimization problems.
+
+Acknowledgments
+This work has been supported in part by NSF grants FODAVA 808515 and CCF 1011228, AFOSR grant FA955012-1-0372, ONR MURI N00014-13-1-0341, and a Google
+research award.
+
+References
+Probabilistic
+inference
+chanllenge,
+2011.
+http://www.cs.huji.ac.il/project/PASCAL/index.php.
+Arora, Sanjeev, Hazan, Elad, and Kale, Satyen. The multiplicative weights update method: a meta-algorithm and
+applications. Theory of Computing, 8(1):121–164, 2012.
+Batra, D., Nowozin, S., and Kohli, P. Tighter relaxations
+for MAP-MRF inference: A local primal-dual gap based
+separation algorithm. AISTATS’11, 15:146–154, 2011.
+Benson, S. and Ye, Y. DSDP5: software for semidefinite
+programming. ACM Trans. Math. Softw., 34(3):16:1–
+16:20, May 2008.
+
+Semidefinite Relaxation for MAP Estimation
+
+Boyd, S., Parikh, N., Chu, E., Peleato, B., and Eckstein, J.
+Distributed optimization and statistical learning via the
+alternating direction method of multipliers. Foundations
+and Trends in Machine Learning, 3(1):1–122, 2011.
+Burer, Samuel and Monteiro, Renato D. C. A nonlinear programming algorithm for solving semidefinite programs
+via low-rank factorization. Math. Program., 95(2):329–
+357, 2003.
+Chekuri, C., Khanna, S., Naor, J., and Zosin, L. A linear
+programming formulation and approximation algorithms
+for the metric labeling problem. SIAM J. Discrete Math.,
+18(3):608–625, 2004.
+Cooper, M. C., de Givry, S., Sanchez, M., Schiex, T., Zytnicki, M., and Werner, T. Soft arc consistency revisited.
+Artif. Intell., 174(7-8):449–478, 2010.
+Crandall, D., Owens, A., Snavely, N., and Huttenlocher, D.
+SfM with MRFs: discrete-continuous optimization for
+large-scale structure from motion. CVPR’11, pp. 3001–
+3008, 2011.
+Cullum, J. K. and Willoughby, R. A. Lanczos Algorithms for
+Large Symmetric Eigenvalue Computations. Number 41.
+SIAM, 2002.
+Goemans, M. and Williamson, D. Improved approximation
+algorithms for maximum cut and satisfiability problems
+using semidefinite programming. JACM, 1995.
+Helmberg, C. and Rendl, F. A spectral bundle method for
+semidefinite programming. SIAM Journal on Optimization, 10(3):673–696, 2000.
+Kappes, J. H., Andres, B., Hamprecht, F. A., Schnorr, C.,
+Nowozin, S., Batra, D., Kim, S., Kausler, B. X., Lellmann, J., Komodakis, N., and Rother, C. A comparative
+study of modern inference techniques for discrete energy
+minimization problems. In CVPR’13, June 2013a.
+Kappes, J. H., Speth, M., Reinelt, G., and Schnörr, C. Towards efficient and exact MAP-inference for large scale
+discrete computer vision problems via combinatorial optimization. In CVPR, 2013b.
+Kolmogorov, V. Convergent tree-reweighted message passing for energy minimization. IEEE PAMI., 28:1568–1583,
+October 2006.
+Komodakis, N. and Paragios, N. Beyond loose LPrelaxations: Optimizing MRFs by repairing cycles. In
+ECCV (3), pp. 806–820, 2008.
+Kumar, M., Kolmogorov, V., and Torr, P. An analysis of
+convex relaxations for MAP estimation of discrete MRFs.
+JMLR, 10:71–106, 2009.
+
+Olsson, C., Eriksson, A., and Kahl, F. Solving large scale
+binary quadratic problems: Spectral methods vs. semidefinite programming. In CVPR’07, 2007.
+Otten, Lars and Dechter, Rina. Anytime and/or depth-first
+search for combinatorial optimization. AI Commun., 25
+(3):211–227, 2012.
+Peng, Jian, Hazan, Tamir, Srebro, Nathan, and Xu,
+Jinbo. Approximate inference by intersecting semidefinite bound and local polytope. In AISTATS, pp. 868–876,
+2012.
+Ravikumar, P., Agarwal, A., and Wainwright, M. J. Messagepassing for graph-structured linear programs: Proximal
+methods and rounding schemes. The Journal of Machine
+Learning Research, 11:1043–1080, 2010.
+Shimony, S. E. Finding MAPs for belief networks is NPhard. Artif. Intell., 68(2):399–410, August 1994.
+Sontag, D., Meltzer, T., Globerson, A., Jaakkola, T. S.,
+and Weiss, Y. Tightening LP relaxations for MAP using
+message passing. arXiv preprint arXiv:1206.3288, 2012.
+Szeliski, R., Zabih, R., Scharstein, D., Veksler, O., Kolmogorov, V., Agarwala, A., Tappen, M., and Rother, C.
+A comparative study of energy minimization methods
+for Markov random fields with smoothness-based priors.
+PAMI, 30(6):1068–1080, June 2008.
+Toh, K. C., Todd, M. J., and Tutuncu, R. H. SDPT3–a
+Matlab software package for semidefinite programming.
+Opt. Methods and Software, 11(12):545–581, 1999.
+Torr, Philip. Solving Markov random fields using semidefinite programming. In AI-STATs’03, 2003.
+Wainwright, M., Jaakkola, T., and Willsky, A. MAP estimation via agreement on trees: message-passing and linear
+programming. IEEE Trans Info Theory, 2005.
+Wainwright, M. J. and Jordan, M. I. Graphical models, exponential families, and variational inference. Foundations
+and Trends in Machine Learning, 1(1-2), 2008.
+Wang, P., Shen, C., and van den Hengel, A. A fast semidefinite approach to solving binary quadratic problems. In
+CVPR ’13, pp. 1312–1319, 2013.
+Wen, Z., Goldfarb, D., and Yin, W. Alternating direction
+augmented Lagrangian methods for semidefinite programming. Math. Prog. Comp., 2(3-4):203–230, 2010.
+Zhao, Xin-Yuan, Sun, Defeng, and Toh, Kim-Chuan. A
+newton-cg augmented lagrangian method for semidefinite
+programming. SIAM J. on Optimization, 20(4):1737–
+1765, January 2010. ISSN 1052-6234.
+
+

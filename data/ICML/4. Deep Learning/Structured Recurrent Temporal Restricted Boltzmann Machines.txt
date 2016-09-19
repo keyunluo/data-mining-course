@@ -1,0 +1,1278 @@
+Structured Recurrent Temporal Restricted Boltzmann Machines
+
+Roni Mittelman†
+RMITTELM @ UMICH . EDU
+Benjamin Kuipers†
+KUIPERS @ UMICH . EDU
+Silvio Savarese‡
+SSILVIO @ STANFORD . EDU
+Honglak Lee†
+HONGLAK @ UMICH . EDU
+†
+Department of Electrical Engineering and Computer Science, University of Michigan, Ann Arbor, MI
+‡
+Computer Science Department, Stanford University, Stanford, CA
+
+Abstract
+The recurrent temporal restricted Boltzmann machine (RTRBM) is a probabilistic time-series
+model. The topology of the RTRBM graphical
+model, however, assumes full connectivity between all the pairs of visible units and hidden
+units, thereby ignoring the dependency structure
+within the observations. Learning this structure
+has the potential for not only improving the prediction performance, but also revealing important dependency patterns in the data. For example, given a meteorological dataset, we could
+identify regional weather patterns. In this work,
+we propose a new class of RTRBM, which we
+refer to as the structured RTRBM (SRTRBM),
+which explicitly uses a graph to model the dependency structure. Our technique is related to
+methods such as graphical lasso, which are used
+to learn the topology of Gaussian graphical models. We also develop a spike-and-slab version of
+the RTRBM, and combine it with the SRTRBM
+to learn dependency structures in datasets with
+real-valued observations. Our experimental results using synthetic and real datasets demonstrate that the SRTRBM can significantly improve the prediction performance of the RTRBM,
+particularly when the number of visible units is
+large and the size of the training set is small. It
+also reveals the dependency structures underlying our benchmark datasets.
+
+1. Introduction
+Discovering patterns and relationships in static and timeseries data is an important theme in many machine learning problems, spanning different fields such as modeling
+of human activities in videos (Prabhakar et al., 2010), or
+inferring gene regulatory networks (Mohan et al., 2012).
+Proceedings of the 31 st International Conference on Machine
+Learning, Beijing, China, 2014. JMLR: W&CP volume 32. Copyright 2014 by the author(s).
+
+Gaussian graphical models have been used often to learn
+the structure of static data, by using a graph to describe
+the sparsity pattern of the inverse covariance matrix. The
+topology of the graph captures the conditional independence property between non-adjacent nodes (Lauritzen,
+1996). The structure of a Gaussian graphical model can
+be learned using the graphical lasso (Banerjee et al., 2008;
+Friedman et al., 2008) approach, which uses sparsity promoting regularization to encourage the learning of sparsely
+connected graphs. The graphical lasso framework is particularly important for estimation of the inverse covariance
+matrix when the number of observations is smaller than the
+number of variables.
+The Graphical lasso has also been used to model sequence data, using graphical models of autoregressive processes (Songsiri & Vandenberghe, 2010). Other timeseries models include hidden Markov models (Rabiner &
+Juang, 1986) and dynamic Bayesian networks (Doshi et al.,
+2011). However, as was discussed in Taylor et al. (2011),
+these models have difficulties capturing long range temporal dependencies. Another class of time-series models, which are potentially better suited to capture long
+range dependencies, relies on the use of recurrent neural networks (RNNs) (Rumelhart et al., 1986; Martens
+& Sutskever, 2011; Boulanger-Lewandowski et al., 2012;
+Sutskever et al., 2013; Pascanu et al., 2013; Bengio et al.,
+2013), and variants of restricted Boltzmann machines
+(RBMs) (Taylor et al., 2011; Sutskever & Hinton, 2007;
+Sutskever et al., 2008). However, these models assume a
+full connectivity between all the pairs of visible and hidden units, which makes it difficult to identify important dependency structures between observations and hidden units
+from the learned model.
+In this paper, we develop a new approach to learn dependency structures in time-series data, based on the recurrent temporal restricted Boltzmann machine (RTRBM)
+(Sutskever et al., 2008). The RTRBM can be viewed as a
+temporal stack of RBMs, where each RBM has a contextual hidden state that is received from the previous RBM
+
+Structured Recurrent Temporal Restricted Boltzmann Machines
+
+and is used to modulate its hidden units bias. In our model,
+we use a dependency graph to define a new energy function for the RTRBM, such that the graph topology is used
+to determine appropriate masking matrices for the RTRBM
+model parameters. By replacing the elements of the masking matrices with logistic functions, we are able to learn the
+structure of the graph. Furthermore, we propose a sparsity
+promoting regularization to promote learning of sparsely
+connected graphs.
+In essence, our approach, which we refer to as the structured RTRBM (SRTRBM), shares similar motivations to
+graphical lasso, and can reveal structure in time-series data.
+Similarly to graphical lasso, we show that learning the
+structure in the RTRBM can improve the prediction performance, particularly when the size of the observations
+vector is large, and the size of the training set is small. It
+can also reveal important dependency patterns in the data.
+Another contribution of this work is to develop a temporal
+extension of the spike-and-slab RBM (ssRBM) (Courville
+et al., 2011a;b) for modeling of time-series data with
+real-valued observations. Previously, modeling of realvalued observations using the RTRBM was achieved using a Gaussian RBM (GRBM) (Hinton & Salakhutdinov,
+2006), which is known to suffer from inadequately modeling the conditional covariance of the visible units (Ranzato
+& Hinton, 2010; Dahl. et al., 2010). The ssRBM associates
+a real-valued variable (“slab”) with each binary hidden unit
+(“spike”), and unlike the GRBM it has a conditional distribution for the visible units which has a non-diagonal covariance. We propose the spike-and-slab formulation in our
+SRTRBM in order to learn the structure of datasets with
+real-valued observations. Our experimental results verify
+that the spike-and-slab version of our model can improve
+over the Gaussian RTRBM, and that learning the structure
+can reduce the prediction error. We are also able to learn
+the underlying structure of our benchmark datasets.
+The rest of the paper is organized as follows. Section 2
+provides the background about the RBM and the ssRBM,
+and in Section 3 we review the RTRBM and its learning
+algorithm. We develop the SRTRBM in Section 4 and the
+spike-and-slab-based RTRBM and SRTRBM in Section 5.
+In Section 6 we present the experimental results, and Section 7 concludes this paper.
+
+2. Preliminaries
+2.1. Restricted Boltzmann Machines
+The RBM (Smolensky, 1987) is an undirected graphical
+model that represents a joint distribution over visible units
+vi , i = 1, . . . , Nv , and binary hidden units hj , j =
+1, . . . , Nh . Assuming binary visible units, the joint distribution takes the form:
+
+P (v, h) = exp{−E(v, h)}/Z,
+E(v, h) = −(h> Wv + c> v + b> h),
+
+(1)
+
+where v = [v1 , . . . , vNv ]> , h = [h1 , . . . , hNh ]> , and Z
+is the partition function which is a function of the model
+parameters b, c, W. The posterior distributions for the
+hidden and visible units take the
+Xform
+
+P (hj = 1|v) = σ
+wj,i vi + bj ,
+(2)
+i
+
+P (vi = 1|h) = σ
+
+X
+
+
+wj,i hj + ci ,
+
+(3)
+
+j
+
+where σ(x) = (1 + exp{−x})−1 . Using (2) and (3), inference is performed using block Gibbs sampling.
+The partial
+P
+derivative of the data likelihood P (v) = h P (v, h) with
+respect to each model parameter θ ∈ {W, b, c} takes the
+form (Hinton, 2002):
+∂
+∂
+∂
+P (v) = −(Eh|v E(v, h) − Ev0 ,h E(v0 , h)). (4)
+∂θ
+∂θ
+∂θ
+The first term in (4) can be evaluated analytically. However,
+the second term is intractable, but it can typically be approximated by running few iterations of block Gibbs sampling after initializing the visible units to the observation.
+This approximation is known as contrastive-divergence
+(CD) (Hinton, 2002).
+2.2. Spike and Slab RBM
+The ssRBM (Courville et al., 2011a;b) models a joint distribution over visible and hidden units, and a real valued
+slab variable sj , j = 1, . . . , Nh , that is associated with
+each hidden unit. In this paper, we consider the version of
+Courville et al. (2011a). The energy function for the joint
+distribution of the ssRBM takes the following form:
+
+1
+E(v, h, s) = −(s  h)> Wv + v> λI + diag(Φ> h) v
+2
+α
+α
+2
+>
++ ksk2 − αµ (s  h) − b> h + µ2> h (5)
+2
+2
+where  denotes element-wise product, diag(·) denotes a
+diagonal matrix with the argument vector on its diagonal,
+µ2 = µ  µ, I is the identity matrix, s = [s1 , . . . , sNh ]> ,
+and the model parameters are: λ, α ∈ R, µ ∈ RNh , Φ ∈
+h ×Nv
+RN
+, W ∈ RNh ×Nv .
++
+Inference in the ssRBM is performed using Gibbs sampling, from the following conditional distributions:
+P (hi = 1|v) = σ(0.5α−1 (Wi,· v)2 + µi Wi,· v
+
+(6)
+
+>
+
+− 0.5v diag(Φi,· )v + bi ),
+P (si |v, hi ) = N ((α−1 Wi,· v + µi )hi , α−1 )
+>
+
+P (v|s, h) = N (Cv|s,h W (s  h), Cv|s,h )
+
+(7)
+(8)
+
+where Wi,· is the ith row vector of W (the same is true
+for “Φi,· ”), and Cv|s,h = (λI + diag(Φ> h))−1 . Equations
+
+Structured Recurrent Temporal Restricted Boltzmann Machines
+
+(6)-(8) can be used iteratively using Gibbs sampling, and
+therefore learning can be performed using CD.
+The conditional distribution of the observation given the
+hidden units takes the form:
+P (v|h) = N (Cv|h W(µ  h), Cv|h ),
+
+(9)
+
+where Cv|h = (λI + diag(Φ> h) − α1 W> diag(h))W)−1 .
+This implies that the conditional covariance matrix Cv|h
+is in general non-diagonal. This property of the ssRBM
+allows it to capture the covariance structure between the
+observations, which the GRBM does not model.
+
+3. RTRBM revisited
+The RTRBM describes the joint probability distribution of
+the visible units vector vt ∈ RNv , and hidden units vector
+ht ∈ RNh at time step t, using a conditional RBM which
+depends on the hidden input rt−1 . The RTRBM network is
+illustrated in Figure 1. The joint probability distribution of
+vt , ht for any t > 1 (given rt−1 ) takes the following form:
+P (vt , ht ; rt−1 ) =
+
+1
+exp{−E(vt , ht ; rt−1 )}
+Zrt−1
+
+(10)
+
+W
+v1
+
+b h
+2
+W!
+W
+v2
+
+b h
+T
+W!
+W
+
+vT
+
+W
+r1
+
+W
+r2
+
+W
+rT
+
+b init h1
+
+W!
+
+W!
+
+Figure 1. An illustration of the RTRBM.
+
+3.1. Inference in the RTRBM
+Given hidden inputs rt−1 (t > 1), the conditional distributions are factorized and takes the form:
+X
+X
+P (ht,j = 1|vt , rt−1 ) = σ(
+wj,i vt,i + bj +
+uj,m rt−1,m ),
+i
+
+P (vt,i = 1|ht , rt−1 ) = σ(
+
+X
+
+l
+
+wj,i ht,j + ci ),
+
+(13)
+
+j
+
+For t = 1, the posterior of h1 given v1 has a similar form as
+(2), where binit replaces b. The above conditional probabilities can also be used to generate samples v1 , ..., vT (i.e.,
+by repeatedly running Gibbs sampling for t = 1, ..., T ).
+
+>
+>
+>
+Further, note that, given the hidden inputs r1 , ..., rT −1 ,
+E(vt , ht ; rt−1 ) = −(h>
+t Wvt + c vt + b ht + ht Urt−1 ),
+all the RBMs (corresponding to different time frames) are
+where W ∈ RNh ×Nv , U ∈ RNh ×Nh , c ∈ RNv , b ∈ RNh
+decoupled; thus, sampling can be performed using block
+are model parameters, and Zrt−1 denotes a normalization
+Gibbs sampling for each RBM independently. This fact is
+factor which depends on rt−1 and the other model paramuseful in deriving the CD approximation for the RTRBM.
+eters (we used the subscript rt−1 since the dependency
+3.2. Learning in the RTRBM
+on the input rt−1 is the major difference compared to the
+In order to learn the parameters, we need to obtain the
+RBM). For t = 1, the joint distribution of v1 , h1 takes
+partial derivatives of the log-likelihood, log P (v1 , ..., vT ),
+the form of a standard RBM with the hidden units biases
+with respect to the model parameters. Using the CD apNh
+binit ∈ R .
+proximation to compute these derivatives requires the graThe inputs rt (where t ∈ {1, . . . , T −1}) are obtained from
+dients of energy function (12) with respect to all the model
+a RNN given v1 , ..., vt :
+parameters. We separate the energy function into the fol(
+lowing two terms: E = −H − Q2 , where
+σ(Wvt + b + Urt−1 ), if t > 1
+(11)
+rt =
+>
+>
+H = h>
+σ(Wvt + binit ),
+if t = 1
+1 Wv1 + c v1 + binit h1
+
+where the logistic function σ(x) = (1 + exp(−x))−1 is
+applied to each element of its argument vector. The motivation for the choice of rt is that using the RBM associated
+with time instant t, we have that E[ht |vt ] = rt ; i.e., it is
+the expected value of the hidden units vector.
+The joint probability distribution of the visible and hidden
+units of the RTRBM with length T takes the form:
+
++
+
+T
+X
+
+>
+h>
+t Wvt + cvt + b ht ,
+
+t=2
+
+Q2 =
+
+T
+X
+
+hTt Urt−1 .
+
+(14)
+
+t=2
+
+Taking the gradients of H with respect to the model parameters is straightforward, and therefore we focus on Q2 .
+−1
+exp{E({vt , ht }Tt=1 ; {rt }Tt=1
+)} To compute the partial derivative of Q2 with respect to a
+−1
+P ({vt , ht }Tt=1 ; {rt }Tt=1
+)=
+model parameter θ, we first compute the gradient of Q2
+Z · Zr1 · · · ZrT −1
+with
+respect to rt , for t = 1, . . . , T − 1, which can be comwhere Z denotes the normalization factor for the first RBM
+puted
+recursively using the backpropagation-through-time
+at t = 1, and where
+(BPTT) algorithm (Rumelhart et al., 1986). These gradi−1
+>
+E({vt , ht }Tt=1 ; {rt }Tt=1
+) = − h>
+(12)
+ents are then used with the chain rule to compute the deriva1 Wv1 + c v1
+T
+X
+  tives with respect to all the model parameters. In the next
+>
+>
+>
+>
+subsection, we use the BPTT to derive the gradient with re+ b>
+h
++
+h
+Wv
++
+c
+v
++
+b
+h
++
+h
+Ur
+t
+t
+t
+t−1
+init 1
+t
+t
+spect to U. The other gradients can be computed similarly.
+t=2
+
+Structured Recurrent Temporal Restricted Boltzmann Machines
+
+3.2.1. C ALCULATING ∇rt Q2 USING BPTT
+We observe that Q2 can be computed recursively using:
+Qt =
+
+T
+X
+
+>
+h>
+τ Urτ −1 = Qt+1 + ht Urt−1
+
+−1
+over “model distribution” (conditioned on {rt }Tt=1
+). Similarly to (17), Dt can be computed recursively using:
+
+Dt+1 = U> (Dt+2  rt+1  (1 − rt+1 )
+(15)
+
+τ =t
+
+(21)
+
+0
++ Eht+1 |vt+1 ;rt [ht+1 ] − Evt+1
+,ht+1 |rt [ht+1 ]),
+
+where QT +1 = 0. Using the chain rule and (15), we have
+
+and DT +1 = 0 (see supplementary material for details).
+
+X ∂Qt+2 ∂rt+1,m0
+∂
+∂
+Qt+1 =
++
+(h>
+t+1 Urt )
+0
+∂rt,m
+∂r
+∂r
+∂r
+t+1,m
+t,m
+t,m
+0
+m
+X ∂Qt+2
+=
+rt+1,m0 (1 − rt+1,m0 )um0 ,m
+∂rt+1,m0
+m0
+X
+ht+1,m0 um0 ,m
++
+(16)
+
+The model parameters θ ∈ {W, U, b, binit , c} is updated
+via gradient ascent (e.g., θ := θ + η∆θH+Q2 ) where
+
+where rt+1,m0 (1 − rt+1,m0 ) is obtained from the partial
+derivative of the sigmoid function. Equation (16) can also
+be expressed in vector form using:
+>
+
+∇rt Qt+1 = U (∇rt+1 Qt+2  rt+1  (1 − rt+1 ) + ht+1 ),
+(17)
+where  denotes element-wise product. Since Qt+1 is
+not a function of r1 , . . . , rt−1 , we have that ∇rt Q2 =
+∇rt Qt+1 , and therefore the necessary partial derivatives
+can be computed recursively using (17).
+3.2.2. C ALCULATING THE PARTIAL DERIVATIVES WITH
+RESPECT TO THE MODEL PARAMETERS
+
+In order to compute the derivatives with respect to U, we
+use the chain rule and (15):
+
+T 
+X
+∂Qt+1 ∂rt,m
+∂
+∂Q2
+>
+=
++
+(h Urt−1 )
+∂um,m0
+∂rt,m ∂um,m0
+∂um,m0 t
+t=2
+
+T 
+X
+∂Qt+1
+=
+rt,m (1 − rt,m ) + ht,m rt−1,m0
+(18)
+∂rt,m
+t=2
+where when taking the derivative of h>
+t Urt−1 with respect
+to um,m0 we regard rt−1 as a constant, since the contribution of its derivative is factored in through ∇rt−1 Qt .
+Using the CD approximation with (16) and (18), it can be
+shown that (see supplemental material) the update rule for
+U, that is related to Q2 (not including H), takes the form:
+T
+X
+Q2
+∆U =
+Dt+1  rt  (1 − rt )
+t=2
+
+(19)
+
+where
+Dt = Eht ,...,hT |vt ,...vT ,r1 ...,rT −1 [∇rt−1 Qt ]
+
+− E{ht ,vt0 }Tt=1 |{rt }Tt=1 [∇θ H] +
+
+(22)
+2
+∆Q
+θ
+
+2
+For the other model parameters, we have ∆Q
+c = 0, and
+
+m0
+
+
++ Eht |vt ,rt−1 [ht ] − Evt0 ,ht |rt−1 [ht ] r>
+t−1
+
+∆θH+Q2 = E{ht }Tt=1 |{vt ,rt }Tt=1 [∇θ H]
+
+(20)
+
+− Eht ,...,hT ,vt0 ,...vT0 |r1 ...,rT −1 [∇rt−1 Qt ].
+Intuitively speaking, the first term is the expectation over
+“data distribution”, and the second term is the expectation
+
+2
+∆Q
+W
+
+=
+
+T
+−1
+X
+
+(Dt+1  rt  (1 − rt ))vt>
+
+(23)
+
+(Dt+1  rt  (1 − rt ))
+
+(24)
+
+t=1
+2
+∆Q
+b =
+
+T
+−1
+X
+t=2
+
+2
+∆Q
+binit = D2  r1  (1 − r1 )
+
+(25)
+
+4. Structured RTRBM
+The energy function at each stage in the RTRBM as defined
+in Eq. (10) assumes full connectivity between all the pairs
+of hidden units and inputs from previous time-steps, and
+pairs of visible and hidden units. Our proposed SRTRBM
+uses a dependency graph to define the set of allowed interactions. We start by developing the SRTRBM assuming
+that the graph structure is known, and then relax the energy
+function in order to learn the topology from the data.
+4.1. SRTRBM with a known dependency graph
+In order to develop the SRTRBM, we use a graph structure to define block masking matrices that are associated
+with the model parameters M and U, where the sparsity
+pattern of the making matrices is specified by the graph.
+Intuitively speaking, we partition visible units, and each
+subset of the partition is associated with a node, as well as
+its corresponding hidden units.
+Specifically, we assume an undirected graph structure G =
+(V, E), where V = {1, . . . , |V |} denotes the set of nodes,
+and E denotes the set of undirected edges. We associate
+with each node  ∈ V a subset of visible units indices
+Cv ⊂ {1, . . . , Nv }, where Nv denotes the number of visible units (we note that a group can be comprised of a single
+observation as well), such that ∪ Cv = {1, . . . , Nv }, and
+∩ Cv = ∅ (i.e. the subsets are disjoint and each visible unit
+is assigned to a node). Similarly, we define a set of hidden
+units indices Ch ⊂ {1, . . . , Nh }, where Nh denotes the
+number of hidden units, such that ∪ Ch = {1, . . . , Nh },
+and ∩ Ch = ∅. We rearrange the order of the vector vt such that v = [v1> , . . . , v> , . . . , v|V |> ]> , where
+
+Structured Recurrent Temporal Restricted Boltzmann Machines
+
+v1, h1, r1
+
+v 2, h2, r2
+
+v 4, h 4, r 4
+
+v 3, h 3, r 3
+
+⎡ v1 ⎤
+⎡ h1 ⎤
+⎡ r1 ⎤
+⎢ ⎥
+⎢ ⎥
+⎢ ⎥
+v = ⎢  ⎥, h = ⎢  ⎥ r = ⎢  ⎥
+4
+4
+⎢ v ⎥
+⎢h ⎥
+⎢r 4 ⎥
+⎣ ⎦
+⎣ ⎦
+⎣ ⎦
+1
+1
+0
+⎡ N h1 ×N v1
+N 1 ×N 2
+h
+v
+⎢1
+1N 2 × N 2 1N 2 × N 3
+N 2 ×N 1
+h
+v
+h
+v
+M W = ⎢ h v
+⎢ 0
+1N 3 × N 2 1N 3 × N 3
+h
+v
+h
+v
+⎢
+1
+0
+1N 4 × N 3
+h
+v
+⎣⎢ N h4 ×N v1
+
+1N 1 ×N 4 ⎤
+h
+v
+0 ⎥
+⎥
+1N 3 ×N 4 ⎥
+h
+v
+⎥
+1N 4 ×N 4 ⎥
+h
+v ⎦
+
+Figure 2. Construction of the masking matrix MW , given the
+graph structure (Nx denotes the dimension of the vector x)
+
+v is a vector containing all the visible units assigned to
+node , and similarly we rearrange the order of the vectors ht , rt , such that h = [h1> , . . . , h> , . . . , h|V |> ]> ,
+r = [r1> , . . . , r> , . . . , r|V |> ]> , where h , r are the vectors containing all the hidden units and hidden inputs from
+the previous time-step assigned to node  respectively. We
+define the energy function of SRTRBM for each t > 1 as:
+>
+E(vt , ht ; rt−1 ) = −(h>
+t (W  MW )vt + c vt
+
++ b> ht + h>
+t (U  MU )rt−1 ),
+
+(26)
+
+where rt = σ((W  MW )vt + b + (U  MU )rt−1 ) for
+t > 1, and r1 = σ((W  MW )v1 + binit ). For t = 1,
+>
+>
+E(v1 , h1 ) = −(h>
+1 (W  MW )v1 + c v1 + binit h1 ),
+
+where MW ∈ RNh ×Nv is a |V |×|V | block masking matrix
+such that the jith block has the dimensions |Cjh |×|Civ |, and
+the jith block is set to all ones if there is an edge connecting
+nodes i and j, and otherwise to all zeros. All the “diagonal” blocks (i.e., the iith blocks) are set to all ones. Similarly, MU ∈ RNh ×Nh is a |V | × |V | block masking matrix,
+where the jith block has the dimensions |Cjh | × |Cih |, and
+the jith block is set to all ones if there is an edge connecting
+nodes i and j, and otherwise to all zeros. All the diagonal
+blocks are set to all ones as well. The construction of the
+masking matrix MW is illustrated in Figure 2.
+
+the jith block of both masking matrices is set to σδ (νji ),
+and where δ ≥ 1 is a hyper-parameter. Learning the graph
+structure now corresponds to learning the logistic parameters νji . Setting the hyper-parameter δ to values larger
+than 1 tends to speed up the convergence of the learning
+algorithm, since the logistic function saturates for smaller
+magnitudes of ν. We used δ = 8 throughout this work.
+We use CD to learn the logistic parameters. Using (26)
+we have that the partial derivative of the SRTRBM energy
+function with respect to νji takes the form:
+X  j>
+∂
+ji i
+E(vt , ht ; rt−1 ) = −
+ht Wji vti + hj>
+t U rt−1
+∂νji
+t
+
++ (∇rt Qjt+1  rjt  (1 − rjt ))> (Wji vti + Uji rit−1 )
+× δσδ (νji )(1 − σδ (νji ))
+
+(27)
+
+where Wji and Uji denote the jith block of W and U
+respectively.
+Sparsity regularization. In order to learn sparsely connected graph structures, we propose to regularize the logistic parameters νji such they are encouraged to be close to
+some negative hyper-parameter.
+Specifically, we add the
+P
+penalty term −β j6=i |νji − κ|, where κ is a negative constant (we used κ = −3 throughout this work), and β is the
+regularization parameter. This method can also be interpreted as using a Laplace distribution prior with negative
+mean for νji . Note that this regularization is different from
+the conventional sparsity regularization imposed on the activation of hidden units (Lee et al., 2008).
+
+5. Spike and slab RTRBM and SRTRBM
+
+The assignment of observations to groups can be performed
+in several ways. If some prior knowledge is available (e.g.,
+if some observations belong to the same node in a sensor
+network), it can be used to determine the groups. Alternatively, one can assign a single observation to each node.
+
+Previous applications of the RTRBM to modeling of timeseries with real valued observations used a GRBM for each
+stage in the network. Here we propose to use a ssRBM
+instead of the GRBM, since it is known to provide better
+modeling for the conditional covariance. The hidden input from the previous time-step is also replaced with the
+expected value of the hidden units at each stage in the network. We do not add any additional terms related to the
+slab variables. Following (5) and (10), we have that the
+probability distribution for each time-step takes the form:
+1
+exp{−E(vt , ht , st ; rt−1 )}
+P (vt , ht , st ; rt−1 ) =
+Zrt−1
+
+Inference and learning are performed similarly to the
+RTRBM, where W and U are replaced by W  MW and
+U  MU respectively. When updating the parameter matrices W and U, we simply multiply the partial derivatives
+by their corresponding masking matrix.
+
+E(vt , ht , st ; rt−1 ) = −(st  ht )> Wvt
+(28)
+
+1
+α
++ vt> λI + diag(Φ> ht ) vt + kst k22
+2
+2
+α 2>
+>
+>
+− αµ (st  ht ) − b ht + µ ht − h>
+t Urt−1 ,
+2
+
+4.2. Learning the dependency graph from the data
+In order to learn the graph structure from the data, we replace the blocks of the masking matrices MW and MU
+with logistic functions σδ (ν) = (1 + exp{−δν})−1 , where
+
+where rt,i = σ(0.5α−1 (Wi,· vt )2 + µi Wi,· vt −
+0.5vt> diag(Φi,· )vt + bi + Ui,· rt−1 ) for t > 1, and r1,i =
+σ(0.5α−1 (Wi,· v1 )2 + µi Wi,· v1 − 0.5v1> diag(Φi,· )v1 +
+binit,i ). The model parameters are {W, U, b, Φ, µ, λ, α}.
+
+Structured Recurrent Temporal Restricted Boltzmann Machines
+
+The joint probability takes the form:
+−1
+P ({vt , ht , st }Tt=1 ; {rt }Tt=1
+) ∝ exp{E({vt , ht , st }Tt=1 )},
+
+Input: training sequence v1 , . . . , vT , and number of CD
+iterations NCD .
+
+where E({vt , ht , st }Tt=1 ) = −H − Q2 , with
+H = (binit − b)> h1 +
+
+T
+X
+
+(st  ht )> Wvt
+
+f = W  MW , U
+e = U  MU , Φ
+e = Φ  MW .
+1. Set W
+
+t=1
+
+α
+1
+− vt> (λI + diag(Φ> ht ))vt − kst k22
+2
+2
+α 2> 
+>
+>
++ αµ (st  ht ) + b ht − µ ht ,
+2
+
+Algorithm 1 Contrastive Divergence training iteration for
+the spike-and-slab SRTRBM.
+
+2. For t = 1, . . . , T
+
+(29)
+
+and Q2 defined as in (14).
+Inference can be performed using Gibbs sampling, where
+vt , ht , st are sampled similarly to (6)-(8), and learning can
+be performed using CD. The gradients with respect to each
+of the model parameters related to H are straightforward
+to compute, whereas the gradients related to Q2 are computed using the same approach used for the RTRBM. First,
+the gradients with respect to rt are computed using (17),
+and subsequently the gradients with respect to each of the
+model parameters are computed using the chain rule.
+5.1. Spike-and-slab SRTRBM
+In order to learn structure in real valued time-series using the spike-and-slab SRTRBM, we define the masking
+matrices MW and MU similarly to the previous section.
+We then replace the model matrices W, U, and Φ, with
+W  MW , U  MU , and Φ  MW respectively. Learning
+of the logistic parameters νji is performed using CD (similarly as in Section 4.2). Using (28) we have that the partial
+derivative of the spike-and-slab SRTRBM energy function
+with respect to νji takes the form:
+X j
+∂
+E(vt , ht ; rt−1 ) = −
+(ht  sjt )> Wji vti
+∂νji
+t
+ji
+i
+i
+ji i
++ hj>
+t (−0.5Φ (vt  vt ) + U rt−1 )
+
+• For each i = 1, . . . , Nh , compute:
+f i,· vt )2 + µi W
+f i,· vt −
+rt,i = σ(0.5α−1 (W
+>
+0
+0
+e
+0.5vt diag(Φi,· )vt + bt,i )), where b1,i = binit,i
+e i,· rt−1 for t > 1.
+and b0t,i = bi + U
+• Run NCD Gibbs sampling iterations to obtain
+(n)
+(n) (n)
+vt , ht , st , n = 0, . . . , NCD .
+(0)
+
+(NCD )
+
+3. Approximate Dt recursively using ht , ht
+e instead of U.
+T, . . . , 2 using (21), using U
+
+,t=
+
+4. Compute approximate gradients related to Q2 with respect to the model parameters:
+PT −1
+2
+• ∆Q
+W =
+t=1 ((Dt+1  rt  (1 − rt )) 
+f t + µ))v>
+(α−1 Wv
+t
+PT −1
+2>
+2
+• ∆Q
+=
+−0.5(D
+t+1  rt  (1 − rt ))vt
+Φ
+t=1
+P
+T −1
+f t)
+• ∆Q 2 =
+(Dt+1  rt  (1 − rt ))  (Wv
+µ
+
+t=1
+
+Q2
+Q2
+2
+• Compute ∆Q
+U , ∆b , and ∆binit using (19),
+(24), and (25) respectively.
+
+5. For each θ ∈ {W, U, b, binit , Φ, µ, λ} update using
+∆θH+Q2 =
+−
+
+∂
+(0)
+(0)
+H({vt , ht }Tt=1 )
+∂θ
+
+
+∂
+(N
+)
+(N
+)
+2
+H({vt CD , ht CD }Tt=1 ) + ∆Q
+ Mθ
+θ
+∂θ
+
+where H is given in (29), MΦ = MW , Mb =
+2
+Mbinit = Mµ = Mλ = 1, and ∆Q
+λ = 0.
+
+f t )j ))> Wji vi
++ (∇rt Qjt+1  rjt  (1 − rjt )  (µj + α−1 (Wv
+t
+ 6. Set any negative element of Φ to zero.
+j
+j
+j >
+ji i
+ji
+i
+i
++ (∇rt Qt+1  rt  (1 − rt )) (U rt−1 − 0.5Φ (vt  vt ))
+7. Update νji using (30) and the sparsity regularization.
+× δσδ (νji )(1 − σδ (νji ))
+(30)
+f = W  MW . The learning scheme for the
+where W
+spike-and-slab SRTRBM is summarized in Algorithm 1.
+
+6. Experimental results
+6.1. Simulations using synthetic data
+Here we use synthetic videos of 3 bouncing balls, where the
+pixels are binary valued. We generated 4000 videos of size
+30 × 30 pixels and duration of 100 time-steps for training,
+using the code that is available online and was described
+in Sutskever et al. (2008). We generated another 200 such
+videos for testing. We defined the SRTRBM groups by partitioning each frame into a 5 × 5 grid, and assigning the
+
+pixels within each block to a unique node in the graph.
+We used the same total number of hidden units for the
+RTRBM and SRTRBM. For the SRTRBM, the number of
+hidden units assigned to each SRTRBM groups was identical, and the regularization hyper-parameter to β = 0.001.
+The number of CD iterations during training was set to 25.
+In Figure 3(a), we show 30 of the bases that were
+learned using the SRTRBM. Comparing to the bases that
+were presented in previous works (Sutskever et al., 2008;
+Boulanger-Lewandowski et al., 2012), the bases shown in
+Figure 3(a) are more spatially localized. In Table 1, we
+
+Structured Recurrent Temporal Restricted Boltzmann Machines
+
+RNN
+Gaussian-RTRBM
+ss-RTRBM
+ss-SRTRBM (no grouping)
+ss-SRTRBM (groups)
+(a) Learned bases
+
+(b) Neighbors
+
+(c) Learned mask
+
+Figure 3. (a) The bases learned using SRTRBM for the videos of
+bouncing balls, (b) the mask MU corresponding to a dependency
+graph in which only neighboring nodes (i.e., adjacent regions in
+the grid) are connected, (c) the learned mask MU .
+
+walking
+21.67
+14.41 ± 0.38
+8.45 ± 0.05
+8.32 ± 0.08
+8.13 ± 0.06
+
+running
+19.05
+10.91 ± 0.27
+6.22 ± 0.04
+5.84 ± 0.05
+5.88 ± 0.05
+
+Table 2. Average prediction error obtained for the motion capture
+dataset using different methods (“no groupings”: one observation per node; “groups”: all the observations associated with each
+body part are assigned to the same node).
+35
+
+ss−RTRBM
+ss−SRTRBM
+
+Nh
+RTRBM
+SRTRBM
+
+2500
+4.00 ± 0.35
+3.58 ± 0.35
+
+3750
+3.88 ± 0.33
+3.31 ± 0.33
+
+30
+25
+20
+
+Table 1. Average prediction error for the bouncing balls dataset.
+Intervals represent the standard error of the mean.
+
+compare the average squared prediction error per frame
+over the 200 test videos, for the RTRBM and SRTRBM
+with different number of hidden units. We used 5 iterations
+per frame to hallucinate the prediction. It can be seen that
+the SRTRBM outperforms the RTRBM, and that using the
+SRTRBM instead of the RTRBM becomes more important
+when the number of hidden units increases. In an additional
+control experiment, we also tried to use `1 regularization
+for the model matrix W of the RTRBM; however, it did
+not improve the performance of the RTRBM.
+
+15
+10
+5
+
+1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21
+
+Figure 4. The prediction error for each motion capture testing sequence, obtained using the spike-and-slab RTRBM (ss-RTRBM)
+and the spike-and-slab SRTRBM (ss-SRTRBM)
+
+normalized space.
+
+In Figure 3(b) we show the sparse adjacency matrix for a
+graph in which only the neighboring nodes (adjacent regions in the 5x5 grid) are connected. In Figure 3(c), we
+show the learned masking matrix MU (i.e., brighter intensities correspond to larger values, and dark intensity values
+correspond to smaller values). The results suggest that the
+learned graph captures the dependency between adjacent
+blocks, as is expected for the bouncing balls dataset.
+
+We used two different approaches to assign the observations to SRTRBM groups. First, we assigned each observation to a group (i.e., no grouping), and the second approach
+was to assign all the angles associated with one of 27 body
+parts (e.g. left-foot, right-hand, etc.) to a single group. The
+number of hidden units that were assigned to each node in
+the SRTRBM was 10 times the number of observations assigned to that node, and we used the same total number of
+hidden units for the RTRBM.
+
+6.2. Simulations using motion capture data
+In this experiment, we used the CMU motion capture
+dataset1 , which contains the joint angles for different motion types. We followed Taylor et al. (2011) and used the 33
+running and walking sequences of subject 35 (23 walking
+sequences, and 10 running sequences). We partitioned the
+33 sequences into two groups: the first had 31 sequences,
+and the second had 2 sequences (one walking, and the other
+running). We used the following preprocessing on the data.
+First, we removed all the joint angles which were constant
+throughout all the time-series (after which we were left
+with 58 angles). Subsequently, we subsampled each sequence by a factor of 4, and normalized the angles by first
+subtracting the mean from each joint and dividing by the
+standard deviation. We evaluated the performance in this
+
+We used a fixed learning rate of 10−3 with 10 CD iterations for training the Gaussian RTRBM, and a single CD iteration for training the spike-and-slab-based methods since
+we observed that when using more iterations the spike-andslab-based algorithms often diverged. We hypothesize that
+this is because the probability distribution of the ssRBM is
+not guaranteed to integrate to 1. The spike-and-slab hyperparameter α was set to 1. The SRTRBM regularization parameter β was set to 5 × 10−3 when assigning each observation to an independent node, and 10−2 when assigning
+observations to groups based on the body parts. We used a
+single Gibbs sampling iteration per time-step to predict the
+normalized joint angles, since it produced the best results
+for all the compared algorithms. We averaged the prediction error over 200 trials.
+
+1
+
+http://mocap.cs.cmu.edu/
+
+In Table 2, we report the average prediction error obtained
+
+Structured Recurrent Temporal Restricted Boltzmann Machines
+
+1
+2
+3
+4
+5
+
+GRTRBM
+33.69 ± 0.77
+42.75 ± 0.97
+38.68 ± 1.00
+34.46 ± 0.86
+35.59 ± 0.76
+
+ss-RTRBM
+26.24 ± 0.12
+35.16 ± 0.14
+30.81 ± 0.14
+25.55 ± 0.1
+27.62 ± 0.11
+
+ss-SRTRBM
+23.49 ± 0.16
+32.91 ± 0.17
+30.87 ± 0.22
+24.55 ± 0.16
+24.51 ± 0.14
+
+Table 3. Average prediction error for the historical weather
+records dataset, for each of the 5 testing sequences.
+
+Figure 5. The sub-graph related to the extremities and major
+bones in the hands and legs, learned using the spike-and-slab
+SRTRBM for the motion capture dataset.
+
+when training with the time-series from the first group, and
+testing with the time-series from the second, using RNN,
+Gaussian RTRBM, spike-and-slab RTRBM, and spike-andslab SRTRBM with the two different groupings described
+before. It can be seen that the spike-and-slab-based methods improve over the Gaussian RTRBM significantly, and
+that the SRTRBM improves over the RTRBM. For the
+spike-and-slab SRTRBM, “no grouping” achieved comparable (or only slightly worse) performance to groupingbased method (based on prior knowledge).
+In Figure 5, we show the parts of the dependency graph
+which are related to the extremities and major bones in the
+legs and hands. We used the sequences from the first group
+to learn the graph using the SRTRBM, where we assigned
+all the angles associated with each body part to the same
+node. It can be observed that many of the edges satisfy
+adjacency relationships in the human body (e.g. left-thumb
+and left-hand, left-thumb and left-fingers, left-foot and lefttibia, left-femur and left-tibia, right-tibia and right-femur,
+right-foot and right-femur, right-foot and right-toes, etc.).
+6.3. Weather modeling
+In this experiment, we used a dataset of historical weather
+records available at the National Climatic Data Center2 . We
+used the maximum and minimum daily temperature measurements from 120 weather stations, and we normalized
+the data using the same procedure described in the previous section. We assigned the minimum and maximum temperatures measured at each station to the same node in the
+SRTRBM, and assigned 10 hidden units per observation.
+We used a learning rate of 5 × 10−5 , and SRTRBM regularization parameter β = 10−2 . We used the spike-andslab parameter α = 8.5 and α = 1 for the non-structured
+and structured versions of the RTRBM respectively. We
+extracted 6 training sequences of length 50 time-steps each
+for training, and 5 such sequences for testing. The prediction error was computed by running a single Gibbs sampling iteration for each time-step, and averaging over 200
+2
+
+ftp://ftp.ncdc.noaa.gov/pub/data/ushcn/daily
+
+Figure 6. The graph corresponding to a subset of the 120 weather
+stations, learned using the historical weather records dataset.
+
+runs. The prediction error results are shown in Table 3,
+where it can be seen that the spike-and-slab-based methods
+significantly outperform the Gaussian RTRBM, and that
+the SRTRBM outperforms the RTRBM.
+In Figure 6, we present a subset of the learned graph for 24
+stations out of the 120 that are located at the western part
+of the US. We used both the training and testing sequences
+to train the model. It can be observed that the links capture
+the neighborhood relationship as well as some longer range
+relationships.
+
+7. Conclusions
+We developed a new approach, the structured recurrent
+temporal restricted Boltzmann machine, to learn the structure of time-series signals. In addition, we proposed
+the spike-and-slab RTRBM, and combined it with the
+SRTRBM to learn the structure of real-valued time-series
+datasets. Our experimental results using several synthetic
+and real datasets verify that the SRTRBM is able to recover
+the structure of the datasets and outperform the RTRBM,
+particularly when the size of the training set is small. Furthermore, the spike-and-slab version of the RTRBM significantly outperforms the Gaussian RTRBM. We hope that
+our approach will inspire more research on deep structural
+learning models for temporal modeling.
+
+Acknowledgments
+This work was supported in part by ONR N000141310762,
+NSF CPS-0931474, and Google Faculty Research Award.
+
+Structured Recurrent Temporal Restricted Boltzmann Machines
+
+References
+Banerjee, O., Ghaoui, L. E., and D’aspremont, A. Model
+selection through sparse maximum likelihood estimation
+for multivariate Gaussian or binary data. Journal of Machine Learning Research, 9:485–516, 2008.
+Bengio, Y., Boulanger-Lewandowski, N., and Pascanu, R.
+Advances in optimizing recurrent networks. In ICASSP,
+2013.
+Boulanger-Lewandowski, N., Bengio, Y., and Vincent, P.
+Modeling temporal dependencies in high-dimensional
+sequences: Application to polyphonic music generation
+and transcription. In ICML, 2012.
+Courville, A. C., Bergstra, J., and Bengio, Y. Unsupervised
+models of images by spike and-slab RBMs. In ICML,
+2011a.
+Courville, A. C., Bergstra, J., and Bengio, Y. A spike and
+slab restricted Boltzmann machine. In AISTATS, 2011b.
+Dahl., G. E., Ranzato, M., Rahman, M. A., and Hinton,
+G. E. Phone recognition with the mean-covariance restricted Boltzmann machine. In NIPS, 2010.
+Doshi, F., Wingate, D., Tenenbaum, J. B., and Roy, N. Infinite dynamic Bayesian networks. In ICML, 2011.
+Friedman, J., Hastie, T., and Tibshirani, R. Sparse inverse
+covariance estimation with the graphical lasso. Biostatistics, (5):432441, 2008.
+Hinton, G. E. Training products of experts by minimizing contrastive divergence. Neural Computation, 14(8):
+1771–1800, 2002.
+Hinton, G. E. and Salakhutdinov, R. Reducing the dimensionality of data with neural networks. Science, 313:
+504–507, 2006.
+Lauritzen, S. L. Graphical Models. Oxford University
+Press, 1996.
+Lee, H., Ekanadham, C., and Ng, A. Y. Sparse deep belief
+net model for visual area V2. In NIPS. 2008.
+Martens, J. and Sutskever, I. Learning recurrent neural networks with Hessian-free optimization. In ICML, 2011.
+Mohan, K., Chung, M., Han, S., Witten, D., Lee, S. I., and
+M, F. Structured learning of Gaussian graphical models.
+In NIPS. 2012.
+Pascanu, R., Mikolov, T., and Bengio, Y. On the difficulty of training recurrent neural networks. In ICML,
+volume 28, 2013.
+
+Prabhakar, K., Oh, S. M., Wang, P., Abowd., G. D., and
+Rehg, J. M. Temporal causality for the analysis of visual
+events. In CVPR, 2010.
+Rabiner, L. and Juang, B.-H. An introduction to hidden markov models. ASSP Magazine, IEEE, 3(1):4–16,
+1986.
+Ranzato, M. and Hinton, G. E. Modeling pixel means and
+covariances using factorized third-order boltzmann machines. In CVPR, 2010.
+Rumelhart, D. E., Hinton, G. E., and Williams, R. J. Learning internal representations by error propagation. In
+Rumelhart, D. E. and Mcclelland, J. L. (eds.), Parallel
+Distributed Processing: Explorations in the Microstructure of Cognition, Volume 1: Foundations, pp. 318–362.
+MIT Press, Cambridge, MA, 1986.
+Smolensky, P. Information processing in dynamical systems: Foundations of harmony theory. In Rumelhart,
+D. E., McClelland, J. L., et al. (eds.), Parallel Distributed
+Processing: Volume 1: Foundations, pp. 194–281. MIT
+Press, Cambridge, 1987.
+Songsiri, J. and Vandenberghe, L. Topology selection in
+graphical models of autoregressive processes. Journal
+of Machine Learning Research, 11:2671–2705, 2010.
+Sutskever, I. and Hinton, G. E. Learning multilevel distributed representations for high-dimensional sequences.
+In AISTATS, 2007.
+Sutskever, I., Hinton, G. E., and Graham, T. W. The recurrent temporal restricted Boltzmann machine. In NIPS,
+2008.
+Sutskever, I., Martens, J., Dahl, G. E., and Hinton, G. E. On
+the importance of initialization and momentum in deep
+learning. In ICML, 2013.
+Taylor, G. W., Hinton, G. E., and Roweis, S. T. Two
+distributed-state models for generating high-dimensional
+time series. Journal of Machine Learning Research, 12:
+1025–1068, 2011.
+
+

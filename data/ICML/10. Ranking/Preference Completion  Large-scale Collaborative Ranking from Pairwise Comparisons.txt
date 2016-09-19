@@ -1,0 +1,1294 @@
+Preference Completion: Large-scale Collaborative Ranking
+from Pairwise Comparisons
+
+Dohyung Park
+Joe Neeman
+Jin Zhang
+Sujay Sanghavi
+Inderjit S. Dhillon
+The University of Texas at Austin
+
+Abstract
+In this paper we consider the collaborative ranking setting: a pool of users each provides a small
+number of pairwise preferences between d possible items; from these we need to predict each
+users preferences for items they have not yet
+seen. We do so by fitting a rank r score matrix
+to the pairwise data, and provide two main contributions:
+(a) we show that an algorithm based on convex optimization provides good generalization
+guarantees once each user provides as few as
+O(r log2 d) pairwise comparisons – essentially
+matching the sample complexity required in the
+related matrix completion setting (which uses actual numerical as opposed to pairwise information), and
+(b) we develop a large-scale non-convex implementation, which we call AltSVM, that trains a
+factored form of the matrix via alternating minimization (which we show reduces to alternating SVM problems), and scales and parallelizes
+very well to large problem settings. It also outperforms common baselines on many moderately
+large popular collaborative filtering datasets in
+both NDCG and in other measures of ranking
+performance.
+
+1. Introduction
+This paper considers the following recommendation system problem: given a set of items, a set of users, and nonnumerical pairwise comparison data, find the underlying
+Proceedings of the 32 nd International Conference on Machine
+Learning, Lille, France, 2015. JMLR: W&CP volume 37. Copyright 2015 by the author(s).
+
+DHPARK @ UTEXAS . EDU
+JOENEEMAN @ GMAIL . COM
+ZJ @ UTEXAS . EDU
+SANGHAVI @ MAIL . UTEXAS . EDU
+INDERJIT @ CS . UTEXAS . EDU
+
+preference ordering of the users. In particular, we are interested in the setting where data is of the form “user i preferes
+item j over item k”, for different ordered user-item-item
+triples i, j, k. Pairwise preference data is wide-spread; indeed, almost any setting where a user is presented with a
+menu of options – and chooses one of them – can be considered to be providing a pairwise preference between the
+chosen item and every other item that is presented.
+Crucially, we are interested in the collaborative filtering
+setting, where (a) on the one hand the number of such pairwise preferences we have for any one user is woefully insufficient to infer anything for that user in isolation; and
+(b) on the other hand, we aim for personalization, i.e. for
+every user to possibly have different inferred preferences
+from every other. To reconcile these two requirements, our
+method relates the preferences of users to each other via a
+low-rank matrix, which we (implicitly) assume governs the
+observed preferences. Essentially, we fit a low-rank users
+× items score matrix X to pairwise comparison data by trying to ensure that Xij − Xik is positive when user i prefers
+item j to item k.
+Our contributions: We present two algorithms to infer
+the score matrix X from training data; once inferred, this
+can be used for predicting future preferences. While there
+has been some recent work on fitting low-rank score matrices to pairwise preference data (which we review and compare to below), in this paper we present the following two
+contributions:
+(a) A statistical analysis for the convex relaxation: we
+bound the generalization error of the solution to our convex program. Essentially, we show that the minimizer of
+the empirical loss also almost minimizes the true expected
+loss. We also give a lower bound showing that our error
+rate is sharp up to logarithmic factors.
+(b) A large-scale non-convex implementation: We provide
+a non-convex algorithm that we call Alternating Support
+
+Preference Completion: Large-scale Collaborative Ranking from Pairwise Comparisons
+
+Vector Machine (AltSVM). This non-convex algorithm is
+more practical than the convex program in a large-scale setting; it explicitly parameterizes the low-rank matrix in factored form and minimizes the hinge loss. Crucially, each
+step in this algorithm can be formulated as a standard SVM
+that updates one of the two factors; the algorithm proceeds
+by alternating updates to both factors. We apply a stochastic version of dual coordinate descent (Hsieh et al., 2008;
+Shalev-Shwartz & Zhang, 2013) with lock-free parallelization. This exploits the problem structure and ensures it parallelizes well. We show that our algorithm outperforms
+several existing collaborative ranking algorithms in both
+speed and prediction accuracy, and it achieves significant
+speedups as the number of cores increases.
+1.1. Related Work
+Ranking/learning preferences is a classical problem that
+has been considered in a large amount of work. There are
+many different settings for this problem, which we discuss
+below.
+Learning to Rank The main problem in this community
+has been to estimate a ranking function from given feature
+vectors and relevance scores. Depending on its application,
+a feature vector may correpond to a user-item pair or a single item. While there have been algorithms that use pairwise comparisons (Herbrich et al., 2000; Joachims, 2002)
+of the training samples, our setting is different in that our
+data consists only of pairwise comparisons. We refer the
+reader to the survey (Liu, 2009).
+One ranking with pairwise comparisions In a singleuser model, we are asked to learn a single ranking given
+pairwise comparisons. Jamieson & Nowak (2011a) and
+Ailon (2011) consider an active query model with noiseless
+responses; Jamieson & Nowak (2011b) give an algorithm
+for exactly recovering the true ranking under a low-rank
+assumption similar to ours, while Ailon (2011) approximately recovers the true ranking without such an assumption. Wauthier et al. (2013) and Negahban et al. (2012)
+learn a ranking from noisy pairwise comparisions; Negahban et al. (2012) consider a Bradley-Terry-Luce model similar to ours and attempt to learn an underlying score vector, while Wauthier et al. (2013) get by without structure
+assumptions, but only attempt to learn the ranking itself.
+Hajek et al. (2014) considered a problem to learn a single
+ranking given a more generalized partial rankings from the
+Plackett-Luce model and provided a minimax-optimal algorithm.
+Many rankings with pairwise comparisions Given
+multiple users with different rankings, one could of course
+attempt to learn their rankings by simply applying an al-
+
+gorithm from the previous section to each user individually. However, it is more efficient – both statistically and
+computationally – to postulate some global structure and
+use it to relate the many users’ rankings. This is the same
+idea that has been applied so successfully in collaborative
+filtering. Rendle et al. (2009) and Liu et al. (2009) were
+the first to take this approach. They modeled the observations as coming from a BTL model with low-rank structure (i.e., very similar to our model) and gave algorithms
+for learning the model parameters. Yi et al. (2013) took a
+purely optimization-based approach. Rather than assuming
+a probabilistic model, they minimized a convex objective
+using the hinge loss on a low-rank matrix. In a slightly different model, Hu et al. (2008) and Shi et al. (2013) consider
+the problem of learning from latent feedback. Recently, Lu
+& Negahban (2014) analyzed an algorithm which is very
+similar to ours for the Bradley-Terry-Luce model independently from our work.
+Many rankings with 1-bit ratings Instead of moving to
+pairwise comparisons, some work has suggested avoiding
+the difficulties of numerical ratings by instead asking users
+to give 1-bit ratings to items; that is, each user only indicates whether they like or dislike an item. In this setting,
+the work of Davenport et al. (2014) is most closely related
+to ours, in that they assume an underlying low-rank structure and give an algorithm based on convex optimization.
+Also, our theoretical analysis owes a lot to their work. Xu
+et al. (2013) consider a slightly different goal: rather than
+attempting to recover the preferences of each user, they try
+to cluster similar users and similar items together. Yun et al.
+(2014) proposed an optimization problem motivated from
+robust binary classification and used stochastic gradient descent to solve the problem in a large-scale setting.
+Many rankings with numerical ratings The goal in this
+setting is the same as ours, except that the data is in the
+form of numerical ratings instead of pairwise comparisons.
+Weimer et al. (2007) attempted to directly optimize Normalized Discounted Cumulative Gain (NDCG), a widely
+used performance measure for ranking problems. Balakrishnan & Chopra (2012), and Volkovs & Zemel (2012) converted this problem into a learning-to-rank problem and
+solved it using the existing algorithms. While these works
+considered the low-rank matrix model, different models are
+proposed by Weston et al. (2012) and Lee et al. (2014). Weston et al. (2012) proposed a tensor model to rank items for
+different queries and users, and (Lee et al., 2014) proposed
+a weighted sum of low-rank matrix models.
+
+2. Empirical Risk Minimization (ERM)
+Let us first formulate the problem mathematically. The task
+is to estimate rankings of multiple users on multiple items.
+
+Preference Completion: Large-scale Collaborative Ranking from Pairwise Comparisons
+
+We denote the numbers of users by d1 , and the number of
+items by d2 . We are given a set of triples Ω ⊂ [d1 ] × [d2 ] ×
+[d2 ], where the preference of user i between items j and
+k is observed if (i, j, k) ∈ Ω. The observed comparison
+is then given by {Yijk ∈ {1, −1} : (i, j, k) ∈ Ω} where
+Yijk = 1 if user i prefers item j over item k, and Yijk = −1
+otherwise. Let Ωi = {(j, k) : (i, j, k) ∈ Ω} denote the set
+of item pairs that user i has compared.
+
+account both the rank of X and the size of its elements, and
+it is roughly proportional to the rank.
+
+We predict rankings for multiple users by estimating a
+score matrix X ∈ Rd1 ×d2 such that Xij > Xik means
+that user i prefers item j over item k. Then the sorting
+order for each row provides the predicted ranking for the
+corresponding user.
+
+Recall the classical Bradley-Terry-Luce model (Bradley &
+Terry, 1952; Luce, 1959) for pairwise preferences of a single user, which assumes that the probability of item j being
+preferred over k is given by a logistic of the difference of
+the underlying preference scores of the two items. For multiple users, we assume that there is some true score matrix
+X ∗ ∈ Rd1 ×d2 and
+∗
+∗
+exp(Xij
+− Xik
+)
+Pr(Yijk = 1) =
+∗ − X∗ ) .
+1 + exp(Xij
+ik
+
+We propose (as have others) that X is low-rank or close to
+low-rank, the intuition being that each user bases their preferences on a small set of features that are common among
+all the items. Then the empirical risk minimization (ERM)
+framework can naturally be formulated as
+X
+minimize
+L(Yijk (Xij − Xik ))
+(1)
+X
+
+(i,j,k)∈Ω
+
+subject to rank(X) ≤ r
+where L(·) is a monotonically non-increasing loss function
+which induces Xij > Xik if Yijk = 1, and Xij < Xik
+otherwise. (e.g., hinge loss, logistic regression loss, etc.)
+Solving (1) is NP-hard because of the rank constraint. As
+a first alternative, we propose a straightforward convex relaxation.
+
+3. Convex Relaxation
+Our first method is the convex relaxation of (1), which involves a nuclear norm constraint.
+X
+minimize
+L(Yijk (Xij − Xik ))
+(2)
+X
+
+(i,j,k)∈Ω
+
+subject to kXk∗ ≤
+
+p
+λd1 d2
+
+Here, for any matrix X, the nuclear/trace norm kXk∗ denotes the sum of its singular values; it is a well-recognized
+convex surrogate for low-rank structure (most famously in
+matrix completion).
+The only parameter of this algorithm is λ, which governs
+the trade-off between better optimizing the likelihood of
+the observed data, and the strictness in imposing approximate low-rank structure. Since we motivated our algorithm
+with the assumption that X has low rank, we should point
+out how our algorithm’s parameter λ compares to the rank:
+note that if X is a d1 × d2 rank-r matrix whose
+√ largest absolute
+entry
+is
+bounded
+by
+C
+then
+kXk
+≤
+rkXkF ≤
+∗
+√
+C rd1 d2 . In other words, λ is a parameter that takes into
+
+3.1. Analytic results
+We analyze (2) by assuming a standard model for pairwise
+comparisons. Then we provide a statistical guarantee of the
+method under the model.
+
+Assume that each user-item-item triple (i, j, k) independently belongs to Ω with probability pi,j,k , and let m =
+P
+i,j,k pi,j,k be the expected size of Ω. We will assume
+that the pi,j,k are approximately balanced in the sense that
+no user-item pair is observed too frequently:
+Assumption 3.1. There is a constant κ > 0 such that for
+every i, j,
+X
+m
+pi,j,k ≤ κ
+.
+d1 d2
+k
+
+Note that if κ = 1 in Assumption 3.1 then the pi,j,k are all
+equal, meaning that each user-item-item triple has an equal
+chance to be observed.
+In order to state our error bounds, we first introduce some
+notation: let PX be the distribution of {Yi,j,k : 1 ≤ i ≤
+d1 , 1 ≤ j < k ≤ d2 } (i.e. the complete distribution of all
+pairwise preferences, even those that are not observed).
+Our main upper bound shows that if m is sufficiently large
+then our algorithm finds a solution with almost minimal
+risk. Given a loss function L, define the expected risk of X
+by
+R(X) =
+
+d1 X
+d2
+1 X
+EX ∗ L(Yijk (Xij − Xik )),
+d1 d22 i=1
+j,k=1
+
+where the expectation is with respect to the distribution
+parametrized by the true parameters X ∗ .
+Theorem 3.1. Suppose that L is 1-Lipschitz, and let Y and
+Ω be distributed as PX ∗ for some d1 ×d2 matrix X ∗ . Under
+Assumption 3.1,
+ER(X̂) ≤
+
+ER(X)
+inf√
+{X:kXk∗ ≤ λd1 d2 }
+r
++ Cκ
+
+λ(d1 + d2 )
+log(d1 + d2 ),
+m
+
+Preference Completion: Large-scale Collaborative Ranking from Pairwise Comparisons
+
+log(1 + exp(z)) − z. Under Assumption 3.1,
+
+where C is a universal constant.
+We recall that the parameter λ is related to rank in that if
+X is a d1 × d2 rank-r matrix whose
+√ entry
+√ largest absolute
+is bounded by C then kXk∗ ≤ rkXkF ≤ C rd1 d2 .
+In other words, λ is a parameter that takes into account
+both the rank of X ∗ and the size of its elements, and it is
+roughly proportional to the rank. In particular, Theorem 3.1
+shows that once we observe m ∼ r(d1 + d2 ) log2 (d1 +
+d2 ) pairwise comparisons, then we can accurately estimate the probability of any user preferring any item over
+any other. In other words, we need to observe about
+r(1 + d2 /d1 ) log2 (d1 + d2 ) comparisons per user, which
+is substantially less than the rd2 log(d2 ) comparisons that
+we would have required if each user were modelled in isolation. Moreover, our lower bound (below) shows that at
+least r(1+d2 /d1 ) comparisons per user are required, which
+is only a logarithmic factor from the upper bound.
+0
+
+Theorem 3.2. Suppose that L (0) < 0. Let A be any algorithm that receives {Yi,j,k : (i, j, k) ∈ Ω} as input and
+produces X̂ as output. For any √
+λ ≥ 1 and m ≥ d1 + d2 ,
+there exists X ∗ with kX ∗ k∗ ≤ λd1 d2 such that when Y
+and Ω are distributed according to PX ∗ then with probability at least 12 ,
+
+1
+d1 d22
+
+sup
+
+√
+{X:kXk∗ ≤ λd1 d2 }
+
+D(PX ∗ kPX̂ ) − D(PX ∗ kPX )
+r
+
+λ(d1 + d2 )
+log(d1 + d2 ),
+m
+where C is a universal constant.
+≤ Cκ
+
+Note that the loss function in Corollary 3.3 is exactly the
+negative logarithm of the logistic function, and so X̂ in
+Corollary 3.3 is the maximum-likelihood estimate for X ∗ .
+Thus, Corollary 3.3 shows that the distribution induced by
+the maximum-likelihood estimator is close to the true distribution in Kullback-Leibler divergence.
+
+4. Large-scale Non-convex Implementation
+While the convex relaxation is statistically near optimal, it
+is not ideal for large-scale datasets because it requires the
+solution of a convex program with d1 ×d2 variables. In this
+section we develop a non-convex variant which both scales
+and parallelizes very well, and has better empirical performance as compared to several existing empirical baseline
+methods.
+Our approach is based on the following steps:
+
+( r
+ER(X̂) ≥ R(X ∗ ) + c min 1,
+
+λ(d1 + d2 )
+m
+
+)
+,
+
+where c > 0 is a constant depending only on L.
+Together, Theorems 3.1 and 3.2 show that (up to logarithmic factors) if X ∗ has rank r then about r(1 + d2 /d1 ) comparisons per user are necessary and sufficient for learning
+the users’ preferences.
+3.1.1. M AXIMUM LIKELIHOOD ESTIMATION OF X ∗
+By specializing the loss function L, Theorem 3.1 has a simple corollary for maximum-likelihood estimation of X ∗ .
+Recall that if µ and ν are two probability distributions on
+a finite set S the the Kullback-Leibler divergence between
+them is
+D(µkν) =
+
+X
+s∈S
+
+µ(s) log
+
+µ(s)
+,
+ν(s)
+
+under the convention that 0 log 0 = 0. We recall that although D(·k·) is not a metric it is always non-negative, and
+that D(µkν) = 0 implies µ = ν.
+Corollary 3.3. Let Y and Ω be distributed as PX ∗ for some
+d1 × d2 matrix X ∗ . Define the loss function L by L(z) =
+
+1. We represent the low-rank matrix in explicit factored
+form X = U V > and replace the regularizer appropriately. This results in a non-convex optimization problem in U ∈ Rd1 ×r and V ∈ Rd2 ×r , where r is the
+rank parameter.
+2. We solve the non-convex problem by alternating between updating U while keeping V fixed, and vice
+versa. With the hinge loss (which we found works
+best in experiments), each of these becomes an SVM
+problem - hence we call our algorithm AltSVM.
+3. The problem is of course not symmetric in U and V
+because users rank items but not vice versa. For the U
+update, each user vector naturally decouples and can
+be done in parallel (and in fact just reduces to the case
+of rankSVM (Joachims, 2002)).
+4. For the V update, we show that this can also be made
+into an SVM problem; however it involves coupling of
+all item vectors, and all user ratings. We employ several tricks (detailed below) to speed up and effectively
+parallelize this step.
+The non-convex problem can be written as
+X
+λ
+2
+2
+min
+L(Yijk · u>
+i (vj − vk )) + (kU kF + kV kF )
+U,V
+2
+(i,j,k)∈Ω
+
+(3)
+
+Preference Completion: Large-scale Collaborative Ranking from Pairwise Comparisons
+
+where we replace the nuclear norm regularizer using the
+property kXk∗ = minX=U V > 12 (kU k2F + kV k2F ) (Sre>
+bro et al., 2004). u>
+i and vi denote the ith rows of U
+and V , respectively. While this is a non-convex algorithm for which it is hard to find the global optimum, it is
+computationally more efficient since only (d1 + d2 )r variables are involved. We propose to use L2 hinge loss, i.e.,
+L(x) = max(0, 1 − x)2 .
+
+(j, k) ∈ Ωi . Then the dual problem of (5) is to solve
+2
+
+
+ X
+
+1
+
+αijk Yijk (vj − vk )
+min
+
+
+|Ω
+|
+α∈R i ,α≥0 2 
+
+(j,k)∈Ωi
+
+2
+
+1
++
+λ
+
+X
+
+∗
+
+L (−λαijk )
+
+(7)
+
+(j,k)∈Ωi
+
+In the alternating minimization of (3), the subproblem for
+U is to solve
+U ← arg
+
+min
+
+U ∈Rd1 ×r
+
+X
+(i,j,k)∈Ω
+
+where L∗ (z) is the convex conjugate of L. At each coordinate descent step for αijk , we find the value of αijk
+minimizing (7) while
+P all the other variables are fixed. If
+we
+maintain
+u
+=
+λ
+i
+(j,k)∈Ωi αijk Yijk (vj − vk ), then the
+2
+L(Yijk · u>
+i (vj − vj )) + kU kF , coordinate descent step is simply to find δ ∗ minimizing
+2
+(4)
+
+while V is fixed. This can be decomposed into n independent problems for ui ’s where each solves for
+λ
+ui ← arg minr kuk22 +
+u∈R 2
+
+X
+
+>
+
+L(Yijk · u (vj − vk ).
+
+(j,k)∈Ωi
+
+(5)
+This part is in general a small-scale problem as the dimension is r, and the sample size is |Ωi | for each user i.
+On the other hand, solving for V with fixed U can be written as
+
+V ← arg
+
+min
+
+V
+
+∈Rd2 ×r
+
+
+λ
+2
+
+kV k2F +
+
+X
+(i,j,k)∈Ω
+
+
+
+L(hV, A(u,i,j) i)
+
+(6)
+
+where A(i,j,k) ∈ Rd2 ×r is such that the lth row of A(i,j,k)
+>
+is Yijk · u>
+i if l = j, −Yijk · ui if l = k, and 0 otherwise.
+It is a much larger SVM problem than (5) as the dimension
+is d2 r and the sample size is |Ω|.
+We note that the feature matrices {A(i,j,k) : (i, j, k) ∈ Ω}
+are highly sparse since in each feature matrix only 2r out
+of the d2 r elements are nonzero. This motivates us to apply the stochastic dual coordinate descent algorithm (Hsieh
+et al., 2008; Shalev-Shwartz & Zhang, 2013), which not
+only converges fast but also takes advantages of feature
+sparsity in linear SVMs. Each coordinate descent step takes
+O(r) computation, and iterations over |Ω| coordinates provide linear convergence (Shalev-Shwartz & Zhang, 2013).
+Now we describe the dual problems of our two subproblems explicitly. Let α ∈ R|Ωi | denote the dual vector for
+(5), in which each coordinate is denoted by αijk where
+
+1
+1
+2
+kui + δ ∗ Yijk (vj − vk )k2 + L∗ (−λ(αijk + δ ∗ )) (8)
+2
+λ
+and update αijk ← αijk + δ ∗ .
+The dual problem of (6) is to solve
+
+2
+ X
+
+
+
+1
+(i,j,k) 
+β
+A
+min
+ijk
+
+
+β∈R|Ω| ,β≥0 2 
+
+(i,j,k)∈Ω
+F
+X
+1
++
+L∗ (−λβijk )
+λ
+
+(9)
+
+(i,j,k)∈Ω
+
+where β is the dual vector for the subproblem (6). Similarly
+to αijk , the coordinate descent step for βijk is to replace
+βijk by βijk + δ ∗ where δ ∗ minimizes
+
+1
+2
+2
+kvj + δ ∗ Yijk ui k2 + kvk − δ ∗ Yijk ui k2
+2
++L∗ (−λ(βijk + δ ∗ )),
+and maintain V =
+
+P
+
+(i,j,k)∈Ω
+
+(10)
+
+βijk Yijk A(i,j,k) .
+
+The detailed description of AltSVM is presented in Algorithm 1. In each subproblem, we run the stochastic
+dual coordinate descent, in which a pairwise comparison
+(i, j, k) ∈ Ω is chosen uniformly at random, and the dual
+coordinate descent for αijk or βijk is computed. We note
+that each coordinate descent step takes the same O(r) computational cost in both subproblems, while the subproblem
+sizes are much different.
+4.1. Parallelization
+For each subproblem, we parallelize the stochastic dual coordinate descent algorithm asynchronously without locking. Given T processors, each processor randomly sample a triple (i, j, k) ∈ Ω and update the corresponding
+dual variable and the user or item vectors. We note that
+this update is for a sparse subset of the parameters. In the
+user part, a coordinate descent step for one sample updates
+
+Preference Completion: Large-scale Collaborative Ranking from Pairwise Comparisons
+
+Algorithm 1 Alternating Support Vector Machine
+(AltSVM)
+Require: Ω, {Yijk : (i, j, k) ∈ Ω}, and λ ∈ R+
+Ensure: U ∈ Rd1 ×r , V ∈ Rd2 ×r
+1: Initialize U , and set α, β ← 0 ∈ R|Ω|
+2: while notP
+converged do
+3:
+vj ← (i,j,k)∈Ω βijk Yijk ui
+P
+− (i,k,j)∈Ω βikj Yikj ui , ∀j ∈ [d2 ]
+4:
+for all threads t = 1, . . . , T in parallel do
+5:
+for s = 1, . . . , S do
+6:
+Choose (i, j, k) ∈ Ω uniformly at random
+7:
+Find δ ∗ minimizing (10).
+8:
+βijk ← βijk + δ ∗
+9:
+vj ← vj + δ ∗ Yijk ui
+10:
+vk ← vk − δ ∗ Yijk ui
+11:
+end for
+12:
+end for
+P
+13:
+ui ← (i,j,k)∈Ω αijk Yijk (vj − vk ), ∀i ∈ [d1 ]
+14:
+for all threads t = 1, . . . , T in parallel do
+15:
+for s = 1, . . . , S do
+16:
+Choose (i, j, k) ∈ Ω uniformly at random.
+17:
+Find δ ∗ minimizing (8).
+18:
+αijk ← αijk + δ ∗
+19:
+ui ← ui + δ ∗ Yijk (vj − vk )
+20:
+end for
+21:
+end for
+22: end while
+
+only r out of the rd1 variables. In the item part, one coordinate descent step for a sample update only 2r out of
+the rd2 variables. This motivates us not to lock the variables when updated, so that we ignore the conflicts. This
+lock-free parallelism is shown to be effective in (Niu et al.,
+2011) for stochastic gradient descent (SGD) on the sum of
+sparse functions. Moreover, in (Hsieh et al., 2015), it is also
+shown that the stochastic dual coordinate descent scales
+well without locking. We implemented the algorithm using the OpenMP framework. In our implementations, we
+also parallelized steps 3 and 13 of Algorithm 1. We show
+in the next section that our proposed algorithm scales up
+favorably.
+4.2. Remark on the implementation
+In Algorithm 1, the subproblem for V comes first, and
+then it solves for the user vectors U . We empirically observed that this order gives better convergence on practical
+datasets. We also note that each subproblem reuses the dual
+variables in the previous outer iteration. When almost converged, the features (V for solving U , and U for solving V )
+do not change too much. By reusing the dual variables in
+the previous iteration we can start with a feasible solution
+close to the optimum.
+
+5. Experimental results
+5.1. Pairwise data
+We used the MovieLens 100k dataset, which contains
+100,000 ratings given by 943 users on 1682 movies. The
+ratings are given as integers from one to five, but we converted them into preference data by declaring that a user
+preferred one movie to another if they gave it a higher rating (if two movies received the same rating, we treated it
+as though the user did not provide a preference). Then we
+held out 20% of the data as a test set.
+We compared our algorithm to the following two:
+• Bayesian Personalized Ranking (BPR) (Rendle et al.,
+2009): This algorithm is based on a similar model to
+ours, but a different optimization procedure (essentially, a variant of stochastic gradient descent).
+• Matrix completion from pairwise differences : A standard matrix completion algorithm that observes – for
+various triples (i, j, k) ∈ Ω – the difference between
+user i’s ratings for item j and item k. Note that
+this algorithm has an advantage over (2) because it
+sees the magnitude of this difference instead of only
+its sign. Nevertheless, the matrix completion algorithm does not perform any better than (2). A similar
+phenomenon was also observed in (Davenport et al.,
+2014).
+We evaluate our performance by computing the proportion
+of pairwise comparisons in the test set T for which we correctly infer the user’s preference.
+X
+1
+I(Xij > Xik )
+(Prediction error) =
+|T |
+(i,j,k)∈T ,Yijk =1
+
+This is similar to the AUC statistic measured by Rendle
+et al. (Rendle et al., 2009), and if the data were fully observed then it would measure Kendall’s distance between
+each user’s true preferences and the learned ones. However,
+our main reason for choosing this measure of performance
+is that, as an average accuracy over all pairwise comparisions, it resembles the quantity that we study in our theoretical bounds.
+Unsurprisingly, we were more accurate at correctly inferring strong preferences; therefore, we have also shown the
+accuracy obtained by only measuring performance on pairs
+whose rankings differ by two or more. Both the methods
+we considered do measurably better at predicting these orderings.
+5.2. Large-scale experiments on rating data
+Now we demonstrate that our algorithm performs well as
+a collaborative ranking method on rating data. We used
+
+Prediction error
+
+Prediction error
+
+Preference Completion: Large-scale Collaborative Ranking from Pairwise Comparisons
+0.68
+0.66
+0.64
+0.62
+0.60
+0.58
+0.56
+0.54
+0.52
+0.50
+10
+0.75
+
+Users
+Items
+Ratings
+Convex
+BPR
+Matrix completion
+20
+
+30
+
+40
+50
+60
+70
+80
+Number of comparisons per user
+
+90
+
+0.50
+10
+
+The algorithms are compared in terms of two standard
+performance measures of ranking, which are NDCG and
+Precision@K. NDCG@K is the ranking measure for numerical ratings. NDCG@K for user i is defined as
+
+Convex (restricted)
+BPR (restricted)
+Matrix completion (restricted)
+20
+
+30
+
+40
+50
+60
+70
+80
+Number of comparisons per user
+
+90
+
+Netflix
+480,000
+17,000
+100,000,000
+
+100
+
+0.65
+0.55
+
+MovieLens10m
+71,567
+10,681
+10,000,054
+
+Table 1. Datasets to be used for simulation
+
+0.70
+0.60
+
+MovieLens1m
+6,040
+3,900
+1,000,209
+
+100
+
+Figure 1. Prediction accuracy on the MovieLens 100k dataset, for
+different numbers of observed comparisions per user. For the “restricted” plots, only the pairs with a rating difference of two or
+more were used for evaluation.
+
+NDCG@K(i) =
+
+DCG@K(i, πi )
+DCG@K(i, πi∗ )
+
+where
+DCG@K(i, πi ) =
+
+K
+X
+2Miπi (k) − 1
+,
+log2 (k + 1)
+
+k=1
+
+the datasets specified in Table 1. Given a training set of
+ratings for each user, our algorithm will only use non-tying
+pairwise comparisons from the set, while other competing
+algorithms use the ratings themselves. Hence, they have
+more information than ours. The competing algorithms are
+those with publicly available codes provided by the authors.
+• CofiRank (Weimer et al., 2007)1 This algorithm uses
+alternating minimization to directly optimize NDCG.
+• Local Collaborative Ranking (LCR) (Lee et al.,
+2014)2 : The main idea is to predict preferences
+from the weighted sum of multiple low-rank matrices
+model.
+• RobiRank (Yun et al., 2014)3 : This algorithm uses
+stochastic gradient descent to optimize the loss function motivated from robust binary classification.
+• Global Ranking : To see the effect of personalized
+ranking, we compare the results with a global ranking of the items. We fixed U to all ones and solved for
+V.
+1
+http://www.cofirank.org, The dimension and the
+regularization parameter are set as suggested in the paper. For
+the rest of the parameters, we left them as provided.
+2
+http://prea.gatech.edu, We run the code with each
+of the 48 sets of loss function and parameters given in the main
+code, and the best result is reported. We could not run this algorithm on the Netflix dataset due to time constraint.
+3
+https://bitbucket.org/d_ijk_stra/
+robirank, We used the part for collaborative ranking from
+binary relevence score. We left the parameter settings as provide
+with the implementation.
+
+and πu (k) is the index of the kth ranked item of Ti in our
+prediction. Mij is the true rating of item j by user i in the
+given dataset, and πu∗ is the permutation that maximizes
+DCG@K. This measure counts only the top K items in
+our predicted ranking and put more weights on the prediction of highly ranked items. We measured NDCG@10 in
+our experiments. Precision@K is the ranking measure for
+binary ratings. Precision@K for user i is defined as
+Precision@K(i) =
+
+1
+K
+
+X
+
+Mij
+
+j∈PK (i)
+
+where Mij is the binary rating on item j by user i given in
+the dataset. This counts the number of relevant items in the
+predicted top K recommendation. These two measures are
+averaged over all of the users.
+We first compare our algorithm with numerical rating based
+algorithms, CofiRank and LCR. We follow the standard
+setting that are used in the collaborative ranking literature (Weimer et al., 2007; Balakrishnan & Chopra, 2012;
+Volkovs & Zemel, 2012; Lee et al., 2014). For each user,
+we subsampled N ratings, used them for training, and
+took the rest of the ratings for test. The users with less
+than N + 10 ratings were dropped out. Table 2 compares
+AltSVM with numerical rating based algorithms. While
+N = 20 is too small so that a global ranking provides the
+best NDCG, our algorithm performs the best with larger
+N . We also ran our algorithm with subsampled pairwise
+comparions with the largest numerical gap (AltSVM-sub),
+which are as many as N for each user (the number of numerical ratings used in the other algorithms). Even with
+this, we could achieve better NDCG. We can also observe
+that the statistical performance is better with the hinge loss
+than with the logistic loss.
+
+Preference Completion: Large-scale Collaborative Ranking from Pairwise Comparisons
+MovieLens1m, 50 ratings/user, rank 10
+
+0.75
+
+0.70
+
+0.70
+
+0.65
+0.60
+
+Binarized MovieLens1m, rank 100
+
+0.25
+
+0.20
+
+Precision@10
+
+0.75
+
+0.65
+
+0.15
+
+AltSVM, 1 thread
+AltSVM, 4 threads
+AltSVM, 16 threads
+RobiRank, 1 thread
+RobiRank, 4 threads
+RobiRank, 16 threads
+
+0.10
+
+0.60
+
+AltSVM, 1 thread
+AltSVM, 4 threads
+AltSVM, 16 threads
+CofiRank
+
+0.55
+0.50
+
+MovieLens10m, 50 ratings/user, rank 10
+
+0.80
+
+NDCG@10
+
+NDCG@10
+
+0.80
+
+0
+
+10
+
+20
+30
+Time (seconds)
+
+40
+
+AltSVM, 1 thread
+AltSVM, 4 threads
+AltSVM, 16 threads
+CofiRank
+
+0.55
+
+50
+
+0.50
+
+0
+
+50
+
+100
+
+150
+200
+Time (seconds)
+
+(a)
+
+250
+
+0.05
+
+0.00
+
+300
+
+0
+
+200
+
+(b)
+
+400
+600
+Time (seconds)
+
+800
+
+1000
+
+(c)
+
+Figure 2. NDCG@10 and Precision@10 over time for different algorithms.
+Datasets
+MovieLens1m
+
+MovieLens10m
+
+Netflix
+
+N
+20
+50
+100
+20
+50
+100
+20
+50
+100
+
+AltSVM
+0.7308
+0.7712
+0.7902
+0.7059
+0.7508
+0.7692
+0.7132
+0.7642
+0.8007
+
+AltSVM-sub
+0.6998
+0.7392
+0.7508
+0.7053
+0.7212
+0.7248
+0.6822
+0.7111
+0.7393
+
+AltSVM-logistic
+0.7125
+0.7141
+0.7446
+0.7031
+0.7115
+0.7292
+-
+
+Global
+0.7500
+0.7501
+0.7482
+0.7264
+0.7176
+0.7101
+0.7605
+0.7640
+0.7656
+
+CofiRank
+0.7333
+0.7441
+0.7332
+0.7076
+0.6977
+0.6754
+0.6615
+0.6527
+0.6385
+
+LCR
+0.7007
+0.7081
+0.7151
+0.6977
+0.6940
+0.6899
+-
+
+Table 2. NDCG@10 on different datasets, for different numbers of observed ratings per user.
+
+Precision@
+1
+2
+5
+10
+100
+
+C = 1000
+0.2165
+0.1965
+0.1572
+0.1265
+0.0526
+
+AltSVM
+C = 2000
+0.2973
+0.2657
+0.2097
+0.1709
+0.0678
+
+RobiRank
+C = 5000
+0.3635
+0.3297
+0.2697
+0.2223
+0.0819
+
+0.3009
+0.2695
+0.2300
+0.1922
+0.0781
+
+Table 3. Precision@K on the binarized MovieLens1m dataset.
+
+# cores
+Time(seconds)
+Speedup
+
+1
+963.1
+1x
+
+2
+691.8
+1.4x
+
+4
+365.1
+2.6x
+
+8
+188.3
+5.1x
+
+16
+111.0
+8.7x
+
+Table 4. Scalability of AltSVM on the binarized MovieLens1m
+dataset.
+
+We have also experimented with collaborative ranking on
+binary ratings. We compare our algorithm against RobiRank (Yun et al., 2014), which is a recently proposed algorithm for collaborative ranking with binary ratings. We ran
+an experiment on a binarized version of the Movielens1m
+dataset. In this case, the movies rated by a user is assumed
+to be relevant to the user, and the other items are not. Since
+it is inefficient to take all possible comparisons which are
+in average a half million per user, we subsampled C comparisons for each user. Both algorithms are set to estimate
+rank-100 matrices. Table 3 shows that our algorithm provides better performance than RobiRank.
+
+5.3. Computational speed and Scalability
+We now show the computational speed and scalability of
+our practical algorithm, AltSVM. The experiments were
+run on a single 16-core machine in the Stampede Cluster
+at University of Texas.
+Figures 2a and 2b show NDCG@10 over time of our algorithms with 1, 4, and 16 threads, compared to CofiRank.
+Figure 2c shows Precision@10 over time of our algorithm
+with C = 5000. We note that our algorithm converges
+faster, while the sample size |Ω| for our algorithm is larger
+than the number of training ratings that are used in the
+competing algorithms. Table 4 shows the scalability of
+AltSVM. We measured the time to achieve 10−5 tolerance
+on the binarized MovieLens1m dataset. As can be seen in
+the table, we could achieve significant speedup.
+
+6. Conclusion
+We considered the collaborative ranking problem where
+one fits a low-rank matrix to the pairwise comparisons by
+multiple users. We showed that the convex relaxation of
+the empirical risk minimization provides good generalization guarantees. For the large-scale practical settings, we
+also proposed a non-convex algorithm, which alternately
+solves two SVM problems. Our algorithm was shown to
+outperform the existing ones and parallelizes well.
+
+Preference Completion: Large-scale Collaborative Ranking from Pairwise Comparisons
+
+References
+Ailon, Nir. Active learning ranking from pairwise preferences with almost optimal query complexity. In
+Advances in Neural Information Processing Systems
+(NIPS), pp. 810–818, 2011.
+Balakrishnan, Suhrid and Chopra, Sumit. Collaborative
+ranking. In ACM International Conference on Web
+Search and Data Mining (WSDM), 2012.
+Bradley, Ralph Allan and Terry, Milton E. Rank analysis of
+incomplete block designs: I. the method of paired comparisons. Biometrika, pp. 324–345, 1952.
+Davenport, Mark A, Plan, Yaniv, Berg, Ewout van den, and
+Wootters, Mary. 1-bit matrix completion. Information
+and Inference, 3(3):189–223, 2014.
+Hajek, Bruce, Oh, Sewoong, and Xu, Jiaming. Minimaxoptimal inference from partial rankings. In Advances in
+Neural Information Processing Systems (NIPS), 2014.
+Herbrich, Ralf, Graepel, Thore, and Obermayer, Klaus.
+Large Margin Rank Boundaries for Ordinal Regression,
+chapter 7, pp. 115–132. MIT Press, January 2000.
+Hsieh, Cho-Jui, Chang, Kai-Wei, Lin, Chih-Jen, Keerthi,
+S. Sathiya, and Sundararajan, S. A dual coordinate descent method for large-scale linear SVM. In International Conference on Machine Learning (ICML), 2008.
+Hsieh, Cho-Jui, Yu, Hsiang-Fu, and Dhillon, Inderjit S.
+PASSCoDe: Parallel asynchronous stochastic dual coordinate descent. In International Conference on Machine Learning (ICML), 2015.
+Hu, Yifan, Koren, Yehuda, and Volinsky, Chris. Collaborative filtering for implicit feedback datasets. In IEEE
+International Conference on Data Mining (ICDM), pp.
+263–272. IEEE, 2008.
+Jamieson, K. G. and Nowak, R. Active ranking using pairwise comparisons. In Advances in Neural Information
+Processing Systems (NIPS), 2011a.
+Jamieson, Kevin G. and Nowak, Robert D. Active ranking using pairwise comparisons. In Advances in Neural
+Information Processing Systems (NIPS), 2011b.
+
+Liu, Nathan N, Zhao, Min, and Yang, Qiang. Probabilistic
+latent preference analysis for collaborative filtering. In
+Proceedings of the 18th ACM conference on Information
+and knowledge management, pp. 759–766. ACM, 2009.
+Liu, Tie-Yan. Learning to Rank for Information Retrieval.
+Now Publishers Inc., 2009.
+Lu, Yu and Negahban, Sahand. Individualized rank aggregation using nuclear norm regularization. ArXiv e-prints:
+1410.0860, Oct 2014.
+Luce, Duncan R. Individual Choice Behavior. Wiley, 1959.
+Negahban, Sahand, Oh, Sewoong, and Shah, Devavrat.
+Iterative ranking from pair-wise comparisons.
+In
+Advances in Neural Information Processing Systems
+(NIPS), 2012.
+Niu, Feng, Recht, Benjamin, Ré, Christopher, and Wright,
+Stephen. Hogwild: A lock-free approach to parallelizing stochastic gradient descent. In Advances in Neural
+Information Processing Systems (NIPS), 2011.
+Rendle, Steffen, Freudenthaler, Christoph, Gantner, Zeno,
+and Schmidt-Thieme, Lars. Bpr: Bayesian personalized
+ranking from implicit feedback. In Proceedings of the
+Twenty-Fifth Conference on Uncertainty in Artificial Intelligence, pp. 452–461. AUAI Press, 2009.
+Shalev-Shwartz, Shai and Zhang, Tong. Stochastic dual coordinate ascent methods for regularized loss minimization. Journal of Machine Learning Research (JMLR),
+pp. 567–599, 2013.
+Shi, Yue, Karatzoglou, Alexandros, Baltrunas, Linas, Larson, Martha, Oliver, Nuria, and Hanjalic, Alan. Climf:
+collaborative less-is-more filtering. In Proceedings of the
+Twenty-Third international joint conference on Artificial
+Intelligence, pp. 3077–3081. AAAI Press, 2013.
+Srebro, Nathan, Rennie, Jason, and Jaakkola, Tommi.
+Maximum margin matrix factorization. In Advances in
+Neural Information Processing Systems (NIPS), 2004.
+Volkovs, Maksims N. and Zemel, Richard S. Collaborative ranking with 17 parameters. In Advances in Neural
+Information Processing Systems (NIPS), 2012.
+
+Joachims, Thorsten. Optimizing search engines using
+clickthrough data. In SIGKDD, 2002.
+
+Wauthier, Fabian L., Jordan, Michael I., and Jojic, Nebojsa. Efficient ranking from pairwise comparisons. In
+International Conference on Machine Learning (ICML),
+2013.
+
+Lee, Joonseok, Bengio, Samy, Kim, Seungyeon, Lebanon,
+Guy, and Singer, Yoram. Local collaborative ranking.
+In International World Wide Web Conference (WWW),
+2014.
+
+Weimer, Markus, Karatzoglou, Alexandros, Le, Quoc V.,
+and Smola, Alex. Cofirank: maximum margin matrix
+factorization for collaborative ranking. In Advances in
+Neural Information Processing Systems (NIPS), 2007.
+
+Preference Completion: Large-scale Collaborative Ranking from Pairwise Comparisons
+
+Weston, Jason, Want, Chong, Weiss, Ron, and Berenzeig,
+Adam. Latent collaborative retrieval. In International
+Conference on Machine Learning (ICML), 2012.
+Xu, Jiaming, Wu, Rui, Zhu, Kai, Hajek, Bruce, Srikant,
+R, and Ying, Lei. Jointly clustering rows and columns
+of binary matrices: Algorithms and trade-offs. In ACM
+Sigmetrics, 2013.
+Yi, Jinfeng, Jin, Rong, Jain, Shaili, and Jain, Anil. Inferring users preferences from crowdsourced pairwise comparisons: A matrix completion approach. In First AAAI
+Conference on Human Computation and Crowdsourcing, 2013.
+Yun, Hyokun, Raman, Parameswaran, and Vishwanathan,
+S. V. N. Ranking via robust binary classification and
+parallel parameter estimation in large-scale data. In
+Advances in Neural Information Processing Systems
+(NIPS), 2014.
+
+

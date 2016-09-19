@@ -1,0 +1,2215 @@
+Learning Deep Structured Models
+Liang-Chieh Chen*
+University of California Los Angeles, USA
+Alexander G. Schwing*
+University of Toronto, 10 King’s College Rd., Toronto, Canada
+Alan L. Yuille
+University of California Los Angeles, USA
+Raquel Urtasun
+University of Toronto, 10 King’s College Rd., Toronto, Canada
+
+LCCHEN @ CS . UCLA . EDU
+ASCHWING @ CS . TORONTO . EDU
+YUILLE @ STAT. UCLA . EDU
+URTASUN @ CS . TORONTO . EDU
+*
+
+Abstract
+Many problems in real-world applications involve predicting several random variables that
+are statistically related. Markov random fields
+(MRFs) are a great mathematical tool to encode
+such dependencies. The goal of this paper is to
+combine MRFs with deep learning to estimate
+complex representations while taking into account the dependencies between the output random variables. Towards this goal, we propose a
+training algorithm that is able to learn structured
+models jointly with deep features that form the
+MRF potentials. Our approach is efficient as it
+blends learning and inference and makes use of
+GPU acceleration. We demonstrate the effectiveness of our algorithm in the tasks of predicting
+words from noisy images, as well as tagging of
+Flickr photographs. We show that joint learning
+of the deep features and the MRF parameters results in significant performance gains.
+
+1. Introduction
+Deep learning algorithms attempt to model high-level abstractions of the data using architectures composed of multiple non-linear transformations. A multiplicity of variants have been proposed (Hinton et al., 1984; LeCun et al.,
+1998; Hinton & Salakhutdinov, 2006; Bengio et al., 2007;
+Salakhutdinov & Hinton, 2012; Zeiler & Fergus, 2014) and
+shown to be extremely successful in a wide variety of applications including computer vision, speech recognition
+as well as natural language processing (Lee et al., 2009;
+Socher et al., 2012; Jia, 2013; Krizhevsky et al., 2013;
+Eigen et al., 2014). Recently, state-of-the-art results have
+Proceedings of the 32 nd International Conference on Machine
+Learning, Lille, France, 2015. JMLR: W&CP volume 37. Copyright 2015 by the author(s).
+
+equal contribution
+
+been achieved in many computer vision tasks, outperforming competitive methods by a large margin (Krizhevsky
+et al., 2013; Girshick et al., 2014).
+Deep neural networks can, however, be even more powerful when combined with graphical models in order to capture the statistical dependencies between the variables of
+interest. For example, Deng et al. (2014) exploit mutual
+exclusion, overlapping and subsumption properties of class
+labels in order to better predict in large scale classification
+tasks. In pose estimation, more accurate predictions can be
+obtained when encoding the spatial relationships between
+joint locations (Tompson et al., 2014).
+It is, however, an open problem how to develop scalable
+deep learning algorithms that can learn higher-order knowledge taking into account the output variables’ dependencies. Existing approaches often rely on a two-step process
+(Nowozin et al., 2011; Xu et al., 2014) where a non-linear
+classifier that employs deep features is trained first, and its
+output is used to generate potentials for the structured predictor. This piece-wise training is, however, suboptimal as
+the deep features are learned while ignoring the dependencies between the variables of interest. For example, in object recognition, independently learned segmentation and
+detection features (Hariharan et al., 2014) might be focusing on predicting the same examples correctly, but when
+learned jointly, they can improve their predictive power
+by exploiting complementary information to fix additional
+mistakes.
+In this paper we extend deep learning algorithms to learn
+complex representations taking into account the dependencies between the output random variables. Towards this
+goal, we propose a learning algorithm that is able to learn
+structured models with arbitrary graphs jointly with deep
+features that form potentials in a Markov random field
+(MRF). Our approach is efficient as it blends learning and
+inference, resulting in a single loop algorithm which makes
+use of GPU acceleration. We demonstrate the effectiveness
+
+Learning Deep Structured Models
+
+of our method in the tasks of predicting words from noisy
+images, and tagging of Flickr photographs. We show that
+joint learning of deep features and MRF parameters results
+in big performance gains.
+
+2. Learning Deep Structured Models
+In this section we investigate how to learn deep features
+taking into account the dependencies between the output
+variables. Let y ∈ Y be the set of random variables
+y = (y1 , . . . , yN ) that we are interested in predicting. We
+assume the space of valid configurations to be a product
+QN
+space, i.e., Y = i=1 Yi , and the domain of each individual variable yi to be discrete, i.e., Yi = {1, . . . , |Yi |}.
+Given input data x ∈ X and parameters w ∈ RA of the
+function F (x, y; w) : X ×Y ×RA → R, inference amounts
+to finding the highest scoring configuration
+y ∗ = arg max F (x, y; w).
+y
+
+Note that if F is a deep network, i.e., a composite function,
+and there are no connections between the output variables
+to be predicted, inference corresponds to a forward pass
+to evaluate the function, followed by independently finding
+the largest response for each variable. This can be interpreted as inference in a graphical model with only unary
+potentials. However, for arbitrary graphical models it is
+NP-hard to find the maximizing configuration y ∗ since the
+inference program generally requires a search over a space
+QN
+of size i=1 |Yi |. Note also that log-linear models are a
+special case of this program, with F (x, y; w) = w> φ(x, y)
+and φ(x, y) denoting a feature vector, computed using the
+input-output pair (x, y).
+In this work, we consider the general setting where
+F (x, y; w) is an arbitrary scalar-valued function of w and
+(x, y). In our experiments F is a function composition of
+non-linear base mappings such as convolutions, rectifications and pooling. We let the probability of an arbitrary
+configuration ŷ be given by the annealed soft-max
+p(x,y) (ŷ|w, ) =
+
+1
+exp(F (x, ŷ; w))1/ .
+Z (x, w)
+
+Hereby Z (x, w) refers to the partition function, normalizing the distribution p(x,y) to lie within the probability simP
+plex ∆ via Z(x, w) = ŷ∈Y exp(F (x, ŷ; w))1/ . The annealing parameter  ≥ 0 is used to adjust the uniformity
+of the distribution. We consider general graphical models
+where the computation of Z (x, w) is #P-hard.
+2.1. Learning via gradient descent
+During learning, given a training set D of input-output
+pairs (x, y) ∈ D, we are interested in finding the parameters w of the model. We do so by maximizing the
+
+Algorithm: Deep Structured Learning
+Repeat until stopping criteria
+1. Forward pass to compute F (x, ŷ; w)
+2. Obtain p(x,y) (ŷ|w, ) via a soft-max
+3. Backward pass via chain rule to obtain gradient
+4. Update parameters w
+Figure 1. Gradient descent for learning deep structured models.
+
+data likelihood,
+i.e., minimizing the negative log-likelihood
+Q
+− ln (x,y)∈D p(x,y) (y|w, ) which yields
+min
+
+X
+
+w
+
+( ln Z (x, w) − F (x, y; w)) .
+
+(1)
+
+(x,y)∈D
+
+Note that this is equivalent to maximizing the cross-entropy
+between a target distribution p(x,y),tg (ŷ) = δ(ŷ = y) placing all its mass on the groundtruth label, and the model distribution p(x,y) (ŷ|w,
+P ). Hence Eq. (1) is equivalently obtained by maxw (x,y),ŷ∈Y p(x,y),tg (ŷ) ln p(x,y) (ŷ|w, ).
+It is easily possible to incorporate more general
+target distributions into Eq. (1).
+Note also that
+regularization can be included and  → 0 recoversPthe general structured hinge loss objective
+minw (x,y)∈D (maxŷ F (x, ŷ; w) − F (x, y; w)), since a
+margin term is easily incorporated.
+Minimizing P
+Eq. (1) w.r.t. w requires computation of the
+∂
+gradient ∂w
+(x,y) − ln p(x,y) (y|w, ), which is given by
+a transformed difference between the distributions of the
+model p(x,y) (ŷ|w, ) and the target p(x,y),tg (ŷ):
+X X ∂
+
+F (x, ŷ; w) p(x,y) (ŷ|w, ) − p(x,y),tg (ŷ) .
+∂w
+
+(x,y)∈D ŷ∈Y
+
+(2)
+A gradient descent algorithm for minimizing Eq. (1) will
+iterate between the following steps: (i) For a given w evaluate the function F , (ii) compute the model distribution
+p(x,y) (ŷ|w, ), (iii) propagate the difference between the
+model and target distribution using a backward pass (resembling the chain rule for composite functions) and (iv)
+update the parameters w. This is summarized in Fig. 1.
+2.2. Approximate Learning
+Note that for general graphical models the exact computation of p(x,y) (ŷ|w, ) is not possible since the state-space
+QN
+size |Y| = i=1 |Yi | is exponential in the number of variables. As a consequence it is intractable to compute the
+exact gradient of the cost-function given in Eq. (2) and one
+has to resort to approximate solutions.
+Inspired by approximations used for log-linear models, we
+make use of the following identity (Wainwright & Jordan,
+
+Learning Deep Structured Models
+
+
+X
+
+min
+
+
+
+w
+
+(x,y)∈D
+
+max
+
+b(x,y) ∈C(x,y)
+
+
+X
+
+
+b(x,y),r (ŷr )fr (x, ŷr ; w) +
+
+X
+r
+
+r,ŷr
+
+
+
+
+cr H(b(x,y),r ) − F (x, y; w)
+
+
+Figure 2. The approximated non-linear structured prediction task.
+
+2008; Koller & Friedman, 2009):
+ ln Z (x, w) = max E[F (x, ŷ; w)] + H(p(x,y) ), (3)
+p(x,y) (ŷ)∈∆
+
+ŷp \ŷr
+
+where E denotes an expectation over the distribution
+p(x,y) (ŷ) and H refers to its entropy.
+For most applications, F (x, y; w) decomposes into a sum
+of functions, each depending on a local subset of variables
+yr , i.e.,
+X
+F (x, y; w) =
+fr (x, yr ; w).
+r∈R
+
+Hereby r is a restriction of the variable tuple y =
+(y1 , . . . , yN ) to the subset r ⊆ {1, . . . , N }, i.e., yr =
+(yi )i∈r . All subsets r required to compute the model function F are summarized in the set R. Importantly we note
+that each local composite function fr (x, yr ; w) can depend
+non-linearly on the parameters w.
+Plugging this decomposition into Eq. (3), we equivalently
+get the log-partition function  ln Z (x, w) via
+X
+
+max
+p(x,y) (ŷ)∈∆
+
+p(x,y),r (ŷr )fr (x, ŷr ; w) + H(p(x,y) ),
+
+r,ŷr
+
+where we use marginals p(x,y),r (ŷr ) =
+
+P
+
+y\yr
+
+p(x,y) (y).
+
+Despite the assumed locality of the scoring function, the
+learning task remains computationally challenging since
+the entropy H(p(x,y) ) can only be computed exactly for a
+very small set of models, e.g., models for which the dependencies of the joint distribution p(x,y) (y) are equivalently
+characterized by a low tree-width graph. In addition, the
+marginalization constraints are exponential in size.
+To deal with both issues a common solution in log-linear
+models is to approximate the true marginals p(x,y),r with
+local beliefs b(x,y),r that are not required to fulfill marginalization constraints globally, but only locally (Wainwright
+& Jordan, 2008). That is marginals b(x,y),r are not required to arise from a common joint distribution p(x,y) .
+In addition, we approximate the entropy via the fractional
+entropy
+(Wiegerinck & Heskes, 2003), i.e., H(p(x,y) ) ≈
+P
+c
+H(b
+(x,y),r ). Counting numbers cr are employed to
+r r
+weight the marginal entropies. Putting all this together, we
+obtain the following approximation for  ln Z (x, w):
+max
+
+b(x,y) ∈C(x,y)
+
+X
+X
+b(x,y),r (ŷr )fr (x, ŷr ; w)+ cr H(b(x,y),r ).
+r,ŷr
+
+where the beliefs are constrained to the local polytope
+(
+∀r
+b(x,y),r ∈ ∆
+P
+C(x,y) = ∀r, ŷr , p ∈ P (r)
+b(x,y),p (ŷp ) = b(x,y),r (ŷr ),
+
+r
+
+(4)
+
+with P (r) the set of parents of region r, i.e., P (r) ⊆ {p ∈
+R : r ⊂ p}, which subsumes those regions for which we
+want the marginalization constraint to hold. Conversely, we
+define the set of children as C(r) = {c ∈ R : r ∈ P (c)}.
+We can thus rewrite the learning problem by plugging the
+approximations derived in Eq. (4) into Eq. (1). This gives
+rise to the new approximated learning program depicted in
+Fig. 2.
+To iteratively update the parameters for the non-smooth approximated cost function given in Fig. 2 we require a subgradient w.r.t. w, which in turn requires to solve the maximization w.r.t. the beliefs b exactly. This is a non-trivial
+task in itself as inference in general graphical models is NPhard. Iterative message passing algorithms (Pearl, 1988;
+Yedidia et al., 2005; Wainwright et al., 2005; Weiss et al.,
+2007; Sontag et al., 2008; Meltzer et al., 2009) are typically employed for approximate inference. Importantly,
+note that combining the procedure outlined in Fig. 1 with
+iterative message passing to approximate p(x,y) (ŷ|w, ) results in a double-loop algorithm which would be slow for
+many graphical models of interest.
+2.3. Efficient Approximate Learning by Blending
+Learning and Inference
+In this section we propose a more efficient algorithm that is
+based on the principle of blending learning (i.e., parameter
+updates) and inference. Thus we are interested in only performing a single message passing iteration before updating
+the parameters w. Note that simply reducing the number of
+iterations is generally not an option as the obtained beliefs
+b(x,y),r are by no means accurate. However, assuming all
+counting numbers cr to be positive, we can derive an algorithm that is able to interleave minimization w.r.t. w and
+maximization of the beliefs b. Such a procedure is more
+efficient as we are able to update the parameters w much
+more frequently.
+To interleave both programs we first convert maximization
+of the beliefs into a minimization by employing the dual
+program as detailed for general scoring functions in the following claim, which was discussed for log-linear models
+in seminal work by Taskar et al. (2005). This conversion
+is possible since the maximization problem is concave in
+b(x,y) if ∀r, cr ≥ 0.
+
+Learning Deep Structured Models
+
+Algorithm: Efficient Deep Structured Learning
+Repeat until stopping criteria
+1. Forward pass to compute fr (x, ŷr ; w) ∀(x, y), r, yr
+ˆ
+
+r ;w,λ)
+2. Compute approximate beliefs b(x,y),r ∝ exp fr (x,ŷ
+by iterating for a fixed number of times over r:
+cr
+
+∀(x, y), p ∈ P (r), ŷr
+µ(x,y),p→r (ŷr ) = cp ln
+
+X
+
+exp
+
+fp (x, ŷp ; w) −
+
+P
+
+p0 ∈P (p)
+
+λ(x,y),p→p0 (ŷp ) +
+
+P
+
+r 0 ∈C(p)\r
+
+cp
+
+ŷp \ŷr
+
+
+λ(x,y),r→p (ŷr ) ∝
+
+cr +
+
+cp
+P
+
+cp
+
+λ(x,y),r0 →p (ŷr0 )
+
+
+
+fr (x, ŷr ; w) +
+
+X
+
+λ(x,y),c→r (ŷc ) +
+
+c∈C(r)
+
+p∈P (r)
+
+3. Backward pass via chain-rule to obtain gradient g =
+
+X
+
+µ(x,y),p→r (ŷr )− µ(x,y),p→r (ŷr )
+
+p∈P (r)
+
+P
+
+(x,y),r,ŷr
+
+b(x,y),r (ŷr )∇w fr (x, ŷr ; w) − ∇w F (w)
+
+4. Update parameters w using stepsize η via w ← w − ηg
+Figure 3. Efficient learning algorithm that blends learning and inference.
+
+Claim
+1 Assume cr ≥ 0 ∀r, and let F (w) =
+P
+(x,y)∈D F (x, y; w) denote the sum of empirical function observations.
+Let λ(x,y),r→p (ŷr ) be the Lagrange
+multipliers
+for
+each marginalization constraint
+P
+b
+(ŷ
+)
+=
+b(x,y),r (ŷr ) within the polytope
+p
+(x,y),p
+ŷp \ŷr
+C(x,y) . Then the approximated general structured prediction task shown in Fig. 2 is equivalent to
+min
+w,λ
+
+X
+(x,y),r
+
+cr ln
+
+X
+ŷr
+
+exp
+
+fˆr (x, ŷr ; w, λ)
+− F (w),
+cr
+
+(5)
+
+where we employed the re-parameterization
+score
+P
+fˆr (x, ŷr ; w, λ) = fr (x, ŷr ; w) +
+λ(x,y),c→r (ŷc ) −
+c∈C(r)
+P
+λ(x,y),r→p (ŷr ).
+p∈P (r)
+
+Proof: To obtain the dual of the maximization w.r.t. b(x,y)
+we utilize its Lagrangian
+X
+X
+L(x,y)= b(x,y),r (ŷr )fˆr (x, ŷr ; w, λ) + cr H(b(x,y),r ).
+r,ŷr
+
+r
+
+Maximization of the Lagrangian w.r.t. the primal variables
+b is possible by employing the relationship stated in Eq. (3)
+locally ∀r. We then obtain the dual function being the first
+term in Eq. (5). For strict convexity, i.e., cr > 0, we
+reconstruct the beliefs to be proportional to the exponentiated, loss-augmented re-parameterization score, i.e., forˆ
+r ;w,λ)
+mally b(x,y),r ∝ exp fr (x,ŷ
+. For cr = 0 the beliefs
+cr
+correspond to a uniform distribution over the set of maximizers of the loss-augmented re-parameterization score
+fˆr (x, ŷr ; w, λ).
+
+It is important to note that by applying duality we managed
+to convert the min-max task in Fig. 2 into a single minimization as shown in Eq. (5). Performing block coordinate
+
+descent updates to minimize Eq. (5), we are therefore able
+to interleave both, updating the weights (i.e., learning) and
+the messages (i.e., inference). This results in a more efficient algorithm, as inference does not have to be run until
+convergence, even a single update of the messages suffices.
+We note that this is possible only if cr ≥ 0 ∀r. Strictly
+speaking, we require concavity only within the set of feasible beliefs C(x,y) . However, for simplicity of the derivations and descriptions we neglected such an extension.
+Fig. 3 summarizes our efficient deep structured prediction algorithm which iterates between the following steps.
+Given parameters w we perform a standard forward pass
+to compute fr (x, ŷr ; w) for all regions r. Depending on
+the model, computation of fr can sometimes be carried
+out more efficiently via a single convolutional neural network which combines all the data. We then iterate through
+all regions r and use block-coordinate descent to find
+the globally optimal value of Eq. (5) w.r.t. λ(x,y),r→p (ŷr )
+∀(x, y), ŷr , p ∈ P (r). This can be done in closed form
+and therefore is computed very efficiently (Globerson &
+Jaakkola, 2007; Sontag et al., 2008; Hazan & Shashua,
+2010; Schwing, 2013). We then compute the gradient using a standard backward pass before we jointly update all
+the parameters w by performing a step of size η along the
+negative gradient.
+2.4. Implementation Details
+We implemented the general algorithm presented in Fig. 3
+in C++ as a library for Linux, Windows and Mac platforms. It supports usage of the GPU for the forward and
+backward pass using both, standard linear algebra packages and manually tuned GPU-kernels. In addition to standard gradient descent, we allow specification of both mini-
+
+Learning Deep Structured Models
+
+banal
+
+julep
+
+resty
+
+drein
+
+yojan
+
+mothy
+
+Figure 4. Samples from the Word50 dataset. Note the high degree of rotation, scaling and translation.
+Graph
+
+MLP
+
+Method
+Unary only
+JointTrain
+1st order Markov One Layer
+PwTrain
+PreTrainJoint
+JointTrain
+2nd order Markov One Layer
+PwTrain
+PreTrainJoint
+H1 = 512
+Unary only
+JointTrain
+1st order Markov Two Layer
+PwTrain
+PreTrainJoint
+JointTrain
+2nd order Markov Two Layer
+PwTrain
+PreTrainJoint
+
+H1 = 128
+8.60 / 61.32
+16.80 / 65.28
+12.70 / 64.35
+20.65 / 67.42
+25.50 / 67.13
+10.05 / 58.90
+28.15 / 69.07
+H2 = 32
+15.25 / 69.04
+35.95 / 76.92
+34.85 / 79.11
+42.25 / 81.10
+54.65 / 83.98
+39.95 / 81.14
+62.60 / 88.03
+
+H1 = 256
+10.80 / 64.41
+25.20 / 70.75
+18.00 / 68.27
+25.70 / 71.65
+34.60 / 73.19
+14.10 / 63.44
+36.85 / 75.21
+H2 = 64
+18.15 / 70.66
+43.80 / 81.64
+38.95 / 80.93
+44.85 / 82.96
+61.80 / 87.30
+48.25 / 84.45
+65.80 / 89.32
+
+H1 = 512
+12.50 / 65.69
+31.80 / 74.90
+22.80 / 71.29
+31.70 / 75.56
+45.55 / 79.60
+18.10 / 67.31
+45.75 / 80.09
+H2 = 128
+19.00 / 71.43
+44.75 / 82.22
+42.75 / 82.38
+46.85 / 83.50
+66.15 / 89.09
+52.65 / 86.24
+68.75 / 90.47
+
+H1 = 768
+12.95 / 66.66
+33.05 / 76.42
+23.25 / 72.62
+34.50 / 77.14
+51.55 / 82.37
+20.40 / 70.14
+50.10 / 82.30
+H2 = 256
+19.20 / 72.06
+46.00 / 82.96
+45.10 / 83.67
+47.95 / 84.21
+64.85 / 88.93
+57.10 / 87.61
+68.60 / 90.42
+
+H1 = 1024
+13.40 / 67.02
+34.30 / 77.02
+26.30 / 73.96
+35.85 / 78.05
+54.05 / 83.57
+22.20 / 71.25
+52.25 / 83.39
+H2 = 512
+20.40 / 72.51
+47.70 / 83.64
+45.75 / 83.88
+47.05 / 84.08
+68.00 / 89.96
+62.90 / 89.49
+69.35 / 90.75
+
+Table 1. Word / Character accuracy. Performance improves as (1) joint-training is employed, (2) the model is more structured, and (3)
+deeper unary classifiers are utilized. The number of hidden units for the first and second layer are denoted as H1 and H2 respectively.
+
+batches, moments and different regularizers like 2-norm
+and ∞-norm. Between iterations the step-size can be reduced based on either the negative log-likelihood or validation set performance. Our function F is specified using
+a directed a-cyclic graph. Hence we support an arbitrarily
+nested function structure composed of data, parameters and
+function prototypes (convolution, affine function aka fully
+connected, dropout, local response normalization, pooling,
+rectified linear, sigmoid and softmax units). The aforementioned library is accompanied by a program performing
+learning, inference and gradient checks. To accommodate
+for large datasets it reads data from HDF5 storage while
+a second thread simultaneously performs the computation.
+This is useful since we can prepare the data for the next
+pass while conducting the computation. Google protocol
+buffers are employed to effectively specify the function F
+without the need to modify any source code. The library is
+released on http://alexander-schwing.de.
+
+3. Experimental Evaluation
+We demonstrate the performance of our model on two
+tasks: word recognition and image classification. We investigate four strategies to learn the model parameters.
+‘Unary only’ denotes training only unary classifiers while
+ignoring the structure of the graphical model, i.e., pairwise weights are equal to 0. ‘JointTrain’ initializes all
+weights at random and trains them jointly. ‘PwTrain’ uses
+
+piecewise training by first training the unary potentials and
+then keeping them fixed when learning the pairwise potentials. ‘PreTrainJoint’ pre-trains the unaries but jointly optimizes pairwise weights as well as unary weights in a second step.
+3.1. Word Recognition: Word50
+Our first task consists of word recognition from noisy images. Towards this goal, we created a challenging dataset
+by randomly selecting 50 words, each consisting of five
+characters. We then generated writing variations of each
+word as follows: we took the lower case characters from
+the Chars74K dataset (de Campos et al., 2009), and inserted them in random background image patches (similar
+to Larochelle et al. (2007)) by alpha matting, i.e., characters
+have transparency. To increase the difficulty, we perturbed
+each character image of size 28×28 by scaling, rotation and
+translation. As shown in Fig. 4 the task is very challenging,
+some characters are fairly difficult to recognize even for
+humans. We denote the resulting dataset ‘Word50.’ The
+training, validation and test sets have 10, 000, 2, 000 and
+2, 000 variations of words respectively.
+We experimented with graphical models composed of
+unary and pairwise regions defined over five random variables, one per character. We encode unary potentials
+fr (x, yi ; wu ) using multi-layer perceptrons (MLPs) with
+rectified linear units (ReLU). Unless otherwise stated, we
+
+Learning Deep Structured Models
+a
+b
+c
+d
+e
+f
+g
+h
+i
+j
+k
+l
+m
+n
+o
+p
+q
+r
+s
+t
+u
+v
+w
+x
+y
+z
+
+a b c d e f g h i j k l mn o p q r s t u v w x y z
+
+Unary weights
+
+distance-1 edges
+
+1000
+Neg. Log−Likelihood
+
+a
+b
+c
+d
+e
+f
+g
+h
+i
+j
+k
+l
+m
+n
+o
+p
+q
+r
+s
+t
+u
+v
+w
+x
+y
+z
+
+a b c d e f g h i j k l mn o p q r s t u v w x y z
+
+distance-2 edges
+
+900
+800
+
+JointTrain
+PwTrain
+PreTrainJoint
+
+700
+600
+500
+400
+300
+0 0.5 1 1.5 2 2.5 3 3.5 4 4.5 5
+4
+Iteration
+x 10
+
+Neg. Log-Likelihood
+
+Figure 5. (left) Subset of the learned unary weights. Pairwise weights (middle two panels), the darker, the larger the weight. (right)
+Negative log-likelihood for different learning approaches.
+38
+
+50
+Linear
+PairH16
+PairH32
+PairH64
+
+36
+34
+32
+
+46
+
+30
+
+ing degree of structure. We report two metrics, the average
+character and word accuracy, which correspond to Hamming loss and zero-one loss respectively. Table 1 depicts
+the results for the different models, learning strategies and
+number of hidden units. We observe the following trends.
+
+Linear
+PairH16
+PairH32
+PairH64
+
+48
+
+44
+
+28
+26
+
+42
+
+24
+
+40
+
+22
+38
+
+20
+18
+
+36
+
+16
+34
+H1=128
+
+H1=256
+
+H1=512
+
+H1=768
+
+H1=1024
+
+One-Layer MLP Chain
+
+H2=32
+
+H2=64
+
+H2=128
+
+H2=256
+
+H2=512
+
+Two-Layer MLP Chain
+
+Figure 6. Learning non-linear pairwise functions: Word recognition as a function of the number of hidden units for the unary potential. Colors represent different number of hidden units for the
+pairwise potentials. The y-axis shows the word accuracy of using
+Linear function, or 16 (PairH16), 32 (PairH32), and 64 (PairH64)
+hidden units for the pairwise function.
+
+define all pairwise interactions via
+X
+fr (x, yi , yj ; wp ) =
+Wmn · δ(yi = m, yj = n),
+
+(6)
+
+mn
+
+where r = {i, j}, wp = {W }, Wmn is the element of
+matrix W , and δ refers to the indicator function.
+For all experiments, we share all unary weights across the
+nodes of the graphical model as well as all pairwise weights
+for all edges. Note that due to the use of ReLU units, the
+negative log-likelihood is non-smooth, non-linear and nonconvex w.r.t. w. Because of the non-smoothness of F , we
+utilize momentum based sub-gradient descent methods to
+estimate the weights. In particular, we use a mini-batch
+size of 100, a step size of 0.01 and a momentum of 0.95.
+If the unary potential is pre-trained, the initial step size is
+reduced to 0.001. All the unary classifiers are trained with
+100, 000 iterations over mini-batches. For all experiments,
+the validation set is only used to decrease the step size, i.e.,
+if the accuracy on the validation set decreases, we reduce
+the step size by 0.5. We use  = 1, set cr = 1 for all regions
+r, and perform 10 message passing iterations to compute
+the marginal beliefs b(x,y),r at step 2 in Fig. 3 when dealing
+with loopy models.
+We experiment with two graphical models, Markov models of first (i.e., there are links only between yi and yi+1 )
+and second order (i.e., there are links between yi and yi+1 ,
+yi+2 ) as well as two types of unary potentials with vary-
+
+Joint training helps: Joint training with pre-trained
+unary classifiers (PreTrainJoint) outperforms all the other
+approaches in almost all cases. Piecewise training (PwTrain), unable to adapt the non-linearities while learning
+pairwise weights, is worst than joint training.
+Structure helps: Adding structure to the model is key
+to capture complex dependencies. As shown in Table 1,
+more structured models (i.e., second order Markov model)
+consistently improves performance.
+Deep helps: We tested our models using one layer and
+two-layer perceptrons with both short-range and longrange connections in the MRF. For the two-layer MLP,
+the number of hidden units in the first layer is fixed to
+H1 = 512, and we varied the number of hidden units H2 in
+the second layer. As shown in Table 1, the deeper and the
+more structured the model is, the better the performance we
+achieve. As expected, performance also increases with the
+number of hidden units.
+Efficiency: Using GPUs, it takes on average 0.064s per
+iteration for the 1st order Markov model and 0.104s for the
+2nd order Markov model. The time employed for training
+one layer vs. the multi-layer models is approximately the
+same. Note that our approach is very efficient, as this is the
+time per iteration to train 831,166 weights.
+Learned parameters: As shown in the left column of
+Fig. 5, the learned unary weights resemble character
+strokes. The middle two panels show the learned pairwise
+weights for distance-1 edges (i.e., edges with only neighboring connections) and distance-2 edges (i.e., edges connecting every other variable). For example, it shows that
+‘q’ is likely to be followed by ‘u,’ and ‘e’ is likely to be
+distance-2 away from ‘q’ in this dataset. On the right-most
+panel, we also show the negative log-likelihood as a function of the number of joint training iterations. PreTrainJoint can achieve the lowest cost value, while PwTrain has
+the highest value.
+
+Learning Deep Structured Models
+
+female/indoor/portrait
+sky/plant life/tree
+water/animals/sea
+animals/dog/indoor
+indoor/flower/plant life
+female/indoor/portrait
+sky/plant life/tree
+water/animals/sky
+animals/dog
+∅
+Figure 7. Flickr test set images and a subset of the assigned tags as well as our predictions (bottom row).
+
+Method
+Unary only
+PwTrain
+PreTrainJoint
+
+Mean error
+9.36
+7.70
+7.25
+
+Table 2. Flickr Hamming loss: Joint training of deep features and
+the MRF improves performance.
+
+Non-linear pairwise functions: To further demonstrate
+the generality of our approach, we replaced the linear pairwise function in Eq. (6) by a one-layer MLP, while keeping
+the other settings identical. For this experiment we utilize
+a 1st order Markov model. As shown in Fig. 6, our model
+attains best performance when using a non-linear pairwise
+function. We found 16 to 64 hidden units for the non-linear
+pairwise function to be sufficient for modeling the bi-gram
+combinations in this dataset. In this case the largest model
+has 974,846 weights and training takes on average 0.068s
+per iteration.
+3.2. Image Tagging: Flickr
+We next evaluate the importance of blending learning and
+inference. Towards this goal, we make use of the Flickr
+dataset, which consists of 10, 000 training and 10, 000 test
+images from Flickr. The task is to predict which of 38 possible tags should be assigned to each image. Fig. 7 shows
+some examples. The graphical model has 38 binary random
+variables, each denoting the presence/absence of a particular tag. We define the non-linear unaries fr (x, yi ; wu ) using the 8-layer deep-net architecture from Krizhevsky et al.
+(2013), followed by a 76-dimensional top layer. Hence
+the function is composed out of two subsequent stacks of
+convolution, rectified linear (ReLU), pooling and local response normalization units. Those are followed by three
+convolution–ReLU function pairs. Afterwards pooling is
+applied before two fully-connected–ReLU–dropout combinations are employed to yield the input into a fully connected layer which finally computes the unary potentials.
+We employ pairwise potentials similar to Eq. (6) which
+now fully model the correlations between any pair of output variables. This amounts to a total of 57, 182, 408 parameters arising from the convolutional units, fully connected units and corresponding biases as well as the pairwise weights.
+
+We use a momentum based sub-gradient method for training with a mini-batch size of 300, a step size of 0.0001, a
+momentum of 0.95 and set  = 1 and cr = 1 ∀r. We initialized the deep-net parameters using a model pre-trained
+on ImageNet (Deng et al., 2009). Our error metric is the
+classification error, i.e., Hamming loss.
+Joint training helps: Results on the test set are summarized in Table 2. Similar to the Word50 dataset we observe
+that joint training is beneficial. We provide examples for
+perfect (two left-most images), roughly accurate and failing predictions (right image) in Fig. 7.
+Learned pairwise weights: In Fig. 8 we illustrate the
+learned correlations for a subset of the 38 classes. We observe that the class ‘people’ correlates highly with ‘female,’
+‘male,’ and ‘portrait.’ The ‘indoor’ tag does not co-occur
+with ‘sky,’ ‘structures,’ ‘plant life’ and ‘tree.’ ‘Sea’ appears
+typically with ‘water,’ ‘clouds,’ ‘lake’ and ‘sky.’
+Efficiency of Blending: To illustrate that blending is indeed beneficial we compare the negative log-likelihood and
+the training error as a function of run-time in Fig. 9. The
+standard approach is limited to 20 iterations of message
+passing to avoid time-consuming, repeated computation of
+a stopping criterion involving both the approximated logpartition function and its dual. As show in Fig. 9 blending learning and inference speeds up parameter estimation
+significantly. For larger graphical models, we expect the
+differences to be even more significant.
+
+4. Discussion
+Joint training of neural networks and graphical models: Neural Networks have been incorporated as unary potentials in graphical models. One of the earliest works
+by Bridle (1990) jointly optimizes a system consisting
+of multilayer perceptrons and hidden Markov models for
+speech recognition. For document processing systems,
+Bottou et al. (1997) propose Graph Transformer Networks
+to jointly optimize sub-tasks, such as word segmentation and character recognition. Several works (Collobert
+et al., 2011; Peng et al., 2009; Ma et al., 2012; Do &
+Artieres, 2010; Prabhavalkar & Fosler-Lussier, 2010; Morris & Fosler-Lussier, 2008) have extended the linear unary
+
+Learning Deep Structured Models
+female
+people
+indoor
+baby
+sea
+portrait
+transport
+flower
+sky
+lake
+structures
+bird
+plant life
+food
+male
+clouds
+water
+animals
+car
+tree
+dog
+sunset
+night
+river
+
+0.00
+
+0.68
+
+0.04
+
+0.06
+
+0.02
+
+0.24
+
+0.03
+
+−0.00 −0.01 0.01
+
+0.04
+
+−0.00 −0.05 −0.01 0.07
+
+−0.01 −0.00 −0.12 0.04
+
+0.01
+
+0.68
+
+0.00
+
+0.06
+
+0.06
+
+−0.00 0.36
+
+0.03
+
+−0.08 −0.05 −0.03 0.02
+
+−0.06 −0.12 −0.05 0.74
+
+−0.04 −0.03 −0.21 0.01
+
+−0.03 −0.03 −0.03 0.05
+
+0.04
+
+0.06
+
+0.00
+
+0.05
+
+−0.06 0.07
+
+−0.12 −0.07 −0.35 −0.03 −0.46 −0.02 −0.34 0.11
+
+0.02
+
+−0.15 −0.14 −0.01 −0.07 −0.21 0.03
+
+−0.08 0.06
+
+−0.03
+
+0.06
+
+0.06
+
+0.05
+
+0.00
+
+0.10
+
+0.11
+
+0.07
+
+0.09
+
+0.03
+
+0.10
+
+0.01
+
+0.09
+
+0.06
+
+0.08
+
+0.07
+
+0.07
+
+0.08
+
+0.06
+
+0.09
+
+0.09
+
+0.08
+
+0.10
+
+0.02
+
+−0.00 −0.06 0.10
+
+0.00
+
+0.04
+
+0.08
+
+0.05
+
+0.16
+
+0.17
+
+−0.02 0.09
+
+−0.02 0.06
+
+0.03
+
+0.14
+
+0.36
+
+0.06
+
+0.05
+
+0.01
+
+0.08
+
+0.14
+
+0.06
+
+0.10
+
+0.24
+
+0.36
+
+0.07
+
+0.11
+
+0.04
+
+0.00
+
+0.01
+
+0.03
+
+−0.02 0.05
+
+−0.02 0.04
+
+−0.01 0.03
+
+0.12
+
+0.02
+
+0.01
+
+−0.07 0.05
+
+0.05
+
+0.03
+
+0.04
+
+0.07
+
+0.05
+
+0.03
+
+0.03
+
+−0.12 0.07
+
+0.08
+
+0.01
+
+0.00
+
+0.02
+
+0.14
+
+0.07
+
+0.14
+
+0.04
+
+0.05
+
+0.03
+
+0.06
+
+0.08
+
+0.07
+
+−0.03 0.36
+
+0.10
+
+0.04
+
+0.05
+
+0.04
+
+0.07
+
+−0.00 −0.08 −0.07 0.09
+
+0.05
+
+0.03
+
+0.02
+
+0.00
+
+0.02
+
+0.07
+
+−0.03 0.07
+
+0.34
+
+0.04
+
+−0.04 0.04
+
+0.04
+
+0.02
+
+0.05
+
+0.06
+
+0.06
+
+0.06
+
+0.02
+
+0.07
+
+−0.01 −0.05 −0.35 0.03
+
+0.16
+
+−0.02 0.14
+
+0.02
+
+0.00
+
+0.12
+
+0.22
+
+0.04
+
+0.24
+
+−0.02 −0.00 0.44
+
+0.12
+
+−0.04 0.10
+
+0.30
+
+0.01
+
+0.23
+
+0.05
+
+0.11
+
+0.01
+
+−0.03 −0.03 0.10
+
+0.17
+
+0.05
+
+0.07
+
+0.12
+
+0.00
+
+−0.00 0.09
+
+0.09
+
+0.07
+
+0.01
+
+0.12
+
+0.26
+
+0.06
+
+0.06
+
+0.10
+
+0.07
+
+0.12
+
+0.07
+
+0.18
+
+0.04
+
+0.02
+
+0.08
+
+0.02
+
+0.02
+
+0.04
+
+0.02
+−0.03
+
+−0.02 −0.02 0.14
+
+−0.03 0.22
+
+−0.00 0.00
+
+0.01
+
+0.04
+
+−0.05 0.06
+
+−0.04 −0.06 0.14
+
+0.09
+
+−0.00 0.06
+
+0.03
+
+0.02
+
+−0.00 −0.06 −0.02 0.10
+
+0.09
+
+0.04
+
+0.07
+
+0.04
+
+0.09
+
+0.01
+
+0.00
+
+0.04
+
+0.07
+
+−0.01 0.06
+
+0.09
+
+0.26
+
+0.06
+
+0.05
+
+0.07
+
+0.09
+
+0.05
+
+0.09
+
+−0.05 −0.12 −0.34 0.02
+
+−0.02 −0.01 0.05
+
+0.34
+
+0.24
+
+0.09
+
+0.04
+
+0.04
+
+0.00
+
+−0.03 −0.07 0.09
+
+0.01
+
+0.01
+
+0.08
+
+0.68
+
+0.02
+
+0.05
+
+−0.07 0.10
+
+−0.01 −0.05 0.11
+
+0.09
+
+0.06
+
+0.03
+
+0.03
+
+0.04
+
+−0.02 0.07
+
+0.03
+
+0.03
+
+0.05
+
+0.01
+
+0.06
+
+0.06
+
+0.04
+
+0.07
+
+0.07
+
+0.06
+
+0.03
+
+0.12
+
+0.06
+
+−0.04 −0.00 0.01
+
+0.06
+
+−0.01 −0.07 −0.01 0.00
+
+0.00
+
+−0.01 −0.10 0.04
+
+−0.02 0.01
+
+0.00
+
+0.06
+
+0.01
+
+−0.01 −0.04 −0.15 0.08
+
+0.14
+
+0.02
+
+0.08
+
+0.04
+
+0.44
+
+0.12
+
+0.08
+
+0.06
+
+0.09
+
+0.03
+
+0.00
+
+0.00
+
+0.09
+
+−0.00 0.07
+
+0.11
+
+0.05
+
+0.22
+
+−0.01 0.10
+
+−0.00 −0.03 −0.14 0.07
+
+0.36
+
+0.01
+
+0.07
+
+0.04
+
+0.12
+
+0.26
+
+−0.04 0.09
+
+0.01
+
+0.03
+
+−0.01 0.09
+
+0.00
+
+0.05
+
+0.02
+
+0.03
+
+0.05
+
+0.10
+
+0.03
+
+−0.12 −0.21 −0.01 0.07
+
+0.06
+
+−0.07 −0.03 0.02
+
+−0.04 0.06
+
+−0.06 0.26
+
+0.01
+
+0.03
+
+−0.10 −0.00 0.05
+
+0.00
+
+0.02
+
+0.00
+
+0.22
+
+0.03
+
+−0.01 0.05
+
+0.04
+
+0.01
+
+−0.07 0.08
+
+0.05
+
+0.05
+
+0.36
+
+0.05
+
+0.10
+
+0.06
+
+0.14
+
+0.06
+
+0.08
+
+0.05
+
+0.04
+
+0.07
+
+0.02
+
+0.02
+
+0.00
+
+0.11
+
+0.06
+
+0.08
+
+0.07
+
+0.01
+
+−0.03 −0.21 0.06
+
+0.01
+
+0.05
+
+0.10
+
+0.06
+
+0.30
+
+0.10
+
+0.09
+
+0.05
+
+0.68
+
+0.01
+
+−0.02 0.11
+
+0.03
+
+0.00
+
+0.11
+
+0.00
+
+0.04
+
+0.09
+
+−0.00 0.12
+
+0.01
+
+−0.03 0.03
+
+0.09
+
+0.08
+
+0.03
+
+0.04
+
+0.06
+
+0.01
+
+0.07
+
+−0.00 0.07
+
+0.02
+
+0.06
+
+0.01
+
+0.05
+
+0.05
+
+0.22
+
+0.06
+
+0.04
+
+0.00
+
+0.06
+
+0.05
+
+0.07
+
+0.02
+
+−0.03 −0.08 0.09
+
+0.14
+
+0.04
+
+0.05
+
+0.06
+
+0.23
+
+0.12
+
+0.06
+
+0.09
+
+0.05
+
+0.06
+
+0.00
+
+0.22
+
+0.10
+
+0.03
+
+0.08
+
+0.09
+
+0.06
+
+0.00
+
+0.06
+
+0.10
+
+0.04
+
+0.05
+
+0.08
+
+0.06
+
+0.07
+
+0.04
+
+0.02
+
+0.05
+
+0.07
+
+0.03
+
+0.05
+
+−0.07 0.04
+
+0.06
+
+−0.01 0.03
+
+−0.01 0.07
+
+−0.00 0.05
+
+0.06
+
+0.00
+
+0.07
+
+0.02
+
+−0.03 −0.03 0.10
+
+0.10
+
+0.05
+
+0.07
+
+0.07
+
+0.11
+
+0.18
+
+0.02
+
+0.09
+
+0.10
+
+0.01
+
+0.10
+
+0.05
+
+0.12
+
+0.10
+
+0.07
+
+0.00
+
+0.74
+
+−0.46 0.01
+
+0.07
+
+0.10
+
+0.01
+
+0.02
+
+0.06
+
+0.04
+
+−0.05 0.07
+
+−0.03 0.00
+
+0.07
+
+−0.01 0.03
+
+0.27
+
+0.06
+
+0.07
+
+0.27
+
+0.06
+
+r
+ve
+ri
+t
+gh
+ni t
+e
+ns
+
+su
+
+g
+do
+ee
+tr
+r
+ca ls
+a
+im
+an
+r
+te
+wa s
+d
+ou
+cl
+le
+ma
+e
+od if
+l
+fo
+t
+an
+pl
+s
+rd re
+bi tu
+c
+ru
+st
+ke
+la
+y
+sk r
+e
+ow rt
+fl po
+s
+an t
+tr ai
+tr
+
+r
+po
+
+a
+se
+by
+ba r
+o
+do
+in e
+l
+op
+pe e
+al
+
+m
+fe
+
+Figure 8. Correlation matrix (i.e., pairwise potentials) learned on the Flickr dataset.
+
+Blending learning and inference: In this paper we defined learning to be a min-max task. The blending strategy, which was previously employed for learning log-linear
+models by (Meshi et al., 2010; Hazan & Urtasun, 2010),
+amounts to converting the maximization task into a minimization problem using its dual. Subsequently we make
+use of block-coordinate descent strategies to obtain a more
+
+5
+
+10
+
+x 10
+
+10000
+w/o blend
+w blend
+
+8
+6
+4
+
+w/o blend
+w blend
+
+6000
+4000
+2000
+
+2
+0
+0
+
+8000
+Training error
+
+Neg. Log−Likelihood
+
+potential in MRFs to incorporate non-linearities. However,
+they assume that exact inference can be performed either
+via a forward-backward pass within the graphical model
+or dynamic programming. In contrast, in this paper we
+present learning algorithms for general graphical models,
+where inference is NP-hard. Moreover, all the previous
+works (except Do & Artieres (2010)) do not consider maxmargin loss during training which is incorporated into our
+framework by choosing  = 0. More recently, Li & Zemel
+(2014) use a hinge loss to learn the unary term defined as
+a neural net, but keep the pairwise potentials fixed (i.e., no
+joint training). Domke (2013) considers non-linear structured prediction and decomposes the learning problem into
+a subset of logistic regressors, which require the parameter updates to be run till convergence before updating the
+messages. Tompson et al. (2014) also jointly train convolutional neural networks and a graphical model for pose estimation. However, the MRF inference procedure is approximated by their Spatial-Model which ignores the partition
+function. Jancsary et al. (2012; 2013) showed the benefits
+of a combination of structured models with classification
+trees. Since the submission of our work, Schwing & Urtasun (2015); Zheng et al. (2015) proposed the use of joint
+training using a double loop algorithm when efficient mean
+field updates are possible. State-of-the-art was achieved
+when using the semantic segmentation graphical model of
+(Chen∗ et al., 2015).
+
+5000
+10000
+Time [s]
+
+0
+0
+
+5000
+10000
+Time [s]
+
+Figure 9. Blending learning and inference speeds-up training significantly.
+
+efficient algorithm. Importantly any order of block-updates
+is possible. It remains an open problem to find the optimal
+tradeoff.
+
+5. Conclusions
+We have proposed an efficient algorithm to learn deep models enriched to capture the dependencies between the output variables. Our experiments on word prediction from
+noisy images and image tagging showed that the deeper and
+the more structured the model, the better the performance
+we achieve. Furthermore, joint learning of all weights outperforms all other strategies. In the future we plan to learn
+deeper models in applications such as holistic scene understanding. We will also extend our approach to deal with
+hidden variables as discussed for log-linear models, e.g., in
+work by Schwing et al. (2012).
+Acknowledgments: We thank NVIDIA Corporation for
+the donation of GPUs used in this research.
+This
+work was partially funded by ONR-N00014-14-1-0232,
+ONR-N00014-12-1-0883, ONR-N000014-10-1-0933 and
+a Google Faculty Research Award.
+
+Learning Deep Structured Models
+
+References
+Bengio, Y., Lamblin, P., Popovici, D., and Larochelle, H.
+Greedy Layer-Wise Training of Deep Networks. In Proc.
+NIPS, 2007.
+Bottou, L., Bengio, Y., and LeCun, Y. Global training of
+document processing systems using graph transformer
+networks. In Proc. CVPR, 1997.
+Bridle, J. S. Training stochastic model recognition algorithms as networks can lead to maximum mutual information estimation of parameters. In Proc. NIPS, 1990.
+∗
+
+∗
+
+Chen , L.-C., Papandreou , G., Kokkinos, I., Murphy, K.,
+and Yuille, A. L. Semantic Image Segmentation with
+Deep Convolutional Nets and Fully Connected CRFs. In
+Proc. ICLR, 2015. ∗ equal contribution.
+Collobert, R., Weston, J., Bottou, L., Karlen, M.,
+Kavukcuoglu, K., and Kuksa, P. Natural language processing (almost) from scratch. JMLR, 2011.
+de Campos, T. E., Babu, B. R., and Varma, M. Character
+recognition in natural images. In Proc. VISAPP, 2009.
+Deng, J., Dong, W., Socher, R., Li, L.-J., Li, K., and
+Fei-Fei, L. Imagenet: A large-scale hierarchical image
+database. In Proc. CVPR, 2009.
+Deng, J., Ding, N., Jia, Y., Frome, A., Murphy, K., Bengio,
+S., Li, Y., Neven, H., and Adam, H. Large-Scale Object Classification using Label Relation Graphs. In Proc.
+ECCV, 2014.
+Do, T.-M.-T. and Artieres, T. Neural conditional random
+fields. In Proc. AISTATS, 2010.
+Domke, J. Structured Learning via Logistic Regression. In
+Proc. NIPS, 2013.
+Eigen, D., Rolfe, J., Fergus, R., and LeCun, Y. Understanding Deep Architectures using a Recursive Convolutional
+Network. In Proc. ICLR, 2014.
+Girshick, R., Donahue, J., Darrell, T., and Malik, J. Rich
+feature hierarchies for accurate object detection and semantic segmentation. In Proc. CVPR, 2014.
+Globerson, A. and Jaakkola, T. Fixing max-product:
+Convergent message passing algorithms for MAP LPrelaxations. In Proc. NIPS, 2007.
+Hariharan, B., Arbeláez, P., Girshick, R., and Malik, J. Simultaneous detection and segmentation. In Proc. ECCV,
+2014.
+Hazan, T. and Shashua, A. Norm-Product Belief Propagation: Primal-Dual Message-Passing for LP-Relaxation
+and Approximate-Inference. Trans. Information Theory,
+2010.
+
+Hazan, T. and Urtasun, R. A Primal-Dual MessagePassing Algorithm for Approximated Large Scale Structured Prediction. In Proc. NIPS, 2010.
+Hinton, G. E. and Salakhutdinov, R. R. Reducing the
+dimensionality of data with neural networks. Science,
+2006.
+Hinton, G. E., Sejnowski, T. J., and Ackley, D. H. Boltzmann Machines: Constraint Satisfaction Networks that
+Learn. Technical report, University of Toronto, 1984.
+Jancsary, J., Nowozin, S., Sharp, T., and Rother, C. Regression Tree Fields – An Efficient, Non-parametric Approach to Image Labeling Problems. In Proc. CVPR,
+2012.
+Jancsary, J., Nowozin, S., and Rother, C. Learning Convex QP Relaxations for Structured Prediction. In Proc.
+ICML, 2013.
+Jia, Y. Caffe: An Open Source Convolutional Architecture for Fast Feature Embedding. http://caffe.
+berkeleyvision.org/, 2013.
+Koller, D. and Friedman, N. Probabilistic Graphical Models: Principles and Techniques. MIT Press, 2009.
+Krizhevsky, A., Sutskever, I., and Hinton, G. E. ImageNet Classification with Deep Convolutional Neural
+Networks. In Proc. NIPS, 2013.
+Larochelle, H., Erhan, D., Courville, A., Bergstra, J., and
+Bengio, Y. An empirical evaluation of deep architectures
+on problems with many factors of variation. In Proc.
+ICML, 2007.
+LeCun, Y., Bottou, L., Bengio, Y., and Haffner, P. Gradientbased learning applied to document recognition. Proceedings of the IEEE, 1998.
+Lee, H., Grosse, R., Ranganath, R., and Ng, A. Y. Convolutional deep belief networks for scalable unsupervised
+learning of hierarchical representations. In Proc. ICML,
+2009.
+Li, Y. and Zemel, R. High Order Regularization for SemiSupervised Learning of Structured Output Problems. In
+Proc. ICML, 2014.
+Ma, J., Peng, J., Wang, S., and Xu, J. A conditional neural
+fields model for protein threading. Bioinformatics, 2012.
+Meltzer, T., Globerson, A., and Weiss, Y. Convergent Message Passing Algorithms: a unifying view. In Proc. UAI,
+2009.
+Meshi, O., Sontag, D., Jaakkola, T., and Globerson, A.
+Learning Efficiently with Approximate inference via
+Dual Losses. In Proc. ICML, 2010.
+
+Learning Deep Structured Models
+
+Morris, J. and Fosler-Lussier, E. Conditional random fields
+for integrating local discriminative classifiers. IEEE
+Trans. Audio, Speech, and Language Processing, 2008.
+
+Wiegerinck, W. and Heskes, T. Fractional belief propagation. In Proc. NIPS, 2003.
+
+Nowozin, S., Rother, C., Bagon, S., Sharp, T., Yao, B., and
+Kohli, P. Decision tree fields. In Proc. ICCV, 2011.
+
+Xu, J., Schwing, A. G., and Urtasun, R. Tell me what you
+see and I will show you where it is. In Proc. CVPR,
+2014.
+
+Pearl, J. Probabilistic Reasoning in Intelligent Systems:
+Networks of Plausible Inference. Morgan Kaufmann,
+1988.
+
+Yedidia, J. S., Freeman, W. T., and Weiss, Y. Constructing
+free-energy approximations and generalized belief propagation algorithms. Trans. Information Theory, 2005.
+
+Peng, J., Bo, L., and Xu, J. Conditional Neural Fields. In
+Proc. NIPS, 2009.
+
+Zeiler, M. D. and Fergus, R. Visualizing and Understanding Convolutional Networks. In Proc. ECCV, 2014.
+
+Prabhavalkar, R. and Fosler-Lussier, E. Backpropagation
+training for multilayer conditional random field based
+phone recognition. In Proc. ICASSP, 2010.
+
+Zheng, S., Jayasumana, S., Romera-Paredes, B., Vineet,
+V., Su, Z., Du, D., Huang, C., and Torr, P. H. S. Conditional Random Fields as Recurrent Neural Networks.
+http://arxiv.org/abs/1502.03240, 2015.
+
+Salakhutdinov, R. R. and Hinton, G. E. An Efficient Learning Procedure for Deep Boltzmann Machines. Neural
+Computation, 2012.
+Schwing, A. G. Inference and Learning Algorithms with
+Applications to 3D Indoor Scene Understanding. PhD
+thesis, ETH Zurich, 2013.
+Schwing, A. G. and Urtasun, R. Fully Connected Deep
+Structured Networks. http://arxiv.org/abs/1503.02351,
+2015.
+Schwing, A. G., Hazan, T., Pollefeys, M., and Urtasun, R.
+Efficient Structured Prediction with Latent Variables for
+General Graphical Models. In Proc. ICML, 2012.
+Socher, R., Huval, B., Bhat, B., Manning, C. D., and Ng,
+A. Y. Convolutional-Recursive Deep Learning for 3D
+Object Classification. In Proc. NIPS, 2012.
+Sontag, D., Meltzer, T., Globerson, A., and Jaakkola,
+T. Tightening LP Relaxations for MAP using Message
+Passing. In Proc. NIPS, 2008.
+Taskar, B., Chatalbashev, V., Koller, D., and Guestrin, C.
+Learning Structured Prediction Models: A Large Margin
+Approach. In Proc. ICML, 2005.
+Tompson, J., Jain, A., LeCun, Y., and Bregler, C. Joint
+Training of a Convolutional Network and a Graphical
+Model for Human Pose Estimation. In Proc. NIPS, 2014.
+Wainwright, M. J. and Jordan, M. I. Graphical Models,
+Exponential Families and Variational Inference. Foundations and Trends in Machine Learning, 2008.
+Wainwright, M. J., Jaakkola, T., and Willsky, A. S. A
+new class of upper bounds on the log partition function.
+Trans. Information Theory, 2005.
+Weiss, Y., Yanover, C., and Meltzer, T. MAP Estimation,
+Linear Programming and Belief Propagation with Convex Free Energies. In Proc. UAI, 2007.
+
+

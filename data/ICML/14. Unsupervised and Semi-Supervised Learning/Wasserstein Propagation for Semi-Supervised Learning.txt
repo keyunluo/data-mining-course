@@ -1,0 +1,949 @@
+Wasserstein Propagation for Semi-Supervised Learning
+
+Justin Solomon
+JUSTIN . SOLOMON @ STANFORD . EDU
+Raif M. Rustamov
+RUSTAMOV @ STANFORD . EDU
+Leonidas Guibas
+GUIBAS @ CS . STANFORD . EDU
+Department of Computer Science, Stanford University, 353 Serra Mall, Stanford, California 94305 USA
+Adrian Butscher
+ADRIAN . BUTSCHER @ GMAIL . COM
+Max Planck Center for Visual Computing and Communication, Campus E1 4, 66123 Saarbrücken, Germany
+
+Abstract
+Probability distributions and histograms are natural representations for product ratings, traffic
+measurements, and other data considered in many
+machine learning applications. Thus, this paper introduces a technique for graph-based semisupervised learning of histograms, derived from
+the theory of optimal transportation. Our method
+has several properties making it suitable for this
+application; in particular, its behavior can be characterized by the moments and shapes of the histograms at the labeled nodes. In addition, it can be
+used for histograms on non-standard domains like
+circles, revealing a strategy for manifold-valued
+semi-supervised learning. We also extend this
+technique to related problems such as smoothing
+distributions on graph nodes.
+
+1. Introduction
+Graph-based semi-supervised learning is an effective approach for learning problems involving a limited amount
+of labeled data (Singh et al., 2008). Methods in this class
+typically propagate labels from a subset of nodes of a graph
+to the rest of the nodes. Usually each node is associated
+with a real number, but in many applications labels are more
+naturally expressed as histograms or probability distributions. For instance, the traffic density at a given location
+can be seen as a histogram over the 24-hour cycle; these
+densities may be known only where a service has cameras
+installed but need to be propagated to the entire map. Product ratings, climatic measurements, and other data sources
+exhibit similar structure.
+While methods for numerical labels, such as Belkin &
+st
+
+Proceedings of the 31 International Conference on Machine
+Learning, Beijing, China, 2014. JMLR: W&CP volume 32. Copyright 2014 by the author(s).
+
+Niyogi (2001); Zhu et al. (2003); Belkin et al. (2006); Zhou
+& Belkin (2011); Ji et al. (2012) (also see the survey by Zhu
+(2008) and references therein), can be applied bin-by-bin to
+propagate normalized frequency counts, this strategy does
+not model interactions between histogram bins. As a result,
+a fundamental aspect of this type of data is ignored, leading
+to artifacts even when propagating Gaussian distributions.
+Among first works directly addressing semi-supervised
+learning of probability distributions is Subramanya &
+Bilmes (2011), which propagates distributions representing class memberships. Their loss function, however, is
+based on Kullback-Leibler divergence, which cannot capture interactions between histogram bins. Talukdar & Crammer (2009) allow interactions between bins by essentially
+modifying the underlying graph to its tensor product with a
+prescribed bin interaction graph; this approach loses probabilistic structure and tends to oversmooth. Similar issues
+have been encountered in the mathematical literature (McCann, 1997; Agueh & Carlier, 2011) and in vision/graphics
+applications (Bonneel et al., 2011; Rabin et al., 2012) involving interpolating probability distributions. Their solutions
+attempt to find weighted barycenters of distributions, which
+is insufficient for propagating distributions along graphs.
+The goal of our work is to provide an efficient and theoretically sound approach to graph-based semi-supervised learning of probability distributions. Our strategy uses the machinery of optimal transportation (Villani, 2003). Inspired
+by (Solomon et al., 2013), we employ the two-Wasserstein
+distance between distributions to construct a regularizer
+measuring the “smoothness” of an assignment of a probability distribution to each graph node. The final assignment
+is produced by optimizing this energy while fitting the histogram predictions at labeled nodes.
+Our technique has many notable properties. As certainty in
+the known distributions increases, it reduces to the method
+of label propagation via harmonic functions (Zhu et al.,
+2003). Also, the moments and other characteristics of the
+
+Wasserstein Propagation
+
+propagated distributions are well-characterized by those
+of the labeled nodes at minima of our smoothness energy.
+Our approach does not restrict the class of the distributions
+provided at labeled nodes, allowing for bi-modality and
+other non-Gaussian properties. Finally, we prove that under
+an appropriate change of variables our objective can be
+minimized using a fast linear solve.
+Overview We first motivate the problem of propagating
+distributions along graphs and show why naı̈ve techniques
+are ineffective (§2). Given this setup, we develop the Wasserstein propagation technique (§3) and discuss its theoretical
+properties (§3.1). We also show how it can be used to
+smooth distribution-valued maps from graphs (§3.2) and
+extend it to more general domains (§4). Finally, after providing algorithmic details (§5) we demonstrate our techniques
+on both synthetic (§6.1) and real-world (§6.2) data.
+
+2. Preliminaries and Motivation
+2.1. Label Propagation on Graphs
+We consider generalization of the problem of label propagation on a graph G = (V, E). Suppose a label function f is known on a subset of vertices V0 ⊆ V , and we
+wish to extend f to the remainder V \V0 . The classical
+approach of Zhu
+Pet al. (2003) minimizes the Dirichlet energy ED [f ] := (v,w)∈E ωe (fv − fw )2 over the space of
+functions taking the prescribed values on V0 . Here ωe is
+the weight associated to the edge e = (v, w). ED is a
+measure of smoothness; therefore the minimizer matches
+the prescribed labels with minimal variation in between.
+Minimizing this quadratic objective is equivalent to solving ∆f = 0 on V \V0 for an appropriate positive definite
+Laplacian matrix ∆ (Chung & Yau, 2000). Solutions of this
+system are well-known to enjoy many regularity properties,
+making it a sound choice for smooth label propagation.
+2.2. Propagating Probability Distributions
+Suppose, however, that each vertex in V0 is decorated with
+a probability distribution rather than a real number. That
+is, for each v ∈ V0 , we are given a probability distribution
+ρv ∈ Prob(R). Our goal now is to propagate these distributions to the remaining vertices, generating a distributionvalued map ρ : v ∈ V 7→ ρv ∈ Prob(R) associating a
+probability distribution with every vertex
+´ v ∈ V . It must
+satisfy ρv (x) ≥ 0 for all x ∈ R and R ρv (x) dx = 1.
+In §4 we consider the generalized case ρ : V → Prob(Γ)
+for alternative domains Γ including subsets of Rn ; most of
+the statements we prove about maps into Prob(R) extend
+naturally to this setting with suitable technical adjustments.
+In the applications we consider, such a propagation process
+should satisfy a number of properties:
+
+Figure 1. Propagating prescribed probability distributions (in red)
+to interior nodes of path graph identified with the interval [0, 1]:
+(a) naive approach; (b) statistical approach; (c) desirable output.
+
+• The spread of the propagated distributions should be
+related to the spread of the prescribed distributions.
+• As the prescribed distributions in V0 become peaked
+(concentrated around the mean), the propagated distributions should become peaked around the values
+obtained by propagating means of prescribed distributions via label propagation (e.g. Zhu et al. (2003)).
+• The computational complexity of distribution propagation should be similar to that of scalar propagation.
+The simplest method for propagating probability distributions is to extend Zhu et al. (2003) naı̈vely. For each x ∈ R,
+we can view ρv (x) as a label at v ∈ V and solve the Dirichlet problem ∆ρv (x) = 0 with ρv0 (x) prescribed for all
+v ∈ V0 . The resulting functions ρv (x) are distributions because the
+´ maximum principle guarantees ρv (x) ≥ 0 for all
+x and R ρv (x) dx = 1 for all v ∈ V since these properties
+hold at the boundary (Chung et al., 2007).
+It is easy to see, however, that this method has shortcomings. For instance, consider the case where G is
+a path graph representing the segment [0, 1] and the labeled vertices are the endpoints, V0 = {0, 1}. In this
+case, the naı̈ve approach results in the linear interpolation
+ρt (x) := (1 − t)ρ0 (x) + tρ1 (x) at all intermediate graph
+vertices for t ∈ (0, 1). The propagated distributions are
+thus bimodal as in Figure 1a. Given our criteria, however,
+we would prefer an interpolation result closer to Figure 1c,
+which causes the peak in the boundary data simply to slide
+from left to right without introducing variance as t changes.
+An alternative strategy for propagating probability distributions over V given boundary data on V0 is to use a statistical
+approach. We could repeatedly draw an independent sample from each distribution in {ρv : v ∈ V0 } and propagate
+the resulting scalars using a classical approach; binning the
+results of these repeated experiments provides a histogramstyle distribution at each vertex in V . This strategy has
+a similar shortcomings to the naı̈ve approach above. For
+instance, in the path graph example, the interpolated distribution is trimodal as in Figure 1b, with nonzero probability
+at both endpoints and for some v in the interior of V .
+
+Wasserstein Propagation
+
+Of course, the desiderata above are application-specific.
+One key assumption is that the spread of the distributions
+is preserved, which differs from existing approaches which
+tend to blur the distributions. While this property is not
+intrinsically superior, in a way the experiments in §6 validate
+not only the algorithmic effectiveness of our technique but
+also this assumption about probabilistic data on graphs.
+
+3. Wasserstein Propagation
+Ad hoc methods for propagating distributions based on methods for scalar functions tend to have a number of drawbacks.
+Therefore, we tackle this problem using a technique designed explicitly for the probabilistic setting. To this end,
+we formulate the semi-supervised problem at hand as the
+optimization of a Dirichlet energy for distribution-valued
+maps generalizing the classical Dirichlet energy.
+Similar to the construction in (Subramanya & Bilmes, 2011),
+we replace the square distance between scalar function values appearing in the classical Dirichlet energy (namely the
+quantity |fv − fw |2 ) with an appropriate distance between
+the distributions ρv and ρw . Rather than using the bin-by-bin
+KL divergence, however, we use the Wasserstein distance
+with quadratic cost between probability distributions with
+finite second moment on R. This distance is defined as
+¨
+1/2
+|x − y|2 dπ(x, y)
+W2 (ρv , ρw ) :=
+inf
+π∈Π(ρv ,ρw )
+
+R2
+
+WASSERSTEIN P ROPAGATION
+Minimize ED [ρ] in the space of distribution-valued
+maps with prescribed distributions at all v ∈ V0 .
+3.1. Theoretical Properties
+Solutions of the Wasserstein propagation problem satisfy
+many desirable properties that we will establish below. Before proceeding, however, we recall a fact about the Wasserstein distance. Let ρ ∈ Prob(R) be a probability distribution.
+Then its cumulative
+distribution function (CDF) is given by
+´x
+F (x) := −∞ ρ(y) dy, and the generalized inverse of the
+its CDF is given by F −1 (s) := inf{x ∈ R : F (x) > s}.
+Then the following result holds.
+Proposition 1. [Villani (2003), Theorem 2.18] Let ρ0 , ρ1 ∈
+Prob(R) with CDFs F0 , F1 . Then
+W22 (ρ0 , ρ1 ) =
+
+1
+
+π(x, y) dx = ρw (y)
+
+and
+
+0
+
+ˆ
+
+π(x, y) dy = ρv (x) .
+
+The Wasserstein distance is a well-known distance metric
+for probability distributions, sometimes called the quadratic
+Earth Mover’s Distance, and is studied in the field of optimal
+transportation. It measures the optimal cost of transporting
+one distribution to another, given that the cost of transporting
+a unit amount of mass from x to y is |x − y|2 . W2 (ρv , ρw )
+takes into account not only the values of ρv and ρw but
+also the ground distance in the sample space R. It already
+has shown promise for search and clustering techniques (Irpino et al., 2011; Applegate et al., 2011) and interpolation
+problems in graphics and vision (Bonneel et al., 2011).
+With these ideas in place, we define a Dirichlet energy for a
+distribution-valued map from a graph into Prob(R) by
+X
+
+(F1−1 (s) − F0−1 (s))2 ds .
+
+(2)
+
+Proposition 2. Wasserstein propagation can be characterized in the following way. For each v ∈ V0 let Fv be the
+CDF of the distribution ρv . Now suppose that for each
+s ∈ [0, 1] we determine gs : V → R as the solution of the
+classical Dirichlet problem
+∆gs = 0 ∀ v ∈ V \ V0
+gs (v) = Fv−1 (s)
+
+∀ v ∈ V0 .
+
+(3)
+
+1
+
+0
+
+ED [ρ] :=
+
+0
+
+1
+
+By applying (2) to the minimization problem (1), we obtain
+a linear strategy for our propagation problem.
+
+where Π(ρ0 , ρ1 ) ⊆ Prob(R2 ) is the set of probability distributions π on R2 satisfying the marginal constraints
+ˆ
+
+ˆ
+
+W22 (ρv , ρw ) ,
+
+(1)
+
+(v,w)∈E
+
+along with the notion of Wasserstein propagation of
+distribution-valued maps given prescribed boundary data.
+
+Then for each v, the function s 7→ gs (v) is the inverse CDF
+of a probability distribution ρv . Moreover, the distributionvalued map v 7→ ρv minimizes the Dirichet energy (1).
+Proof. Let X be the set of functions g : V × [0, 1] → R
+satisfying the constraints gs (v) = Fv−1 (s) for all s ∈ [0, 1]
+and all v ∈ V0 . Consider the minimization problem
+min ÊD (g) :=
+g∈X
+
+X ˆ
+
+(u,v)∈E
+
+1
+
+(gs (u) − gs (v))2 ds .
+
+0
+
+The solution of this optimization for each s is exactly a solution of the classical Dirichlet problem (3) on G. Moreover,
+the maximum principle implies that gs (v) ≤ gs′ (v) whenever s < s′ , which holds by definition for all v ∈ V0 , can be
+extended to all v ∈ V (Chung et al., 2007). Hence gs (v) can
+be interpreted as an inverse CDF for each v ∈ V form which
+we can define a distribution-valued map ρ : v 7→ ρv . Since
+ÊD takes on its minimum value in the subset of X consisting
+of inverse CDFs, and ÊD coincides with ED on this set, ρ is
+a solution of the Wasserstein propagation problem.
+
+Wasserstein Propagation
+
+Distribution-valued maps ρ : V → Prob(R) propagated by
+optimizing (1) satisfy many analogs of functions extended
+using the classical Dirichlet problem. Two results of this
+kind concern the mean m(v) and the variance σ(v) of the
+distributions ρv as functions of V . These are defined as
+ˆ ∞
+xρv (x) dx
+m(v) :=
+−∞
+ˆ ∞
+σ 2 (v) :=
+(x − m(v))2 ρv (x) dx .
+−∞
+
+Proposition 3. Suppose the distribution-valued map ρ :
+V → Prob(R) is obtained using Wasserstein propagation.
+Then for all v ∈ V the following estimates hold.
+
+of the classical Dirichlet problem and the Wasserstein propagation problem coincide in the following way. Suppose that
+f : V → R satisfies the classical Dirichlet problem with
+boundary data u. Then ρv (x) := δ(x − f (v)) minimizes (1)
+subject to the fixed boundary constraints.
+Proof. The boundary data for ρ given here yields the boundary data gs (v) = u(v) for all v ∈ V0 and s ∈ [0, 1) in
+the Dirichlet problem (3). The solution of this Dirichlet
+problem is thus also constant in s, let us say gs (v) = f (v)
+for all s ∈ [0, 1) and v ∈ V . The only distributions whose
+inverse CDFs are of this form are δ-distributions; hence
+ρv (x) = δ(x − f (v)) as desired.
+
+• inf v0 ∈V0 m(v0 ) ≤ m(v) ≤ supv0 ∈V0 m(v0 ).
+
+3.2. Application to Smoothing
+
+• 0 ≤ σ(v) ≤ supv0 ∈V0 σ(v0 ).
+
+Using the connection to the classical Dirichlet problem in
+Proposition 2 we can extend our treatment to other differential equations. There is a large space of differential
+equations that have been adapted to graphs via the discrete
+Laplacian ∆; here we focus on the heat equation, considered
+e.g. in Chung et al. (2007).
+
+Proof. Both estimates can be derived from the following
+formula. Let ρ ∈ Prob(R) and let φ : R → R be any
+integrable function. If we apply the change of variables
+s = F (x) where F is the CDF of ρ in the integral defining
+the expectation value of φ with respect to ρ, we get
+ˆ
+
+∞
+
+φ(x)ρ(x) dx =
+
+ˆ
+
+1
+
+φ(F −1 (s)) ds .
+
+0
+
+−∞
+
+´1
+´1
+Thus m(v) = 0 Fv−1 (s) ds and σ 2 (v) = 0 (Fv−1 (s) −
+m(v))2 ds where Fv is the CDF of ρv for each v ∈ V .
+Assume ρ minimizes (1) with fixed boundary constraints
+on V0 . By Proposition 2, we then have ∆Fv−1 = 0 for all
+´1
+v ∈ V . Therefore ∆m(v) = 0 ∆Fv−1 (s) ds = 0, so m is
+a harmonic function on V . The estimates for m follow by
+the maximum principle for harmonic functions. Also,
+∆[σ 2 (v)] =
+
+ˆ
+
+1
+
+0
+
+=
+
+(v,v ′ )∈E
+
+≥0
+
+ˆ
+
+0
+
+1
+
+a(v, s) − a(v ′ , s)
+
+Proposition 5. Let ρ : V → Prob(R) be a distributionvalued map and let Fv : [0, 1] → R be the CDF of ρv for
+each v ∈ V . Then these two procedures are equivalent:
+• Mass-preserving flow of ρ in the direction of steepest
+descent of the Dirichlet energy.
+• Heat flow of the inverse CDFs.
+
+∆(Fv−1 (s) − m(v))2 ds
+
+X
+
+The heat equation for scalar functions is applied to smoothing problems; for example, in Rn solving the heat equation
+is equivalent to Gaussian convolution. Just as the Dirichlet
+equation on F −1 is equivalent to Wasserstein propagation,
+heat diffusion on F −1 is equivalent to gradient flows of
+the energy ED in (1), providing a straightforward way to
+understand and implement such a diffusive process.
+
+2
+
+ds
+
+— where a(v, s) := Fv−1 (s) − m(v),
+
+since ∆Fv−1 (s) = ∆m(v) = 0. Thus σ 2 is a subharmonic
+function and the upper bound for σ 2 follows by the maximum principle for subharmonic functions.
+Finally, we check that if we encode a classical interpolation problem using Dirac delta distributions, we recover
+the classical solution. The essence of this result is that
+if the boundary data for Wasserstein propagation has zero
+variance, then the solution must also have zero variance.
+Proposition 4. Suppose that there exists u : V0 → R such
+that ρv (x) = δ(x−u(v)) for all v ∈ V0 . Then, the solutions
+
+Proof. A mass-preserving flow of ρ is a family of
+distribution-valued maps ρε : V → Prob(R) with ε ∈
+(−ε0 , ε0 ) that satisfies the equations
+
+
+∂ρv,ε (t)
+∂
+
++
+Yv (ε, t)ρv,ε (t) = 0
+∂ε
+∂t
+∀v ∈ V
+
+ρv,0 (t) = ρv (t)
+
+where Yv : (−ε0 , ε0 ) × R → R is an arbitrary function
+that governs the flow. By applying the change of variables
+−1
+t = Fv,ε
+(s) using the inverse CDFs of the ρv,ε , we find that
+this flow is equivalent to the equations
+
+−1
+∂Fv,ε
+(s)
+
+−1
+= Yv (ε, Fv,ε (s))
+∀v ∈ V .
+∂ε
+
+−1
+−1
+Fv,0 (s) = Fv (s)
+
+Wasserstein Propagation
+
+A short calculation starting from (1) now leads to the derivative of the Dirichlet energy under such a flow, namely
+Xˆ 1
+dED (ρε )
+−1
+−1
+∆(Fv,ε
+) · Yv (ε, Fv,ε
+(s)) ds .
+= −2
+dε
+0
+v∈V
+
+ρvi ≥ 0 ∀v ∈ V, i ∈ S
+
+xij ≥ 0 ∀i, j ∈ S
+
+where S = {1, . . . , m}.
+
+5. Algorithm Details
+
+Thus, steepest descent for the Dirichlet energy is achieved
+−1
+by choosing Yv (ε, Fv,ε
+(s)) := ∆(Fv,ε (s)) for each v, ε, s.
+−1
+As a result, the equation for the evolution of Fv,ε
+becomes
+
+−1
+∂Fv,ε
+(s)
+
+−1
+= ∆(Fv,ε
+(s))
+∀v ∈ V
+∂ε
+
+−1
+Fv,0
+(s) = Fv−1 (s)
+
+We handle the general case from §4 by optimizing the linear
+programming formulation directly. Given the size of these
+linear programs, we use large-scale barrier method solvers.
+
+4. Generalization
+
+For a given graph G = (V, E) and subset V0 ⊆ V , we
+discretize the domain [0, 1] of Fv−1 for each v using a set
+of evenly-spaced samples s0 = 0, s1 , . . . , sm = 1. This
+representation supports any ρv provided it is possible to
+sample the inverse CDF from Proposition 1 at each si . In
+particular, when the underlying distributions are histograms,
+we model ρv using δ functions at evenly-spaced bin centers, which have piecewise constant CDFs; we model continuous ρv using piecewise linear interpolation. Regardless, in the end we obtain a non-decreasing set of samples
+−1 1
+(F −1 )1v , . . . , (F −1 )m
+)v = 0 and (F −1 )vm = 1.
+v with (F
+
+−1
+which is exactly heat flow of Fv,ε
+.
+
+Our preceding discussion involves distribution-valued maps
+into Prob(R), but in a more general setting we might wish
+to replace Prob(R) with Prob(Γ) for an alternative domain
+Γ carrying a distance metric d. Our original formulation
+of Wasserstein propagation easily handles such an extension by replacing |x − y|2 with d(x, y)2 in the definition of
+W2 . Furthermore, although proofs in this case are considerably more involved, some key properties proved above for
+Prob(R) extend naturally.
+In this case, we no longer can rely on the computational
+benefits of Propositions 2 and 5 but can solve the propagation problem directly. If Γ is discrete, then Wasserstein distances between ρv ’s can be computed using a linear program.
+Suppose we represent two histograms P
+as {a1 , . . P
+. , am } and
+{b1 , . . . , bm } with ai , bi ≥ 0 ∀i and i ai = i bi = 1.
+Then, the definition of W2 yields the optimization:
+X
+d2ij xij
+(4)
+W22 ({ai }, {bj }) = min
+ij
+
+s.t.
+
+X
+
+xij = ai ∀i
+
+X
+
+xij = bj ∀j
+
+xij ≥ 0 ∀i, j
+
+i
+
+j
+
+Here dij is the distance from bin i to bin j, which need not
+be proportional to |i − j|.
+From this viewpoint, the energy ED from (1) remains convex
+in ρ and can be optimized using a linear program simply by
+summing terms of the form (4) above:
+XX
+(e)
+d2ij xij
+min
+ρ,x
+
+s.t.
+
+e∈E ij
+
+(e)
+
+X
+
+xij = ρvi ∀e = (v, w) ∈ E, i ∈ S
+
+X
+
+(e)
+xij
+
+X
+
+ρvi = 1 ∀v ∈ V
+
+j
+
+= ρwj ∀e = (v, w) ∈ E, j ∈ S
+
+i
+
+i
+
+ρvi fixed ∀v ∈ V0
+
+The characterizations in Propositions 2 and 5, however, suggest a straightforward discretization and accompanying set
+of optimization algorithms in the linear case. In fact, we
+can recover propagated distributions by inverting the graph
+Laplacian ∆ via a sparse linear solve, leading to near-realtime results for moderately-sized graphs G.
+
+Now that we have sampled Fv−1 for each v ∈ V0 , we can
+propagate to the remainder V \V0 . For each i ∈ {1, . . . , m},
+we solve the system from (3):
+∆g = 0 ∀ v ∈ V \ V0
+g(v) = (F −1 )iv
+
+∀ v ∈ V0 .
+
+(5)
+
+In the diffusion case, we replace this system with implicit
+time stepping for the heat equation, iteratively applying
+(I − t∆)−1 to g for diffusion time step t. In either case, the
+linear solve is sparse, symmetric, and positive definite; we
+apply Cholesky factorization to solve the systems directly.
+This process propagates F −1 to the entire graph, yielding
+samples (F −1 )iv for all v ∈ V . We invert once again to
+yield samples ρiv for all v ∈ V . Of course, each inversion
+incurs some potential for sampling and discretization error,
+but in practice we are able to oversample sufficiently to
+overcome most potential issues. When the inputs ρv are
+discrete histograms, we return to this discrete representation
+by integrating the resulting ρv ∈ Prob([0, 1]) over the width
+of the bin about the center defined above.
+This algorithm is efficient even on large graphs and is easily
+parallelizable. For instance, the initial sampling steps for
+obtaining F −1 from ρ are parallelizable over v ∈ V0 , and
+the linear solve (5) can be parallelized over samples i. Direct
+solvers can be replaced with iterative solvers for particularly
+
+Wasserstein Propagation
+
+(a)
+
+Figure 2. Comparison of propagation strategies on a linear graph
+(coarse version on left); each horizontal slice represents a vertex
+v ∈ V , and the colors from left to right in a slice show ρv . (Subramanya & Bilmes, 2011) (KL) is shown only in one example
+because it has qualitatively similar behavior to the PDF strategy.
+
+large graphs G; regardless, the structure of such a solve is
+well-understood and studied, e.g. in Krishnan et al. (2013).
+
+6. Experiments
+
+(b)
+
+(c)
+
+Figure 3. PDF (b) and Wasserstein (c) propagation on a meshed
+circle with prescribed boundary distributions (a). The underlying
+graph is shown in grey, and probability distributions at vertices
+v ∈ V are shown as vertical bars colored by the density ρv ; we
+invert the color scheme of Figures 2 and 4 to improve contrast.
+Propagated distributions in (b) and (c) are computed for all vertices
+but for clarity are shown at representative slices of the circle.
+
+We run our scheme through a number of tests demonstrating
+its strengths and weaknesses compared to other potential
+methods for propagation. We compare Wasserstein propagation with the strategy of propagating probability distribution
+functions (PDFs) directly, as described in §2.2.
+6.1. Synthetic Tests
+We begin by considering the behavior of our technique on
+synthetic data designed to illustrate its various properties.
+One-Dimensional Examples Figure 2 shows “displacement interpolation” properties inherited by our propagation
+technique from the theory of optimal transportation. The
+underlying graph is a line as in Figure 1, along the vertical
+axis. Horizontally, each image is colored by values in ρv .
+The bottom and top vertices v0 and v1 have fixed distributions ρv0 and ρv1 , and the remaining vertices receive ρv
+via one of two propagation techniques. The left of each
+pair propagates distributions by solving a classical Dirichlet
+problem independently for each bin of the probability distribution function (PDF) ρv , whereas the right of each pair
+propagates inverse CDFs using our method in §5.
+
+(a)
+
+(b)
+
+Figure 4. Comparison of PDF diffusion (a) and Wasserstein diffusion (b); in both cases the leftmost distribution comprises the
+initial conditions, and several time steps of diffusion are shown
+left-to-right. The underlying graph G is the circle on the left.
+
+unit circle, and we propagate ρv from fixed distributions
+on the boundary. Unlike the classical case, however, our
+prescribed boundary distributions ρv are multimodal. Once
+again, Wasserstein propagation recovers a smoothly-varying
+set of distributions whose peaks behave like solutions to
+the classical Dirichlet problem. Propagating probability directions rather than inverse CDFs yields somewhat similar
+modes, but with much higher entropy and variance especially at the center of the circle.
+
+By examining the propagation behavior from the bottom to
+the top of this figure, it is easy to see how the naı̈ve PDF
+method varies from Wasserstein propagation. For instance,
+in the leftmost example both ρv0 and ρv1 are unimodal, yet
+when propagating PDFs all the intermediate vertices have
+bimodal distributions; furthermore, no relationship is determined between the two peaks. Contrastingly, our technique
+identifies the modes of ρv0 and ρv1 , linearly moving the
+peak from one side to the other.
+
+Diffusion Figure 4 illustrates the behavior of Wasserstein
+diffusion compared with simply diffusing distribution values directly. When PDF values are diffused directly, as time
+t increases the distributions simply become more and more
+smooth until they are uniform not only along G but also as
+distributions on Prob([0, 1]). Contrastingly, Wasserstein diffusion preserves the uncertainty from the initial distributions
+but does not increase it as time progresses.
+
+Boundary Value Problems Figure 3 illustrates our algorithm on a less trivial graph G. To mimic a typical test case
+for classical Dirichlet problems, our graph is a mesh of the
+
+Alternative Target Domain Figure 5 shows an example
+in which the target is Prob(S1 ), where S1 is the unit circle, rather than Prob([0, 1]). We optimize the ED using the
+
+Wasserstein Propagation
+
+(a)
+
+(b)
+
+Figure 5. Interpolation of distributions on S1 via (a) PDF propagation and (b) Wasserstein propagation; in these figures the vertices
+with valence 1 have prescribed distributions ρv and the remaining
+vertices have distributions from propagation.
+
+linear program in §4 rather than the linear algorithm for
+Prob([0, 1]). Conclusions from this example are similar
+to those from Figure 3: Wasserstein propagation identifies
+peaks from different prescribed boundary distributions without introducing variance, while PDF propagation exhibits
+much higher variance in the interpolated distributions and
+does not “move” peaks from one location to another.
+6.2. Real-World Data
+We now evaluate our techniques on real-world input. To
+evaluate the quality of our approach relative to ground truth,
+we will use the one-Wasserstein distance, or Earth Mover’s
+Distance (Rubner et al., 2000), formulated by removing the
+square in the formula for W22 . We use this distance, given on
+Prob(R) by the L1 distance between (non-inverted) CDFs,
+because it does not favor the W2 distance used in Wasserstein propagation while taking into account the ground distances. We consider weather station coordinates as defining
+a point cloud on the plane and compute the point cloud
+Laplacian using the approach of (Coifman & Lafon, 2006).
+Temperature Data Figure 6 illustrates the results of a
+series of experiments on weather data on a map of the United
+States.1 Here, we have |V | = 1113 sites each collecting
+daily temperature measurements, which we classify into
+100 bins at each vertex. In each experiment, we choose a
+subset V0 ⊆ V of vertices, propagate the histograms from
+these vertices to the remainder of V , and measure the error
+between the propagated and ground-truth histograms.
+Figure 6a shows quantitative results of this experiment. Here
+we show the average histogram error per vertex as a function of the percent of nodes in V with fixed labels; the fixed
+vertices are chosen randomly, and errors are averaged over
+20 trials for each percentage. The Wasserstein strategy consistently outperforms naı̈ve PDF interpolation with respect
+to our error metric and approaches relatively small error
+with as few as 5% of the labels fixed.
+Figures 6b and 6c show results for a single trial. We color
+the vertices v ∈ V by the mean (b) and standard deviation
+1
+
+National Climatic Data Center
+
+(c) of ρv from PDF and Wasserstein propagation. Both
+yield similar mean temperatures on V \V0 , which agree with
+the means of the ground truth data. The standard deviations, however, better illustrate differences between the
+approaches. In particular, the standard deviations of the
+Wasserstein-propagated distributions approximately follow
+those of the ground truth histograms, whereas the PDF strategy yields high standard deviations nearly everywhere on
+the map due to undesirable smoothing effects.
+Wind Directions We apply the general formulation in §4
+to propagating distributions on the unit circle S1 by considering histograms of wind directions collected over time by
+nodes on the ocean outside of Australia.2
+In this experiment, we keep approximately 4% of the data
+points and propagate to the remaining vertices. Both the
+PDF and Wasserstein propagation strategies score similarly
+with respect to our error metric; in the experiment shown,
+Wasserstein propagation exhibits 6.6% average error per
+node and PDF propagation exhibits 6.1% average error per
+node. Propagation results are illustrated in Figure 7a.
+The nature of the error from the two strategies, however, is
+quite different. In particular, Figure 7b shows the same map
+colored by the entropy of the propagated distributions. PDF
+propagation exhibits high entropy away from the prescribed
+vertices, reflecting the fact that the propagated distributions
+at these points approach uniformity. Wasserstein propagation, on the other hand, has a more similar pattern of entropy
+to that of the ground truth data, reflecting structure like that
+demonstrated in Proposition 3.
+Non-Euclidean Interpolation Proposition 4 suggests an
+application outside histogram propagation. In particular, if
+the vertices of V0 have prescribed distributions that are δ
+functions encoding individual points as mapping targets, all
+propagated distributions also will be δ functions. Thus, one
+strategy for interpolation is to encode the problem probabilistically using δ distributions, interpolate using Wasserstein propagation, and then extract peaks of the propagated
+distributions. Experimentally we find that optima of the
+linear program in §4 with peaked prescribed distributions
+yield peaked distributions ρv for all v ∈ V even when the
+target is not Prob(R); we leave a proof for future work.
+In Figure 8, we apply this strategy to interpolating angles on
+S1 from a single day of wind data on a map of Europe.3 Classical Dirichlet interpolation fails to capture the identification
+of angles 0 and 2π. Contrastingly, if we encode the boundary conditions as peaked distributions on Prob(S1 ), we can
+interpolate using Wasserstein propagation without losing
+structure. The resulting distributions are peaked about a sin2
+3
+
+WindSat Remote Sensing Systems
+Carbon Dioxide Information Analysis Center
+
+Wasserstein Propagation
+
+(b)
+
+(c)
+(a)
+Figure 6. We propagate histograms of temperatures collected over time to a map of the United States: (a) Average error at propagated sites
+as a function of the number of nodes with labeled distributions; (b) means of the histograms at the propagated sites from a typical trial in
+(a); (c) standard deviations at the propagated sites. Vertices with prescribed distributions are shown in blue and comprise ∼ 2% of V .
+
+Ground truth
+PDF
+Wasserstein
+(a) Histograms of wind directions
+
+Ground truth
+
+PDF
+(b) Entropy
+
+Wasserstein
+
+Figure 7. (a) Interpolating histograms of wind directions using the PDF and Wasserstein propagation methods, illustrated using the same
+scheme as Figure 5; (b) entropy values from the same distributions.
+
+Ground truth
+
+PDF (19%)
+
+Wasserstein (15%)
+
+Figure 8. Learning wind directions on the unit circle S1 .
+
+gle maximum, so we extract a direction field as the mode of
+each ρv . Despite noise in the dataset we achieve 15% error
+rather than the 19% error obtained by classical Dirichlet
+interpolation of angles disregarding periodicity.
+
+7. Conclusion
+It is easy to formulate strategies for histogram propagation
+by applying methods for propagating scalar functions binby-bin. Here, however, we have shown that propagating
+instead inverse CDFs has a deep connections to the theory of
+optimal transportation and provides superior results, making
+it a strong yet still efficient choice. This basic connection
+gives our method theoretical and practical soundness that is
+difficult to guarantee otherwise.
+While our algorithms show promise as practical techniques,
+we leave many avenues for future study. Most prominently,
+the generalization in §4 can be applied to many problems,
+
+such as the surface mapping problem in Solomon et al.
+(2013). Such an optimization, however, has O(m2 |E|) variables, which is intractable for dense or large graphs. An
+open theoretical problem might be to reduce the number of
+variables asymptotically. Some simplifications may also be
+afforded using approximations like (Pele & Werman, 2009),
+which simplify the form of dij at the cost of complicating
+theoretical analysis and understanding of optimal distributions ρv . Alternatively, work such as (Rabin et al., 2011)
+suggests the potential to formulate efficient algorithms when
+replacing Prob([0, 1]) with Prob(S1 ) or other domains with
+special structure.
+In the end, our proposed algorithms are equally as
+lightweight as less principled alternatives, while exhibiting practical performance, theoretical soundness, and the
+possibility of extension into several alternative domains.
+
+Acknowledgments The authors gratefully acknowledge
+the support of NSF grants CCF 1161480 and DMS 1228304,
+AFOSR grant FA9550-12-1-0372, a Google research award,
+the Max Planck Center for Visual Computing and Communications, the National Defense Science and Engineering
+Graduate Fellowship, the Hertz Foundation Fellowship, and
+the NSF GRF program.
+
+Wasserstein Propagation
+
+References
+Agueh, M. and Carlier, G. Barycenters in the Wasserstein
+space. J. Math. Anal., 43(2):904–924, 2011. 1
+Applegate, David, Dasu, Tamraparni, Krishnan, Shankar,
+and Urbanek, Simon. Unsupervised clustering of multidimensional distributions using earth mover distance. In
+KDD, pp. 636–644, 2011. 3
+Belkin, Mikhail and Niyogi, Partha. Laplacian eigenmaps
+and spectral techniques for embedding and clustering. In
+NIPS, pp. 585–591, 2001. 1
+Belkin, Mikhail, Niyogi, Partha, and Sindhwani, Vikas.
+Manifold regularization: A geometric framework for
+learning from labeled and unlabeled examples. JMLR, 7:
+2399–2434, December 2006. 1
+Bonneel, Nicolas, van de Panne, Michiel, Paris, Sylvain, and
+Heidrich, Wolfgang. Displacement interpolation using
+Lagrangian mass transport. Trans. Graph., 30(6):158:1–
+158:12, December 2011. 1, 3
+Chung, Fan and Yau, S.-T. Discrete Green’s functions. J.
+Combinatorial Theory, 91(1–2):191–214, 2000. 2.1
+Chung, Soon-Yeong, Chung, Yun-Sung, and Kim, Jong-Ho.
+Diffusion and elastic equations on networks. Pub. RIMS,
+43(3):699–726, 2007. 2.2, 3.1, 3.2
+Coifman, Ronald R. and Lafon, Stéphane. Diffusion maps.
+Applied and Computational Harmonic Anal., 21(1):5–30,
+2006. 6.2
+Irpino, Antonio, Verde, Rosanna, and de A.T. de Carvalho, Francisco. Dynamic clustering of histogram data
+based on adaptive squared Wasserstein distances. CoRR,
+abs/1110.1462, 2011. 3
+Ji, Ming, Yang, Tianbao, Lin, Binbin, Jin, Rong, and Han,
+Jiawei. A simple algorithm for semi-supervised learning
+with improved generalization error bound. In ICML, 2012.
+1
+Krishnan, Dilip, Fattal, Raanan, and Szeliski, Richard. Efficient preconditioning of Laplacian matrices for computer
+graphics. Trans. Graph., 32(4):142:1–142:15, July 2013.
+5
+McCann, Robert J. A convexity principle for interacting
+gases. Advances in Math., 128(1):153–179, 1997. 1
+Pele, O. and Werman, M. Fast and robust earth mover’s
+distances. In ICCV, pp. 460–467, 2009. 7
+Rabin, Julien, Delon, Julie, and Gousseau, Yann. Transportation distances on the circle. J. Math. Imaging Vis.,
+41(1–2):147–167, September 2011. 7
+
+Rabin, Julien, Peyre, Gabriel, Delon, Julie, and Bernot,
+Marc. Wasserstein barycenter and its application to
+texture mixing. volume 6667 of LNCS, pp. 435–446.
+Springer, 2012. 1
+Rubner, Yossi, Tomasi, Carlo, and Guibas, Leonidas. The
+earth mover’s distance as a metric for image retrieval.
+IJCV, 40(2):99–121, November 2000. 6.2
+Singh, Aarti, Nowak, Robert D., and Zhu, Xiaojin. Unlabeled data: Now it helps, now it doesn’t. In NIPS, pp.
+1513–1520, 2008. 1
+Solomon, Justin, Guibas, Leonidas, and Butscher, Adrian.
+Dirichlet energy for analysis and synthesis of soft maps.
+Comp. Graph. Forum, 32(5):197–206, 2013. 1, 7
+Subramanya, Amarnag and Bilmes, Jeff. Semi-supervised
+learning with measure propagation. JMLR, 12:3311–
+3370, 2011. 1, 3, 2
+Talukdar, Partha Pratim and Crammer, Koby. New regularized algorithms for transductive learning. ECML-PKDD,
+5782:442–457, 2009. 1
+Villani, Cédric. Topics in Optimal Transportation. Graduate
+Studies in Mathematics. AMS, 2003. 1, 1
+Zhou, Xueyuan and Belkin, Mikhail. Semi-supervised learning by higher order regularization. ICML, 15:892–900,
+2011. 1
+Zhu, Xiaojin. Semi-supervised learning literature survey.
+Technical Report 1530, Computer Sciences, University
+of Wisconsin-Madison, 2008. 1
+Zhu, Xiaojin, Ghahramani, Zoubin, and Lafferty, John D.
+Semi-supervised learning using Gaussian fields and harmonic functions. pp. 912–919, 2003. 1, 2.1, 2.2
+
+

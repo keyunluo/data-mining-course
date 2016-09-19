@@ -1,0 +1,1064 @@
+Multiresolution Matrix Factorization
+Risi Kondor∗†
+Nedelina Teneva∗
+∗
+Department of Computer Science, † Department of Statistics, The University of Chicago
+Vikas K. Garg
+Toyota Technological Institute at Chicago
+
+Abstract
+Large matrices appearing in machine learning
+problems often have complex hierarchical structures that go beyond what can be found by traditional linear algebra tools, such as eigendecomposition. Inspired by ideas from multiresolution analysis, this paper introduces a new notion of matrix factorization that can capture structure in matrices at multiple different scales. The
+resulting Multiresolution Matrix Factorizations
+(MMFs) not only provide a wavelet basis for
+sparse approximation, but can also be used for
+matrix compression (similar to Nyström approximations) and as a prior for matrix completion.
+
+1. Introduction
+Recent years have seen a surge of work on compressing and
+estimating large matrices in a variety of different ways, including (i) low rank approximations (Drineas et al., 2006;
+Halko et al., 2009), (ii) matrix completion (Achlioptas &
+McSherry, 2007; Candès & Recht, 2009); (iii) compression (Williams & Seeger, 2001; Kumar et al., 2012), and
+(iv) randomized linear algebra (see (Mahoney, 2011) for a
+review). Each of these requires some assumption about the
+matrix at hand, and invariably that assumption is that the
+matrix is of low rank. In this paper we offer an alternative to
+the low rank paradigm by introducing multiresolution matrices, which, we argue, in certain contexts better captures
+the true nature of matrices arising in learning problems.
+To contrast the two approaches, recall that saying that a
+symmetric matrix A ∈ Rn×n is of rank r ≪ n means that
+it can be expressed in terms of a dictionary of r mutually
+orthogonal unit vectors {u1 , u2 , . . . , ur } in the form
+r
+∑
+A=
+di ui u⊤
+(1)
+i,
+i=1
+st
+
+Proceedings of the 31 International Conference on Machine
+Learning, Beijing, China, 2014. JMLR: W&CP volume 32. Copyright 2014 by the author(s).
+
+RISI @ UCHICAGO . EDU
+NTENEVA @ UCHICAGO . EDU
+VKG @ TTIC . EDU
+
+where u1 , . . . , ur are the normalized eigenvectors of A and
+d1 , . . . , dr are the corresponding eigenvalues. This is the
+decomposition that Principal Component Analysis (PCA)
+finds and it corresponds to the factorization
+A = U ⊤D U
+
+(2)
+
+with D = diag (d1 , . . . , dr , 0, 0, . . . , 0) and U orthogonal.
+The drawback of PCA is that eigenvectors are almost always dense, while matrices occurring in learning problems,
+especially those related to graphs, often have strong locality
+properties, whereby they more closely couple certain clusters of “nearby” coordinates than those farther apart with
+respect to some underlying topology. In such cases, modeling A in terms of a basis of global eigenfunctions is both
+computationally wasteful and conceptually absurd: a localized dictionary would be more appropriate. This is part
+of the reason for the recent interest in sparse PCA (sPCA)
+algorithms (Jenatton et al., 2010), in which the {ui } dictionary vectors of (2) are constrained to be sparse, while the
+orthogonality constraint may be relaxed. However, sPCA
+is liable to suffer from the opposite problem of capturing
+structure locally, but failing to recover larger scale patterns
+in A.
+In contrast to PCA and sPCA, the multiresolution factorizations introduced in this paper tease out structure at multiple
+different scales by applying not just one, but a sequence
+of sparse orthogonal transforms to A. After the first orthogonal transform, the subset of rows/columns of U1A U1⊤
+which interact the least with the rest of the matrix capture
+the finest scale structure in A, so the corresponding rows
+of U1 are designated level one wavelets, and these dimensions are subsequently kept invariant. Then the process
+is repeated by applying a second orthogonal transform to
+yield U1 U2 A U1⊤U2⊤ and splitting off another subspace of
+Rn spanned by second level wavelets, and so on, ultimately
+resulting in an L level factorization of the form
+A = U1⊤ U2⊤ . . . UL⊤ H UL . . . U2 U1 .
+
+(3)
+
+For a given type of sparsity constraint on U1 , . . . , UL and a
+given rate at which dimensions must be eliminated, matrices that are expressible in this form with H diagonal (ex-
+
+Multiresolution Matrix Factorization
+
+cept, possibly, for a single small dense block on the diagonal) we call multiresolution factorizable.
+Multiresolution matrix factorization (MMF) uncovers soft
+hierarchical organization in matrices, characteristic of naturally occurring large networks and the covariance structure
+of large collections of random variables, without enforcing
+a hard hierarchical clustering. In addition to using MMF as
+an exploratory tool, we suggest that
+1. MMF structure may be used as a “prior” in matrix approximation and completion problems;
+2. MMF can be used for matrix compression, since
+each intermediate Uℓ . . . U1 A U1⊤ . . . Uℓ⊤ is effectively
+a compressed version of A;
+3. The wavelet basis associated with MMF is a natural
+basis for sparse approximation of functions on a domain whose metric structure is given by A.
+In the following sections we discuss the relationship of
+MMF to classical multiresolution analysis (Section 3), propose algorithms for computing MMFs (Section 4), take the
+first steps to analyze their theoretical properties (Section 5)
+and provide some experiments (Section 6). The proofs of
+all propositions and theorems are in the Supplement.
+1.1. Related work
+Our work is related to several other recent lines of work on
+constructing wavelet bases on discrete spaces. The work of
+Coifman & Maggioni (2006) on Diffusion Wavelets was a
+major inspiration, especially in emphasizing the connection to classical harmonic analysis. The tree-like structure of MMFs relates them to the recent work of Gavish
+et al. (2010) on multiresolution on trees, and in particular
+to Treelets (Lee et al., 2008), which is a direct precursor to
+this paper. Hammond et al. (2011) propose a different approach to defining wavelets on graphs based on the analogy
+between spectral graph theory and Fourier analysis.
+More generally, the idea of multilevel operator compression is related to both algebraic multigrid methods (e.g.,
+(Livne & Brandt, 2011)) and fast multipole expansions
+(Greengard & Rokhlin, 1987). In the machine learning
+community, ideas of multiscale factorization and clustering
+have appeared in (Dhillon et al., 2007), (Savas & Dhillon,
+2011) and (Zhong et al., 2012), amongst other works.
+
+2. Notation
+We define [n] = {1, 2, . . . , n}. The n dimensional identity
+matrix we denote In unless n is obvious from the context,
+in which case we will just use I. The i’th row of a matrix
+M is Mi,: and the j’th column is M:,j . We use ∪· to denote
+the disjoint union of two sets, so S1 ∪· . . . ∪· Sm = T is
+a partition of T . The group of n dimensional orthogonal
+
+L2 (X)
+
+/ ...
+
+/ V0
+
+/
+/
+/
+JJJ V1 LLL V2 MMMM . . .
+%
+%
+&
+W1
+W2
+W3
+
+Figure 1. Multiresolution analysis repeatedly splits V0 , V1 , . . .
+into a smoother part Vj+1 and a rougher part Wj+1 .
+
+matrices is SO(n).
+Given a matrix M ∈ Rn×m and two sequences of indices
+I= (i1 , . . . , ik )∈[n]k and J = (j1 , . . . , jℓ )∈[m]ℓ , MI,J will
+denote the k × ℓ submatrix of M cut out by rows i1 , . . . , ik
+and columns j1 , . . . , jℓ , i.e., the matrix whose entries are
+[MI,J ]a,b = Mia ,jb . Similarly, if S = {i1 , . . . , ik } ⊆ [n]
+and T = {j1 , . . . , jℓ } ⊆ [m] (assuming i1 < i2 < . . . < ik
+and j1 < j2 < . . . < jk ), MS,T will be the k ×ℓ matrix with
+entries [MS,T ]a,b = Mia ,jb .
+Given M1 ∈ Rn1 ×m1 and M1 ∈ Rn1 ×m1 , M1 ⊕ M2 is the
+(n1 + n2 ) × (m1 + m2 ) dimensional matrix with entries
+
+
+if i ≤ n1 and j ≤ m1
+[M1 ]i,j
+[M1 ⊕ M2 ]i,j = [M2 ]i−n1 ,j−m1 if i > n1 and j > m1
+
+
+0
+otherwise.
+A matrix M is said to be block diagonal if it is of the form
+M = M1 ⊕ M2 ⊕ . . . ⊕ Mp
+(4)
+for some sequence of smaller matrices M1 , . . . , Mp . We
+will only deal with block diagonal matrices in which each
+of the blocks is square. To remove the restriction that each
+block in (4) must involve a contiguous set of indices we
+introduce the notation
+M = ⊕(i11 ,...,i1k ) M1 ⊕(i21 ,...,i2k ) M2 . . . ⊕(ip1 ,...,ipk ) Mp (5)
+1
+
+2
+
+p
+
+for the generalized block diagonal matrix whose entries are
+{
+[Mu ]q,r if iuq = a and iur = b for some u, q, r,
+Ma,b =
+0
+otherwise.
+We will sometimes abbreviate expressions like (5) by dropping the first ⊕ operator and its indices.
+
+3. Multiresolution Analysis
+Given a measurable space X, Fourier analysis filters functions on X according to smoothness by expressing them
+in the eigenbasis of an appropriate self-adjoint smoothing
+operator T . On X = Rd , for example, T might be the
+∂2
+∂2
+∂2
+inverse of the Laplacian ∇2 = ∂x
+2 + ∂x2 + . . . + ∂x2 ,
+1
+2
+d
+∫
+leading to the Fourier transform fb(k) = f (x) e−2πik·x dx.
+When X is a graph and T is the graph Laplacian or a diffusion operator, the same ideas lead to spectral graph theory.
+Thus, Fourier analysis corresponds to the eigendecomposition T = U ⊤DU or its operator counterpart.
+In contrast, Multiresolution Analysis (MRA) constructs a
+sequence of spaces of functions of increasing smoothness
+L2 (X) ⊃ . . . ⊃ V0 ⊃ V1 ⊃ V2 ⊃ . . .
+
+(6)
+
+Multiresolution Matrix Factorization
+
+by repeatedly splitting each Vj into a smoother part Vj+1 ,
+and a rougher part Wj+1 (Figure 1). The further we go
+down this sequence, the longer the length scale over which
+typical functions in Vj vary, thus, projecting a function to
+Vj , Vj+1 , . . . amounts to analyzing it at different levels of
+resolution. This inspired Mallat to define multiresolution
+analysis on X = R directly in terms of dilations and translations by the following axioms (Mallat, 1989):
+∩
+1. ∪j Vℓ = {0},
+2. ℓ Vℓ = L2 (R),
+3. If f ∈ Vℓ then f ′ (x) = f (x − 2ℓ m) is also in Vℓ for
+any m ∈ Z,
+4. If f ∈ Vℓ , then f ′ (x) = f (2x) is in Vℓ−1 .
+These imply the existence of a so-called “mother wavelet”
+ψ such that each Wℓ is spanned by an orthonormal basis
+Ψℓ = { ψℓ,m (x) = 2−ℓ/2 ψ(2−ℓ x − m) }m∈Z
+and a “father wavelet” ϕ such that each Vℓ is spanned by an
+orthonormal basis1
+Φℓ = { ϕℓ,m (x) = 2−ℓ/2 ϕ(2−ℓ x − m) }m∈Z .
+
+ℓ=1 m
+ℓ
+⟨f, ψm
+⟩ and
+
+m
+L
+⟨ϕm , f ⟩.
+
+with
+=
+βm =
+Multiresolution
+owes much of its practical usefulness to the fact that ψ can
+be chosen in such a way that (a) it is localized in both space
+and frequency, (b) the individual Uℓ : Vℓ−1 → Vℓ ⊕ Wℓ basis transforms are sparse. Thus, (7) affords a computationally efficient way of decomposing functions into components at different levels of detail, and provides an excellent
+basis for sparse approximations.
+
+The problem with extending multiresolution to less structured and discrete spaces, such as graphs, is that in these
+settings there are no obvious analogs of translation and
+dilation, required by Mallat’s third and fourth axioms.
+Rather, similarly to (Coifman & Maggioni, 2006), assuming that |X| = n is finite, we adopt the view that multiresolution analysis with respect to a symmetric smoothing matrix A ∈ Rn×n now consists of finding a sequence of spaces
+
+1
+
+ηℓ = sup ⟨v, Av⟩ / ⟨v, v⟩
+v∈Vℓ
+
+decays at a given rate.
+MRA2. The wavelets are localized in the sense that
+µℓ =
+
+max
+
+m∈{1,...,dℓ }
+
+ℓ
+∥ψm
+∥0
+
+increases no faster than a certain rate.
+MRA3. Letting Uℓ be the matrix expressing Φℓ ∪ Ψℓ in the
+previous basis Φℓ−1 , i.e.,
+∑dim(V )
+ϕℓm = i=1 ℓ−1 [Uℓ ]m,i ϕℓ−1
+(9)
+i
+∑dim(Vℓ−1 )
+ℓ−1
+ℓ
+ψm = i=1
+[Uℓ ]m+dim(Vℓ−1 ),i ϕi , (10)
+each Uℓ is sparse, guaranteeing the existence of a
+fast wavelet transform (Φ0 is taken to be the standard basis, ϕ0m = em ).
+
+The central idea of this paper is to convert multiresolution analysis into a matrix factorization problem by focusing on how it compresses the matrix A. In particular, extending each Uℓ matrix to size n × n by setting
+Uℓ ← Uℓ ⊕ In−dim(Vℓ−1 ) , we find that in the Φ1 ∪ Ψ1
+basis A becomes U1 A U1⊤ . In the Φ2 ∪ Ψ2 ∪ Ψ1 basis
+it becomes U2 U1 A U1⊤U2⊤ , and so on, until finally in the
+ΦL ∪ ΨL ∪ . . . ∪ Ψ1 basis it takes on the form
+H = UL . . . U2 U1 A U1⊤U2⊤ . . . UL .
+
+(8)
+
+To be more precise, Mallat’s axioms imply that there is a set
+of mother wavelets and father wavelets from which we can build
+bases in this way. However, the vast majority of MRAs discussed
+in the literature only make recourse to a single mother wavelet
+and a single father wavelet.
+
+(11)
+
+Therefore, similar to the way that Fourier analysis corresponds to eigendecomposition, multiresolution analysis effectively factorizes A in the form
+A = U1⊤ U2⊤ . . . UL H UL . . . U2 U1
+
+3.1. Multiresolution on discrete spaces
+
+VL ⊂ . . . ⊂ V2 ⊂ V1 ⊂ V0 = L(X) ∼
+= Rn
+
+MRA1. The sequence (8) is a filtration of Rn in terms of
+smoothness with respect to A in the sense that
+
+3.2. Multiresolution Matrix Factorization
+
+The wavelet transform (up to level L) of a function
+f : X → R residing at a particular level of the hierarchy
+(6), without loss of generality f ∈ V0 , expresses it as
+L ∑
+∑
+∑
+ℓ
+ℓ
+f (x) =
+αm
+ψm
+(x) +
+βm ϕL
+(7)
+m (x),
+ℓ
+αm
+
+where each Vℓ has an orthonormal basis Φℓ := {ϕℓm }m and
+each complementary space Wℓ has an orthonormal basis
+ℓ
+Ψℓ := {ψm
+}m satisfying the following conditions:
+
+(12)
+
+with the constraints that (a) each Uℓ orthogonal matrix must
+be sufficiently sparse, (b) outside its top left dim(Vℓ−1 ) ×
+dim(Vℓ−1 ) block, each Uℓ is the identity. Furthermore,
+by (9 – 10), the first dim(VL ) rows of UL . . . U2 U1 are the
+{ϕL
+m }m scaling functions, whereas the rest of its rows reL
+L−1
+1
+turn the {ψm
+}, {ψm
+}, . . . , {ψm
+} wavelets.
+In the Fourier case, H would be diagonal. In the multiresolution case the situation is slightly more complicated since
+H consists of four distintict blocks:
+(
+) (
+)
+HΦ,Φ HΦ,Ψ
+H1:dL ,1:dL H1:dL ,dL+1:n
+H=
+=
+,
+HΨ,Φ HΨ,Ψ
+HdL+1:n,1:dL HdL+1:n,dL+1:n
+with dL = dim(VL ). Here HΦ,Φ is effectively A compressed to VL , and is therefore dense. The structure of the
+
+Multiresolution Matrix Factorization
+
+other three matrices, however, reflects to what extent the
+MRA1 criterion is satisfied. In particular, the closer the
+wavelets are to being eigenfunctions, the better they can
+filter the space by smoothness, as defined by A. Below,
+we define multiresolution factorizable matrices as those for
+which this is perfectly satisfied, i.e., which have a factor⊤
+ization with HΦ,Ψ = HΨ,Φ
+= 0 and HΨ,Ψ diagonal.
+In the following, we relax the form of (12) somewhat by
+allowing each Uℓ to fix some set [n] \ Sℓ of n − dim(Vℓ−1 )
+coordinates rather than necessarily the last n − dim(Vℓ−1 )
+(as long as S0 ⊇ S1 ⊇ . . .). This also affects the order
+in which rows are eliminated as wavelets, and the criterion
+for perfect factorizability now becomes H ∈ HSnL , where
+HSnL = {H ∈ Rn×n | Hi,j = 0 unless i = j or i, j ∈ SL }.
+Definition 1 Given an appropriate subset O of the group
+SO(n) of n–dimensional rotation matrices, a depth parameter L ∈ N, and a sequence of integers n = d0 ≥ d1 ≥
+d2 ≥ . . . ≥ dL ≥ 1, a Multiresolution Matrix Factorization (MMF) of a symmetric matrix A ∈ Rn×n over O is a
+factorization of the form
+A = U1⊤ U2⊤ . . . UL⊤ H UL . . . U2 U1 ,
+
+Definition 2 We say that a symmetric matrix A ∈ Rn×n
+is fully multiresolution factorizable over O ∈ SO(n) with
+(d1 , . . . , dL ) if it has a decomposition of the form described
+in Definition 1.
+The sequence (d1 , . . . , dL ) may follow some predefined
+law, such as geometric decay, dℓ = ⌈nη ℓ ⌉ or arithmetic
+decay, dℓ = n − ℓm. The major difference between different types of MMFs, however, is in the definition of the set
+O of sparse rotations. In this regard we consider two alternatives: elementary and compound k’th order rotations.
+Definition 3 We say that U ∈ Rn×n is an elementary rotation of order k (sometimes also called a k–point rotation)
+if it is an orthogonal matrix of the form
+U = In−k ⊕(i1 ,...,ik ) O
+(14)
+for some {i1 , . . . , ik } ⊆ [n] and O ∈ SO(k). The set of all
+such matrices we denote SOk (n).
+A k’th order elementary rotation is very local, since it only
+touches coordinates {i1 , . . . , ik }, and leaves the rest invariant. The simplest case are second order rotations, which
+are of the form
+
+
+θ
+U = Ui,j
+
+·
+
+c
+s
+
+·
+
+−s
+c
+
+
+,
+
+·
+
+c = cos θ
+s = sin θ,
+
+Definition 4 We say that U ∈ Rn×n is a compound rotation of order k if it is an orthogonal matrix of the form
+m Om (16)
+U = ⊕(i11 ,...,i1k ) O1 ⊕(i21 ,...,i2k ) O2 . . .⊕(im
+1 ,...,ik )
+1
+
+m
+
+2
+
+m
+for some partition {i11 , . . . , i1k1 } ∪· . . . ∪· {im
+1 , . . . , ikm } of
+[n] with k1 , . . . , km ≤ k, and some sequence of orthogonal
+matrices O1 , . . . , Om of the appropriate sizes. The set of
+all such matrices we denote SO∗k (n).
+
+Intuitively, compound rotations consist of many elementary
+rotations exectuted in parallel, and can consequently lead to
+much more compact factorizations.
+
+(13)
+
+where each Uℓ ∈ O satisfies [Uℓ ][n]\Sℓ−1 , [n]\Sℓ−1 = In−dℓ
+for some nested sequence of sets [n] = S0 ⊇ S1 ⊇ . . . ⊇ SL
+with |Sℓ | = dℓ , and H ∈ HSnL .
+
+
+=
+
+
+where the dots denote that apart from rows/columns i and j,
+θ
+Ui,j
+is the identity, and θ is some angle in [0, 2π). Such matrices are called Givens rotations, and they play an important role in numerical linear algebra. Indeed, Jacobi’s algorithm for diagonalizing symmetric matrices (Jacobi, 1846),
+possibly the first matrix algorithm to have been invented,
+works precisely by constructing an MMF factorization over
+Givens rotations. Inspired by this connection, we will call
+any MMF with O = SOk (n) a k’th order Jacobi MMF.
+
+(15)
+
+4. Computing MMFs
+Much like how low rank methods express matrices in terms
+of a small dictionary of vectors as in (1), MMF approximates A in the form
+A∗ =
+
+dL
+∑
+
+L⊤
+βi,j ϕL
++
+i ϕj
+
+i,j=1
+
+dℓ
+L ∑
+∑
+
+ηiℓ ψiℓ ψiℓ ⊤ ,
+
+ℓ=1 i=1
+
+where the ηiℓ = ⟨ψiℓ , Aψiℓ ⟩ wavelet frequencies are the diagonal elements of the HΨ,Ψ block of H, whereas the βi,j
+coefficients are the entries of the HΦ,Φ block. Thus, given
+O and (d1 , . . . , dL ), finding the best MMF factorization to
+a symmetric matrix A requires solving
+minimize
+
+[n] ⊇ S1 ⊇ . . . ⊇ SL
+H ∈Hn
+S ; U1 , . . . , U L ∈ O
+
+∥ A − U1⊤ . . . UL⊤ H UL . . . U1 ∥.
+
+L
+
+Assuming that we measure error in the Frobenius norm,
+which is rotationally invariant, this is equivalent to
+minimize
+
+[n] ⊇ S1 ⊇ . . . ⊇ SL
+U1 , . . . , UL ∈O
+
+∥ UL . . . U1 A U1⊤ . . . UL⊤ ∥2resi ,
+
+(17)
+
+where ∥ ∥2resi is the squared “residual norm”
+∑
+2
+∥H ∥2resi =
+|Hi,j | .
+i̸=j and (i,j)̸=SL×SL
+
+Defining Aℓ = Uℓ . . . U1 A U1⊤ . . . Uℓ , intuitively, our objective is to find a series of sparse rotations
+U
+
+U
+
+U
+
+1
+2
+L
+A ≡ A0 −→
+A1 −→
+. . . −→
+AL
+
+(18)
+
+Multiresolution Matrix Factorization
+
+U5
+? UO 6 `
+p8 U4 ^
+?? _
+ppp
+δ3
+? U3W/ jgOjOjOj4 UO 4 gOOδO7OO δ10
+? U3 fNNNN
+jjjj/// O
+UO 2 _ gOO δ6
+/
+@ U1 _
+@ U2 ^
+@ UO 1 _
+OOO
+δ2
+δ5 δ1
+δ4 δ2 δ5 δ1 δ4 δ6 δ8 δ9
+Figure 2. Left: Example of the tree induced by a second order
+Jacobi MMF of a six dimensional matrix. Right: Example of a
+Jacobi MMF with k = 3 of a 10 dimensional matrix.
+
+that bring A to a form as close to diagonal as possible. The
+following Proposition tells us that as soon as we designate a
+certain set Jℓ := Sℓ−1 \Sℓ of rows/columns in Aℓ wavelets,
+the ℓ2 -norm of these rows/columns (discounting the diagonal and those parts that fall outside the Sℓ−1 × Sℓ−1 active
+submatrix) is already committed to the final error.
+Proposition 1 Given an MMF as defined in Definition
+∑L 1,
+the objective function of (17) is expressible as ℓ=1 Eℓ ,
+where Eℓ = ∥[Aℓ ]Jℓ ,Jℓ ∥2off-diag + 2 ∥[Aℓ ]Jℓ ,Sℓ ∥2Frob , and
+∑
+2
+2
+∥M ∥off-diag := i̸=j |Mi,j | .
+The following algorithms for finding MMFs all follow the
+greedy approach suggested by this proposition of finding at each level a rotation Uℓ that produces dℓ − dℓ−1
+rows/columns that are as close to diagonal as possible, and
+then designating these as the level ℓ wavelets.
+4.1. Jacobi MMFs
+In Jacobi MMFs, where each Uℓ is an In−k ⊕(i1 ,...,ik )O elementary rotation, we set (d1 , . . . , dL ) so as to split off some
+constant number m < k of wavelets at each level. For simplicity, for now we take m = 1. Furthermore, we make
+the natural assumption that this wavelet is one of the rows
+involved in the rotation, w.l.o.g. Jℓ = {ik }.
+Proposition 2 If Uℓ = In−k ⊕I O with I = (i1 , . . . , ik )
+and Jℓ = {ik }, then the contribution of level ℓ to the MMF
+approximation error is
+k−1
+∑
+Eℓ = EIO = 2
+[O[Aℓ−1 ]I,I O⊤ ]2k,p + 2 [OBO⊤ ]k,k ,
+p=1
+
+where B = [Aℓ−1 ]I,Sℓ ([Aℓ−1 ]I,Sℓ )⊤ .
+
+(19)
+
+Corollary 1 In the special case of k = 2 and Iℓ = (i, j),
+O
+Eℓ = E(i,j)
+= 2 [O[Aℓ−1 ](i,j),(i,j) O⊤ ]22,1 + 2 [OBO⊤ ]k,k
+(20)
+with B = [Aℓ−1 ](i,j),Sℓ ([Aℓ−1 ](i,j),Sℓ )⊤ .
+According to the greedy strategy, at each level ℓ, the I index tuple and O rotation must be chosen so as to minimize (19). The resulting algorithm is given in Algorithm 1,
+where AL ↓HnS stands for zeroing out all the entries of Aℓ
+L
+except those on the diagonal and in the SL × SL block.
+When k = 2, the rotations U1 , . . . , UL form a binary tree, in
+which each Uℓ takes two scaling functions from level ℓ − 1
+
+Algorithm 1 G REEDY JACOBI: computing the Jacobi
+MMF of A with dℓ = n − ℓ.
+Input: k, L, and a symmetric matrix A0 = A ∈ Rn×n
+set S0 ← [n]
+for ( ℓ = 1 to L ){
+foreach I = (i1 , . . . , ik ) ∈ (Sℓ−1 )k with i1 < . . . < ik
+compute EI = minO∈SO(k) EIO (as defined in (19))
+set Iℓ ← arg minI EI
+set Oℓ ← arg minO∈SO(k) EIOℓ
+set Uℓ ← In−k ⊕Iℓ Oℓ
+set Sℓ ← Sℓ−1 \ {ik }
+set Aℓ ← Uℓ Aℓ−1 Uℓ⊤
+}
+Output: U1 , . . . , UL and H = AL ↓HnS
+L
+
+and passes on a single linear combination of them to the
+next level (Figure 2). In general, the more similar two rows
+Ai,: and Aj,: are to each other, the smaller we can make
+(21) by choosing the approriate O. In graphs, for example,
+where in some metric the entries in row i measure the similarity of vertex i to all the other vertices, this means that
+Algorithm 1 will tend to pick pairs of adjacent or nearby
+vertices and then produce scaling functions that represent
+linear combinations of those vertices. Thus, second order
+MMFs effectively perform a hierarchical clustering on the
+rows/columns of A. Uncovering this sort of hierarchical
+sructure is one of the goals of MMF analysis.
+The idea of constructing wavelets by forming a tree of
+Givens rotations was first intruduced under the name
+“Treelets” by Lee et al. (2008). Their work, however, does
+not make a connection to matrix factorization. In particular, instead of minimizing the contribution of each rotation
+to the matrix approximation error, the Treelets algorithm
+chooses I and O so as to zero out the largest off-diagonal
+entry of Aℓ−1 . This pivoting rule is the same as in Jacobi’s
+classical algorithm, so if one of the two indices {i, j} was
+not always eliminated from the active set, we would eventually diagonalize A to arbitrary precision.
+Jacobi MMFs with k ≥ 3 are even more interesting because they correspond to a lattice in which each Uℓ now
+has k children and k − 1 parents (Figure 2). In the k = 2
+′
+case the supports of any two wavelets ψ1ℓ and ψ1ℓ are either disjoint or one is contained in the other. In contrast,
+for k ≥ 3, a single original coordinate, such as δ6 in Figure 2 can contribute to multiple wavelets (ψ15 and ψ16 , for
+example) with different weights, determined by all the orthogonal matrices along the corresponding paths in the lattice. Thus, higher order MMFs are more subtle than just a
+single hierarchical clustering: by building a lattice of subspaces they capture a softer notion of hierarchy, and can
+uncover multiple overlapping hierarchical structures in A.
+
+Multiresolution Matrix Factorization
+
+Algorithm 2 G REEDY PARALLEL: computing the binary
+parallel MMF of A with dℓ = ⌈n2−ℓ ⌉.
+Input: L and a symmetric matrix A = A0 ∈ Rn×n
+set S0 ← [n]
+for ( ℓ = 1 to L ){
+set p ← ⌊|Sℓ−1 | /2⌋
+compute Wi,j = Wj,i as defined in (22) ∀ i, j ∈ Sℓ−1
+find the matching∑
+{(i1 , j1 ), . . . , (ip , jp )}
+p
+minimizing r=1 Wir ,jr
+O
+for (r = 1 to p) set Or ← arg minO∈SO(2) E(i
+r ,jr )
+set Uℓ ← ⊕(i1 ,j1 ) O1 ⊕(i2 ,j2 ) O2 ⊕ . . . ⊕(ip ,jp ) Op
+set Sℓ ← Sℓ−1 \ {i1 , . . . , ip }
+set Aℓ ← Uℓ Aℓ−1 Uℓ⊤
+}
+Output: U1 , . . . , UL and H = AL ↓HnS
+L
+
+4.2. Parallel MMFs
+Since MMFs exploit hierarchical cluster-of-clusters type
+structure in matrices, towards the bottom of the hierarchy
+one expects to find rotations that act locally, within small
+subclusters, and thus do not interact with each other. By
+combining these independent rotations into a single compound rotation, parallel MMFs yield factorizations that
+are not only more compact, but also more interpretable in
+terms of resolving A at a small number of distinct scales.
+Once again, we assume that it is the last coordinate in
+m
+each (i11 , . . . , i1k1 ) . . . (im
+1 , . . . , ikm ) block that gives rise to
+a wavelet, therefore dℓ decays by a constant factor of approximately (k − 1)/k at each level.
+Proposition 3 If Uℓ is a compound rotation of the form
+Uℓ = ⊕I1O1 . . . ⊕ ImOm for some partition I1 ∪· . . . ∪· Im of
+[n] with k1 , . . . , km ≤ k, and some sequence of orthogonal matrices O1 , . . . , Om , then level ℓ’s contribution to the
+MMF error obeys
+]
+j −1
+m [k∑
+∑
+⊤ 2
+⊤
+Eℓ ≤ 2
+[Oj [Aℓ−1 ]Ij ,Ij Oj ]kj ,p+[Oj Bj Oj ]kj ,kj ,
+j=1
+
+Wi,j = 2 min
+
+O∈SO(2)
+
+[
+
+]
+[O[Aℓ−1 ](i,j),(i,j) O⊤ ]22,1 + [OBO⊤ ]k,k ,
+
+(22)
+where B = [Aℓ−1 ](i,j),Sℓ−1 \{i,j} ([Aℓ−1 ](i,j),Sℓ−1 \{i,j} )⊤.
+An exact solution to this optimization problem can be
+3
+found in time O(|Sℓ−1 | ) using a modern weighted version
+of the famous “Blossom algorithm” by Edmonds (1965).
+However, it is also known that the simple greedy strategy
+of setting (i1 , j1 ) = arg mini,j∈Sℓ−1 Wi,j , then (i2 , j2 ) =
+arg mini,j∈Sℓ−1 \{i1 ,j1 } Wi,j , etc., yields a 2–approximation in linear time. In general, the most expensive component of MMF factorizations is forming the B matrices
+(which naı̈vely takes O(nk ) time), however, in practice
+techinques like locality sensitive hashing allow this (as well
+as the entire algorithm) to run in time close to linear in n.
+We remark that the fast Haar transform is nothing but a
+binary MMF, and the Cooley–Tukey FFT is a degenerate
+MMF (where d0 = . . . = dL ) of a complex valued matrix.
+4.3. Computational details
+Problems of the form minO∈SO(k) ∥OBO⊤C ∥, called Procrustes problems, generally have easy, O(k 3 ) time closed
+form solutions. Unfortunately, both (19) and (21) involve
+mixed linear/quadratic versions of this problem, which are
+much more challenging. However, the following result
+shows that in the k = 2 case this may be reduced to solving
+a simple trigonometric equation.
+2×2
+2×2
+Proposition 4 Let
+sym( A ∈ R )be diagonal, B ∈ R
+cos α − sin α
+metric and O = sin α cos α . Set a = (A1,1 − A2,2 )2 /4,
+√
+b = B1,2 , c = (B2,2 −B1,1 )/2, e = b2 + c2 , θ = 2α and
+ω = arctan(c/b). Then if α minimizes ([OAO⊤ ]2,1 )2 +
+[OBO⊤ ]2,2 , then θ satisfies
+
+(a/e) sin(2θ) + sin(θ + ω + π/2) = 0.
+
+(23)
+
+Putting A and B in the diagonal form required by this
+proposition is easy. While (23) is still not an explicit expression for α, it is trivial to solve with iterative methods.
+
+p=1
+
+where Bj = [Aℓ−1 ]Ij ,Sℓ−1 \Ij ([Aℓ−1 ]Ij ,Sℓ−1 \Ij )⊤ .
+
+(21)
+
+The reason that (21), in contrast to (19), only provides an
+upper bound on Eℓ is that it double counts the contribution
+of the matrix elements {[Aℓ ]kj ,kj′ }m
+j,j ′ =1 at the intersection
+of pairs of wavelet rows/columns. Accounting for these elements explicitly would introduce interactions between the
+Oj rotations, leading to a difficult optimization problem.
+Therefore, both for finding the optimal partition I1 ∪·. . .∪·Im
+and for finding the optimal O1 , . . . , Om rotations, we use
+the right hand side of (21) as a proxy for Eℓ .
+Once again, the binary (k = 2) case is the simplest, since
+optimizing I1 ∪· . . . ∪· Im then reduces to finding a minimal
+cost matching amongst the indices in the active set Sℓ−1
+with cost matrix
+
+4.4. Comparison to Treelets
+Since Treelets (Lee et al., 2008) are a special case of MMF,
+it is natural to compare the two approaches:
+1. In Treelets, the choice of (i, j) coordinates to rotate
+and the rotation angle θ are chosen based on an analogy with Jacobi’s algorithm. In contrast, in MMF
+they are optimized to reduce the algorithm’s objective
+function, which is approximation error.
+2. The Treelets algorithm has a tendency to lead to cascades, where the same coordinate is involved in a long
+series of rotations, and this can ruin multiresolution.
+Parallel MMFs avoid this problem.
+3. MMFs extend to k ≥ 3, which is what enables imputing more subtle structure than just a single hierarchy.
+
+Multiresolution Matrix Factorization
+
+5. Theoretical analysis
+MMFs satisfy properties MRA2 and MRA3 of Section 3.1
+by construction. Showing that they also satisfy MRA1 requires, roughly, to prove that the smoother a function is,
+the smaller its high frequency wavelet coefficients are. For
+this purpose the usual notion of smoothness with respect to
+a metric d is Hölder continuity, defined
+|f (x) − f (y)| ≤ cH d(x, y)α
+
+∀x, y ∈ X,
+
+with cH and α > 0 constant. In classical wavelet analysis
+one proves that the wavelet coefficients of (cH , α)–Hölder
+functions decay at a certain rate, for example, | ⟨f, ψℓm ⟩ | ≤
+c′ ℓα+β for some β and c′ (Daubechies, 1992).
+As we have seen, MMFs are driven by the similarity between the rows/columns of the matrix A. Therefore, relaxing the requirement that d must be a metric, we now take
+d(i, j) = | ⟨Ai,: , Aj,: ⟩ |
+
+−1
+
+.
+
+(24)
+
+One must also make some assumptions about the structure
+of the underlying space, classically that X is a so-called
+space of homogeneous type (Deng & Han, 2009), which
+means that for some constant chom ,
+Vol(B(x, 2r)) ≤ chom Vol(B(x, r)) ∀x ∈ X, ∀r > 0.
+To capture the analogous structural property for matrices,
+we introduce a concept with connections to the R.I.P condition in compressed sensing (Candès & Tao, 2005).
+Definition 5 We say that a symmetric matrix A ∈ Rn×n
+is Λ–rank homogeneous up to order K, if for any S ⊆
+[n] of size at most K, letting Q = AS,: A:,S , setting D
+to be the diagonal matrix with Di,i = ∥Qi,: ∥1 , and Q̃ =
+D−1/2 QD−1/2 , the λ1 , . . . , λ|S| eigenvalues of Q̃ satisfy
+Λ < | λi | < 1 − Λ, and furthermore c−1
+T ≤ Di,i ≤ cT for
+some constant cT .
+Recall that the spectrum of the normalized adjacency matrix of a graph is bounded in [−1, 1] (Chung, 1997). Definition 5 asserts that if we form a graph with vertex set S and
+edge weights ⟨Ai,: , Aj,: ⟩, its eigenvalues in absolute value
+are bounded away from both 0 and 1. Definition 5 then
+roughly corresponds to asserting that A does not have clusters of rows that are either almost identical (an incoherence
+condition) or completely unrelated. This allows us to now
+state the matrix analog of the Hölder condition.
+Theorem 1 Let A ∈ Rn×n be a symmetric matrix that is
+Λ–rank homogeneous up to order K and has an MMF facℓ
+torization A = U1⊤ . . . UL⊤ H UL . . . U1 . Assume ψm
+is a
+wavelet in this factorization arising from row i of Aℓ−1
+2
+supported on a set S of size K ≤ K and that ∥Hi,: ∥ ≤ ϵ.
+
+Figure 3. Comparison with the Treelets algorithm. Zachary’s
+Karate Club graph (left) and a matrix of genetic relationship between 50 individuals from (Crossett et al., 2013) (right).
+
+Then if f : [n] → R is (cH , 1/2)–Hölder with respect to
+(24), then
+√
+ℓ
+| ⟨f, ψm
+⟩ | ≤ cT cH cΛ ϵ1/2 K
+(25)
+with cΛ = 4/(1 − (1 − 2Λ)2 ).
+Here ϵ is closely related to the MMF approximation error
+and is therefore expected to be small. Eq. (25) then says
+that, as we expect, if f is smooth, then its “high frequency”
+local wavelet coefficents (low K and ℓ) will be small.
+
+6. Experiments
+In a toy example we consider the diffusion kernel of the
+Laplacian of a cycle graph (Cn ) on n = 16 vertices. Applying Algorithm 2, we compute the binary parallel MMF
+up to depth L = 5, and find that MMF recovers the Haar
+wavelets (see Figure 6 in the supplement). Similar results
+can be obtained for any cycle graph, except that for large
+n the longest wavelength wavelets cannot be fully reconstructed due to issues of numerical precision.
+We also evaluate the performance of G REEDY JACOBI by
+comparing it with Treelets on two small matrices. Note
+that in the greedy setting, similar to the Treelets, MMF
+removes one dimension at a time, and thus in both algorithms, the off-diagonal part of the rows/columns designated as wavelets contributes to the error. The first dataset
+is the well-known Zachary’s Karate Club (Zachary, 1977)
+social network (N = 34, E = 78) for which we set A to
+be the heat kernel. The second one is constructed using
+simulated data from the family pedigrees in (Crossett et al.,
+2013) : 5 families were randomly selected, and 10 individuals from the 15 related individuals were randomly selected
+independently in each family. The resulting relationship
+matrix represents the estimated kinship coefficient and is
+calculated via the GCTA software of Yang et al. (2011).
+Figure 4 shows that G REEDY JACOBI outperforms Treelets
+for a wide range of compression ratios.
+6.1. Comparison to Other Factorization Methods
+To verify that MMF produces meaningful factorizations,
+we measure the approximation error of factoring two
+
+Multiresolution Matrix Factorization
+
+Figure 4. Frobenius norm error of the MMF and Nyström methods on a random vs. a structured (Kronecker) matrix.
+
+1024 × 1024 matrices: a matrix consisting of i.i.d. normal
+random variables and a Kronecker graph, K1k , of order
+k = 5, where K1 is a 2 × 2 seed matrix (Leskovec et al.,
+2010). Figure 4 shows that MMF performs suboptimally
+when the matrix lacks an underlying multiresolution structure. However, on matrices with multilevel structure MMF
+systematically outperforms other algorithms.2
+In order to evaluate MMF for matrix compression, we use
+several large datasets: GR (arXiv General Relativity collaboration graph, N = 5242) (Leskovec et al., 2007), Dexter
+(bag of words, N = 2000) (Asuncion & Newman, 2012),
+and HEP (arXiv High Energy Physics collaboration graph,
+N = 9877, see Supplement). The first two are normalized
+graph Laplacians of real-world networks and the third one
+is a linear kernel matrix constructed from a 20000-feature
+dataset. By virtue of its design, MMF operates only on
+symmetric matrices, so we compare its performance to different variants of the so-called Nyström method, which in
+machine learning is considered standard for compressing
+symmetric matrices (Figure 5).
+The Nyström method involves randomly sampling
+rows/columns of the matrix to be compressed, and its
+variants differ mainly in the sampling technique (uniform
+at random without replacement, non-uniform leverage
+score probabilities, Gaussian or SRFT mixtures of the
+columns). The MMF approximation error is measured by
+summing the ℓ2 norm (except for the diagonal element)
+of the rows/columns that are designated wavelets at each
+iteration of the algorithm (Proposition 1). For the Nyström
+method, the compression error ||A − CW † C T ||Frob is
+a function of the number of columns sampled, as well
+as, potentially, the desired rank r of the approximation
+(which leads to a distinction between rank-restricted and
+non-rank-restricted variants) (Gittens & Mahoney, 2013).
+Similarly, at every level of the MMF compression, the
+approximation error is a function of |Sℓ |, the number of
+dimensions that have not yet been eliminated. The results
+in Figure 5 suggest that, despite similar wall clock times,
+2
+
+Note that compressing a matrix to size d×d means something
+slightly different for Nyström methods and MMF: in the latter
+case, in addition to the d × d core, we also preserve a sequence of
+n − d wavelet frequencies.
+
+Figure 5. Comparison of the Frobenius norm error of the binary
+parallel MMF (Algorithm 2 with k = 2) and different flavors of
+the Nyström method on two real datasets. In the rank-restricted
+cases r = 20 for GR and r = 8 for Dexter.
+
+by leveraging more nuanced structure in matrices arising
+from data than just low rank, MMF factorization can
+potentially outperform standard compression techniques
+by a large margin.
+
+7. Conclusions
+The interplay between the geometry of a space X and the
+structure of function spaces on X is a classical theme in
+harmonic analysis (Coifman & Maggioni, 2006). As an
+instance of this connection, this paper developed the matrix factorization analog of multiresolution analysis on finite sets. The resulting factorizations, on the one hand,
+provide a natural way to define multiresolution on graphs,
+correlated sets of random variables, and so on. On the other
+hand, they lead to new classes of structured matrices and
+new matrix compression algorithms.
+What classes of naturally occurring matrices exhibit MMF
+structure is an important question. From the algorithmic
+point of view, devising fast randomized version of MMFs
+will be critical. Finally, from the theoretical point of view,
+one of the biggest challenges is to relate the new concepts
+of multiresolution factorizable and Λ–rank homogenous
+matrices to the existing body of work in harmonic analysis, algebra and compressed sensing.
+
+Acknowledgments
+We would like to thank Andreas Krause and Joel Tropp for
+their input in the early stages of this project, the NSF for
+support (award no. 1320344), and the anonymous reviewers for valuable suggestions.
+
+Multiresolution Matrix Factorization
+
+References
+Achlioptas, D. and McSherry, F. Fast computation of low-rank
+matrix approximations. Journal of the ACM (JACM), 54(2):9,
+April 2007.
+Asuncion, A. and Newman, D. J. Dexter dataset. UCI Machine
+Learning Repository, 2012.
+Candès, E. J. and Recht, B. Exact matrix completion via convex
+optimization. Foundations of Computational Mathematics, 9
+(6):717–772, April 2009.
+
+Jenatton, R., Obozinski, G., and Bach, F. Structured sparse principal component analysis. In International Conference on Artificial Intelligence and Statistics (AISTATS), 2010.
+Kumar, S., Mohri, M., and Talwalkar, A. Sampling methods for
+the Nyström method. Journal of Machine Learning Research
+(JMLR), 13:981–1006, 2012.
+Lee, A. B., Nadler, B., and Wasserman, L. Treelets – an adaptive
+multi-scale basis for sparse unordered data. Annals of Applied
+Statistics, 2(2):435–471, 2008.
+
+Candès, E. J. and Tao, T. Decoding by linear programming. IEEE
+Transactions on Information Theory, 51(12):4203–4215, Dec
+2005.
+
+Leskovec, J., Kleinberg, J., and Faloutsos, C. Graph evolution:
+Densification and shrinking diameters. ACM Transactions of
+Knowledge Discovery from Data (TKDD), 1, 2007.
+
+Chung, F. R. K. Spectral Graph Theory. Number 92 in the Regional Conference Series in Mathematics. AMS, 1997.
+
+Leskovec, J., Chakrabarti, D., Kleinberg, J., Faloutsos, C., and
+Ghahramani, Z. Kronecker graphs : an approach to modeling
+networks. Journal of Machine Learning Research (JMLR), 11:
+985–1042, 2010.
+
+Coifman, R. R. and Maggioni, M. Diffusion wavelets. Applied
+and Computational Harmonic Analysis, 21(1):53–94, 2006.
+Crossett, A., Lee, A. B., Klei, L., Devlin, B., and Roeder, K.
+Refining genetically inferred relationships using treelet covariance smoothing. The Annals of Applied Statistics, 7(2):669–
+690, 2013.
+
+Livne, O. E. and Brandt, A.
+Lean algebraic multigrid (LAMG): fast graph Laplacian linear solver.
+http://arxiv.org/abs/1108.1310, 2011.
+Mahoney, M. W. Randomized algorithms for matrices and data.
+Foundations and Trends in Machine Learning, 3, 2011.
+
+Daubechies, I. Ten Lectures on Wavelets. SIAM, 1992.
+Deng, D. and Han, Y. Harmonic Analysis on Spaces of Homogeneous Type. Springer, 2009.
+
+Mallat, S. G. A Theory for Multiresolution Signal Decomposition. IEEE Transactions on Pattern Analysis and Machine Intelligence (TPAMI), 11:674–693, 1989.
+
+Dhillon, I. S., Guan, Y., and Kulis, B. Weighted graph cuts without eigenvectors: a multilevel approach. IEEE Transactions on
+Pattern Analysis and Machine Intelligence, 29(11):1944–1957,
+2007.
+
+Savas, B. and Dhillon, I. S. Clustered low rank approximation of
+graphs in information science applications. In SIAM International Conference on Data Mining (SDM), 2011.
+
+Drineas, P., Kannan, R., and Mahoney, M. W. Fast monte carlo
+algorithms for matrices I–III. SIAM Journal on Computing, 36
+(1):158–183, 2006.
+
+Williams, C. and Seeger, M. Using the Nyström method to speed
+up kernel machines. In Advances in Neural Information Processing Systems (NIPS), 2001.
+
+Edmonds, J. Paths, trees, and flowers. Canadian Journal of Mathematics, 17:449–467, 1965.
+
+Yang, J., Lee, S. H., Goddard, M. E., and Visscher, P. M. GCTA:
+a tool for genome-wide complex trait analysis. American Journal of Human Genetics, 88(1):76–82, 2011.
+
+Gavish, M., Nadler, B., and Coifman, R. R. Multiscale wavelets
+on trees, graphs and high dimensional data: Theory and applications to semi supervised learning. In International Conference on Machine Learning (ICML), 2010.
+
+Zachary, W. W. An information flow model for conflict and fission
+in small groups. Journal of Anthropological Research, 33:452–
+473, 1977.
+
+Gittens, A. and Mahoney, M. W. Revisiting the Nyström method
+for improved large-scale machine learning. In International
+Conference on Machine Learning (ICML), 2013.
+Greengard, L. and Rokhlin, V. A fast algorithm for particle simulations. Journal of Computational Physics, 73:325–348, 1987.
+Halko, N., Martinsson, P. G., and Tropp, J. A. Finding structure with randomness: Probabilistic algorithms for constructing approximate matrix decompositions. Computing, 53(2):
+1–74, 2009.
+Hammond, D. K., Vandergheynst, P., and Gribonval, R. Wavelets
+on graphs via spectral graph theory. Applied and Computational Harmonic Analysis, 30(2):129–150, 2011.
+Jacobi, C. J. G. Über ein leichtes verfahren, die in der theorie
+der säkularstörungen vorkommenden gleichungen numerisch
+aufzulösen. Journal für Reine und Angewandte Mathematik,
+30:51–95, 1846.
+
+Zhong, E., Fan, W., and Yang, Q. Contextual collaborative filtering via hierarchical matrix factorization. In SIAM International
+Conference on Data Mining (SDM), 2012.
+
+

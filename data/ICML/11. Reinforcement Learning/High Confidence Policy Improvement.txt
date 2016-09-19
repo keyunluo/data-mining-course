@@ -1,0 +1,1050 @@
+High Confidence Policy Improvement
+
+Philip S. Thomas
+University of Massachusetts Amherst
+
+PTHOMAS @ CS . UMASS . EDU
+
+Georgios Theocharous
+Adobe Research
+
+THEOCHAR @ ADOBE . COM
+
+Mohammad Ghavamzadeh
+Adobe Research & INRIA
+
+GHAVAMZA @ ADOBE . COM
+
+Abstract
+We present a batch reinforcement learning (RL)
+algorithm that provides probabilistic guarantees
+about the quality of each policy that it proposes,
+and which has no hyper-parameters that require
+expert tuning. The user may select any performance lower-bound, ρ− , and confidence level, δ,
+and our algorithm will ensure that the probability
+that it returns a policy with performance below
+ρ− is at most δ. We then propose an incremental
+algorithm that executes our policy improvement
+algorithm repeatedly to generate multiple policy
+improvements. We show the viability of our approach with a simple gridworld and the standard
+mountain car problem, as well as with a digital
+marketing application that uses real world data.
+
+1. Introduction
+Most reinforcement learing (RL) algorithms do not provide
+any guarantees that they will work properly with high confidence. This plays a major role in precluding their use for
+applications in which execution of a bad policy could be
+costly (Jonker et al., 2004) or even dangerous (Moore et al.,
+2010). To overcome this limitation, rather than focusing on
+learning speed, sample complexity, or computational complexity, we focus on ensuring “safety”. In this paper, we
+mean by safety that the probability that our algorithm returns a policy with performance below a baseline ρ− is at
+most δ, where both ρ− and δ are chosen by the user to specify how much risk is reasonable for the application at hand.
+We present batch and incremental policy improvement algorithms that provide safety guarantees for every policy
+
+they propose. Our algorithms do not have any hyperparameters that require expert tuning (there is one hyperparameter that should be set based on runtime limitations).
+The primary drawbacks of our algorithms are their high
+computational complexity and that, in order to provide their
+guarantees, they tend to require more data to produce a policy improvement than ordinary RL algorithms.
+To the best of our knowledge, conservative policy iteration (CPI) (Kakade & Langford, 2002) and its derivatives
+(Pirotta et al., 2013) are the only RL algorithms with monotonically improving behavior. However, CPI was not intended to be implemented as a safe algorithm—the analysis
+that shows it is safe was meant to provide insight into how
+it scales to larger problems, not a practical guarantee of
+safety. This is evidenced by its use of big-O notation when
+specifying how many trajectories to generate before updating the policy (Kakade, 2003).1 We found that CPI requires
+an impractical number of trajectories to ensure safety—for
+the gridworld that we use it requires more trajectories than
+the span of our plots to make a single change to the policy.
+The remainder of this paper is organized as follows. We review relevant material in Section 2 before formalizing the
+problem in Section 3. We present a batch version of our algorithm in Section 4 and an incremental version in Section
+5. In Section 6 we provide case studies including a digital
+marketing study using data from a Fortune 20 company to
+show the viability of our approach before concluding.
+
+2. Preliminaries
+We assume that the environment can be modeled as
+a Markov decision process (MDP) or partially observable Markov decision process (POMDP) (Sutton & Barto,
+1
+
+Proceedings of the 32 nd International Conference on Machine
+Learning, Lille, France, 2015. JMLR: W&CP volume 37. Copyright 2015 by the author(s).
+
+CPI requires m + k trajectories for each change to the policy.
+Sham Kakade’s thesis specified m using big-O notation in Lemma
+7.3.4, and k can be derived from the appendix of the work of
+Kakade & Langford (2002).
+
+High Confidence Policy Improvement
+
+1998). Although we adopt MDP notation hereafter, this
+work can be immediately translated to the POMDP setting
+with state-free policies (Kaelbling et al., 1996, Sections 7.1
+and 7.2) by replacing states with observations. Let S and
+A denote the state and action sets, rt ∈ [rmin , rmax ] be the
+bounded reward at time t, and γ ∈ [0, 1] be a discount
+factor. Let π(a|s) be the probability (density) of taking
+action a in state s when using policy π. A trajectory of
+length T is an ordered set of states, actions, and rewards:
+τ = {sτ1 , aτ1 , r1τ , sτ2 , aτ2 , r2τ , . . . , sτT , aτT , rTτ }. We define
+the (normalized
+discounted)
+and
+ return of a trajectory to
+PT
+t−1 τ
+be R(τ ) :=
+γ
+r
+t − R− / (R+ − R− ) ∈
+t=1
+[0, 1], where R− and R+ are upper and lower bounds
+PT
+t−1 τ 2
+on
+rt . Let ρ(π) := E[R(τ )|π] denote the
+t=1 γ
+performance of policy π, i.e., the expected normalized
+and discounted return when using policy π. We assume that all trajectories are of length at most T . We
+denote by D a set of n trajectories, {τi }ni=1 , each labeled by the policy that generated it, {πi }ni=1 , i.e., D :=
+{(τi , πi ) : i ∈ {1, . . . , n}, τi generated using πi } . We call
+the policies, {πi }ni=1 , that generated the available data, D,
+behavior policies. We write |D| to denote the number of
+trajectories in D, πiD to denote the ith behavior policy in D,
+and τiD to denote the ith trajectory in D.
+
+2.2. High-Confidence Off-Policy Evaluation (HCOPE)
+High-confidence off-policy evaluation (HCOPE) involves
+taking a set of trajectories, D, generated using some behavior policies, and using them to lower-bound the performance of another policy, πe , called the evaluation policy.
+In this section we present three approaches to HCOPE that
+we use later. When discussing policy improvement later, it
+will be important that we can not just lower-bound the performance of a policy given some trajectories, but that we
+can predict from some trajectories what the lower bound
+would be if computed later with more trajectories. We
+therefore present each approach as an algorithm that predicts what the lower-bound would be if computed using a
+different number of samples.
+
+We define a mixed policy, µα,π0 ,π , to be a mixture of π0 and
+π with mixing parameter α ∈ [0, 1]. As α increases, the
+mixed policy becomes more like π(a|s), and as α decreases
+it becomes more like π0 (a|s). Formally, µα,π0 ,π (a|s) :=
+απ(a|s) + (1 − α)π0 (a|s).
+
+All of the approaches are based on importance sampling
+(Precup et al., 2000), which can be used to produce an unbiased estimator of ρ(πe ) from a trajectory τ generated
+by a behavior policy, πb .4 This estimator is called the
+importance weighted return, ρ̂(πe |τ, πb ), and is given by:
+ρ̂(πe |τ, πb ) := R(τ )w(τ, πe , πb ), where w(τ, πe , πb ) is the
+QT π (aτ |sτ )
+importance weight: w(τ, πe , πb ) := t=1 πeb (aτt |sτt ) . The
+t
+t
+three approaches to bounding ρ(πe ) are all based on first
+computing the importance weighted returns, which are then
+used to produce a high confidence lower-bound. For generality, we present each method in terms of a set of n random
+variables, X = {X1 , . . . , Xn }, which are independent and
+which all have the same expected value, x̄ := E [Xi ]. Later
+we will use the importance weighted returns, ρ̂(πe |τi , πi ),
+as the Xi , and so x̄ = ρ(πe ).
+
+2.1. Stationarity
+
+2.3. A Concentration Inequality (CI) for HCOPE
+
+Because we will use data from the past to make predictions about the future, we must assume that the future will
+somehow reflect the past. By assuming the problem can be
+exactly formulated as a POMDP, we have assumed that the
+initial state distribution and the mechanisms that produce
+the rewards, observations, and state transitions, are all stationary. Although such stationarity assumptions are commonplace in machine learning, it is important to note that,
+if an application is not exactly modeled as a POMDP, our
+probabilistic guarantees are only approximate. So, practitioners should strive to formulate the problem in a way that
+is as close to a POMDP as possible, and should be aware
+of the risks that stem from this assumption.3
+
+Thomas et al. (2015) presented a concentration inequality that is particularly well-suited to using importance
+weighted returns to lower-bound the performance of the
+evaluation policy. Let ρ̂− (X, δ, m, c) be a prediction, computed from X, of their 1 − δ confidence lower-bound on x̄,
+if the lower bound were to be computed using m random
+variables rather than n (m trajectories rather than n), and
+if the provided hyperparameter value c were used (Thomas
+et al., 2015, cf. Equation 7):
+
+2
+
+We normalize the returns because ρCI
+− (X, δ, m), which will
+be introduced later, requires X to be positive.
+3
+For example, it is common in industry to retrain the policy
+for selecting user-specific advertisements every day, specifically
+to mitigate non-stationarity.
+
+!
+n
+7c ln(2/δ)
+1 X
+? −
+ρ̂− (X,δ, m, c) :=
+n i=1
+3(m − 1)
+v
+!
+!2 !
+u
+n
+n
+u 2 ln(2/δ)
+X
+X
+t
+2
+n
+?
+−
+?
+,
+−
+mn(n − 1)
+i=1
+i=1
+
+where ? is shorthand for min{Xi , c}.
+Algorithm 1 shows how their concentration inequalitybased approach can be used to compute an estimate,
+ρCI
+− (X, δ, m), of what the 1 − δ confidence lower bound on
+4
+If the support of πe and πb differ, then importance sampling
+produces an underestimate of ρ(πe ) (Thomas et al., 2015).
+
+High Confidence Policy Improvement
+
+x̄ would be if computed using m trajectories. Intuitively,
+this algorithm approximates the optimal value for the parameter c, and then computes the prediction with this value.
+If n = m, then ρCI
+− (X, δ, m) is a 1 − δ confidence lower
+bound on x̄. If n 6= m, then ρCI
+− (X, δ, m) is an estimate
+of what the lower bound would be if it were computed using m random variables rather than n.5 Note that in this
+method it is assumed that each Xi ≥ 0. This approach is
+similar to that of Bottou et al. (2013), but it does not discard data and it optimizes the hyperparameter, c, in a more
+principled manner.
+Algorithm 1 ρCI
+− (X, δ, m) : Predict what the 1 − δ confidence
+lower bound on E[Xi ] would be if X contained m random variables rather than n.
+1: Place 1/20 of X in Xpre and the remainder in Xpost
+2: c? ∈ arg maxc∈[1,∞) ρ̂− (Xpre , δ, m, c)
+3: return ρ̂− (Xpost , δ, m, c? )
+
+The primary benefit of this approach, which we call the
+concentration inequality (CI) approach, is that it introduces
+no false assumptions. The drawback of the CI approach is
+that, because it makes no simplifying assumptions, it tends
+to be overly conservative. In the following two subsections
+we present approaches to HCOPE that introduce simplifying assumptions that are typically false, but which allow for
+tighter lower bounds.
+2.4. Student’s t-Test for HCOPE
+Each of the Xi are unbiased estimators ofPx̄. So, the samn
+ple mean of these estimators, X̂ := n1 i=1 Xi , is also
+an unbiased estimator of x̄. As n → ∞, given mild assumptions, the central limit theorem (CLT) says that the
+distribution of X̂ approximates a normal distribution, and
+so it is appropriate to use a one-sided Student’s t-test to get
+a 1 − δ confidence lower bound on x̄. We present in Algorithm 2 an algorithm similar to Algorithm 1, but using
+a one-sided Student’s t-test in place of the concentration
+inequality. Here t1−δ,ν denotes the 100(1 − δ) percentile
+of the Student’s t distribution with ν degrees of freedom
+(i.e., tinv(1 − δ, ν) in M ATLAB).
+The benefit of using the t-test is that it usually produces
+tighter bounds than the CI approach because it introduces
+the additional assumption that X̂ is normally distributed.
+When n is sufficiently large (using a sufficiently large number of trajectories), this assumption becomes quite reasonable. However, the importance weighted returns often
+come from distributions with heavy upper tails (Thomas
+et al., 2015), which can make the t-test overly conservative
+even for seemingly large data sets, as shown in Fig. 1.
+5
+
+There are additional stipulations on how trajectories are partitioned into Dpre and Dpost when there are multiple behavior policies (Thomas et al., 2015).
+
+Notice, however, that this is not a real guarantee that the ttest will be overly conservative—in some cases it may still
+result in an error rate greater than δ. Still, if the domain
+is non-stationary, then the false assumption that X̂ is normally distributed may be minor in comparison to the false
+assumption that the environment is a POMDP.
+Algorithm 2 ρTT
+− (X, δ, m) : Predict what the 1 − δ confidence
+lower bound on E[Xi ] would be if X contained m random variables rather than n.
+P
+X
+1: X̂ ← n1 n
+r i=1 i 
+2
+Pn
+1
+2: σ ← n−1 i=1 Xi − X̂
+3: return X̂ −
+
+√σ t1−δ,m−1
+m
+
+2.5. A Bootstrap Confidence Interval for HCOPE
+Rather than assume that the sample mean, X̂, is normally
+distributed, we can use bootstrapping to estimate the true
+distribution of X̂, which can then be used to produce a
+lower-bound. A popular method for this sort of bootstrapping is Bias Corrected and accelerated (BCa) bootstrap (Efron, 1987). We present in Algorithm 3 an algorithm similar to Algorithm 1, but using BCa in place of
+the concentration inequality. We choose to use B = 2000
+resamplings as suggested by practitioners (Efron & Tibshirani, 1993; Davison & Hinkley, 1997). In the pseudocode, Φ, is the cumulative distribution function of the normal distribution, 1A is one if A is true and 0 otherwise,
+and #ξi < X̂ denotes the number of ξi that are less than
+X̂. Our pseudocode is derived from that of Carpenter &
+Bithell (2000), with notation changed as necessary to avoid
+conflicts with our other notation.
+Using the bootstrap estimate of the distribution of X̂, BCa
+can correct for the heavy tails in our data to produce lowerbounds that are not overly conservative, as shown in Figure 1. As with the t-test, for some distributions the lowerbounds produced by BCa may have error rates larger than δ.
+However, the bounds produced by BCa are reliable enough
+that their use is commonplace in high-risk applications
+such as analyzing the results of medical research (Champless et al., 2003; Folsom et al., 2003).
+
+3. Problem Formulation
+Given a (user specified) lower-bound, ρ− , on the performance and a confidence level, δ, we call an RL algorithm
+safe if it ensures that the probability that a policy with performance less than ρ− will be proposed is at most δ. The
+only assumption that a safe algorithm may make is that
+the underlying environment is a POMDP. Moreover, we require that the safety guarantee must hold regardless of how
+any hyperparameters are tuned.
+
+Empirical Error Rate
+
+High Confidence Policy Improvement
+0.05
+CI
+TT
+BCa
+0
+20
+
+200
+n
+
+2,000
+
+Figure 1. Empirical error rates when estimating a 95% confidence
+lower-bound on the mean of a gamma distribution (shape parameter k = 2 and scale parameter θ = 50) using ρ†− , where the
+legend specifies the value of †. This gamma distribution has a
+heavy upper-tail similar to that of importance weighted returns.
+The logarithmically scaled horizontal axis is the number of samples used to compute the lower bound (from 20 to 2000) and the
+vertical axis is the mean empirical error rate over 100,000 trials.
+Note that CI is overly conservative, with zero error in all the trials (it is on the x-axis). The t-test is initially conservative, but
+approaches the allowed 5% error rate as the number of samples
+increases. BCa remains around the correct 5% error rate regardless of the number of samples.
+
+We call an RL algorithm semi-safe if it would be safe,
+except that it makes a false but reasonable assumption.
+Semi-safe algorithms are of particular interest when the
+assumption that the environment is a POMDP is significantly stronger than the (other) false assumption made by
+the algorithm, e.g., that the sample mean of the importance
+weighted returns is normally distributed when using many
+trajectories.
+We call a policy, π, (as opposed to an algorithm) safe if we
+can ensure that ρ(π) ≥ ρ− with confidence 1−δ. Note that
+“a policy is safe” is a statement about our belief concerning
+that policy given the observed data, and not a statement
+about the policy itself.
+If there are many policies that might be deemed safe, then
+the policy improvement mechanism should return the one
+that is expected to perform the best, i.e.,
+π 0 ∈ arg max g(π|D),
+safe π
+
+Algorithm 3 ρBCa
+− (X, δ, m) : Predict what the 1 − δ confidence
+lower bound on E[Xi ] would be if X contained m random variables rather than n.
+P
+1: X̂ ← n1 n
+i=1 Xi
+2: B ← 2000;
+3: for i = 1 to B do
+4: Randomly sample m elements of x ∈ X, with replacement.
+5: Set ξi to be the mean of these m samples.
+6: end for
+7: Sort the vector ξ = (ξ1 , ξ2 , . . . , ξB ) such that ξi ≤ ξj for
+1≤i<j≤
+ B.
+
+8: z0 ← Φ−1 {#ξiB<X̂}
+9: for i = 1 to n do
+10: Set yi to beP
+the mean of X excluding the ith element:
+1
+yi ← n−1 n
+j=1 1(j6=i) Xj
+11: end for P
+12: ȳ ← n1 n
+i=1 yi
+13: a ←
+
+3
+i=1 (ȳ−yi )
+2 3/2
+i=1 (ȳ−yi )
+−1
+
+Pn
+
+Pn
+
+]
+Φ
+(1−δ)−z0
+14: zL ← z0 − 1+a(Φ
+−1 (1−δ)−z )
+0
+15: Q ← (B + 1)Φ(zL )
+16: l ← min{bQc, B − 1}
+6[
+
+17: return X̂ +
+
+Q
+l )
+Φ−1 ( B+1
+)−Φ−1 ( B+1
+l+1
+l )
+Φ−1 ( B+1
+)−Φ−1 ( B+1
+
+(ξQ , ξQ+1 )
+
+ters that require expert tuning.
+In the following, we use the † symbol as a placeholder for
+either CI, TT, or BCa. We also overload the symbol ρ†− so
+that it can take as input a policy, π, and a set of trajectories,
+D, in place of X, as follows:
+ρ†− (π, D, δ, m) := ρ†−
+
+
+ |D|
+[
+	
+ρ̂ π|τiD , πiD , δ, m . (2)
+i=1
+
+|
+
+{z
+X
+
+}
+
+For example, ρBCa
+− (π, D, δ, m) is a prediction made using
+the data set D of what the 1 − δ confidence lower-bound on
+ρ(π) would be, if computed from m trajectories by BCa.
+
+(1)
+
+where g(π|D) ∈ R is a prediction of ρ(π) computed from
+D. We use a lower-variance, but biased, alternative to ordinary importance sampling, called weighted importance
+sampling
+(Precup etal., 2000), for g, i.e., g(π|D) :=
+P
+P|D|
+|D|
+D
+D
+D
+D
+i=1 ρ̂(π|τi , πi ) /
+i=1 ŵ(τi , π, πi ) . Note that
+even though Eq. 1 uses g, our safety guarantee is
+uncompromising—it uses the true (unknown and often unknowable) expected return, ρ(π).
+In this paper, we present batch and incremental policy improvement algorithms that are safe when they use the CI
+approach to HCOPE and semi-safe when they use the t-test
+or BCa approaches. Our algorithms have no hyperparame-
+
+4. Safe Policy Improvement
+Our proposed batch (semi-)safe policy improvement algorithm, P OLICY I MPROVEMENT†‡ , takes as input a set of trajectories labeled with the policies that generated them, D,
+a performance lower bound, ρ− , and a confidence level, δ,
+and outputs either a new policy or N O S OLUTION F OUND
+(NSF). The meaning of the ‡ subscript will be described
+later.
+When we use D to both search the space of policies and
+perform safety tests, we must be careful to avoid the multiple comparisons problem (Benjamin & Hochberg, 1995).
+To make this important problem clear, consider what would
+happen if our search of policy space included only two poli-
+
+High Confidence Policy Improvement
+
+cies, and used all of D to test both of them for safety. If at
+least one is deemed safe, then we return it. HCOPE methods can incorrectly label a policy as safe with probability
+at most δ. However, the system we have described will
+make an error whenever either policy is incorrectly labeled
+as safe, which means its error rate can be as large as 2δ.
+In practice the search of policy space should include many
+more than just two policies, which would further increase
+the error rate.
+We avoid the multiple comparisons problem by setting
+aside data that is only used for a single safety test that determines whether or not a policy will be returned. Specifically, we first partition the data into a small training set,
+Dtrain , and a larger test set, Dtest . The training set is used
+to search for which single policy, called the candidate policy, πc , should be tested for safety using the test set. This
+policy improvement method, P OLICY I MPROVEMENT†‡ , is
+reported in Algorithm 4. To simplify later pseudocode,
+P OLICY I MPROVEMENT†‡ assumes that the trajectories have
+already been partitioned into Dtrain and Dtest . In practice, we place 1/5 of the trajectories in the training
+set and the remainder in the test set. Also, note that
+P OLICY I MPROVEMENT†‡ can use the safe concentration inequality approach, † = CI, or the semi-safe t-test or BCa
+approaches, † ∈ { TT, BCa}.
+
+the safety test, it returns the policy, π, that it predicts will
+have the highest lower bound on ρ(π). If policies are found
+that are predicted to pass the safety test, it returns one that
+is predicted to perform the best (according to g).
+The benefits of this approach are its simplicity and that
+it works well when there is an abundance of data. However, when there are few trajectories in D (e.g., cold start),
+this approach has a tendency to overfit—it finds a policy
+that it predicts will perform exceptionally well and which
+will easily pass the safety test, but actually fails the subsequent safety test in P OLICY I MPROVEMENT†None . We call
+this method ‡ = None because it does not use any methods
+to avoid overfitting.
+Algorithm 4 P OLICY I MPROVEMENT†‡ (Dtrain , Dtest , δ, ρ− )
+Either returns N O S OLUTION F OUND (NSF) or a (semi-)safe policy. Here † can denote either CI, TT, or BCa.
+1: πc ← G ET C ANDIDATE P OLICY†‡ (Dtrain , δ, ρ− , |Dtest |)
+2: if ρ†− (πc , Dtest , δ, |Dtest |) ≥ ρ− then return πc
+3: return NSF
+
+Algorithm 5 G ET C ANDIDATE P OLICY†None (D, δ, ρ− , m)
+Searches for the candidate policy, but does nothing to mitigate
+overfitting.
+1: return arg maxπ f † (π, D, δ, ρ− , m)
+
+P OLICY I MPROVEMENT†‡
+
+is
+presented
+in
+a
+top-down
+manner
+and
+makes
+use
+of
+the
+G ET C ANDIDATE P OLICY†‡ (D, δ, ρ− , m) method, which
+searches for a candidate policy. The input m specifies the
+number of trajectories that will be used during the subsequent safety test. Although G ET C ANDIDATE P OLICY†‡
+could be any batch RL algorithm, like LSPI or FQI
+(Lagoudakis & Parr, 2001; Ernst et al., 2005), we propose an approach that leverages our knowledge that the
+candidate policy must pass a safety test. We will present
+two versions of G ET C ANDIDATE P OLICY†‡ , which we
+differentiate between using the subscript ‡, which may
+stand for None or k-fold.
+Before presenting these two methods, we define an objective function f † as:
+(
+g(π|D) if ρ†− (π, D, δ, m) ≥ ρ− ,
+f † (π, D, δ, ρ− , m) :=
+ρ†− (π, D, δ, m)
+otherwise.
+Intuitively, f † returns the predicted performance of π if the
+predicted lower-bound on ρ(π) is at least ρ− , and the predicted lower-bound on ρ(π), otherwise.
+Consider G ET C ANDIDATE P OLICY†None , which is presented
+in Algorithm 5. This method uses all of the available training data to search for the policy that is predicted to perform
+the best, subject to it also being predicted to pass the safety
+test. That is, if no policy is found that is predicted to pass
+
+In machine learning, it is common to introduce a regularization term, αkwk, into the objective function in order to
+prevent overfitting. Here w is the model’s weight vector
+and k·k is some measure of the complexity of the model
+(often L1 or squared L2 -norm), and α is a parameter that is
+tuned using a model selection method like cross-validation.
+This term penalizes solutions that are too complex, since
+they are likely to be overfitting the training data.
+Here we can use the same intuition, where we control for
+the complexity of the solution policy using a regularization parameter, α, that is optimized using k-fold crossvalidation. Just as the squared L2 -norm relates the complexity of a weight vector to its squared distance from
+the zero vector, we define the complexity of a policy to
+be some notion of its distance from the initial policy, π0 .
+In order to allow for an intuitive meaning of α, rather
+than adding a regularization term to our objective function,
+f † (·, Dtrain , δ, ρ− , |Dtest |), we directly constrain the set of
+policies that we search over to have limited complexity.
+We achieve this by only searching the space of mixed policies, µα,π0 ,π , where α is the fixed regularization parameter, π0 is the fixed initial policy, and where we search
+the space of all possible π. Consider, for example what
+happens to the probability of action a in state s when
+α = 0.5. If π0 (a|s) = 0.4, then for any π, we have
+that µα,π0 ,π (a|s) ∈ [0.2, 0.7]. That is, the mixed policy
+
+High Confidence Policy Improvement
+
+can only move 50% of the way towards being deterministic (in either direction). In general, α denotes that the
+mixed policy can change the probability of an action no
+more than 100α% towards being deterministic. So, using
+mixed policies results in our searches of policy space being
+constrained to some feasible set centered around the initial
+policy, and where α scales the size of this feasible set.
+While small values of α can effectively eliminate overfitting by precluding the mixed policy from moving far away
+from the initial policy, they also limit the quality of the best
+mixed policy in the feasible set. It is therefore important
+that α is chosen to balance the tradeoff between overfitting and limiting the quality of solutions that remain in the
+feasible set. Just as in machine learning, we use k-fold
+cross-validation to automatically select α.
+This approach is provided in Algorithm 6, where
+C ROSS VALIDATE† (α, D, δ, ρ− , m) uses k-fold crossvalidation to predict the value of f † (π, Dtest , δ, ρ− , |Dtest |)
+if π were to be optimized using Dtrain and regularization parameter α. C ROSS VALIDATE† is reported in Algorithm 7.
+In our implementations we use k = min{20, 21 |D|} folds.
+Algorithm 6 G ET C ANDIDATE P OLICY†k-fold (D, δ, ρ− , m)
+Searches for the candidate policy using k-fold cross-validation to
+avoid overfitting.
+1: α? ← arg maxα∈[0,1] C ROSS VALIDATE† (α, D, δ, ρ− , m)
+2: π ? ← arg maxπ f † (µα? ,π0 ,π , D, δ, ρ− , m)
+3: return µα? ,π0 ,π?
+
+Algorithm 7 C ROSS VALIDATE† (α, D, δ, ρ− , m)
+1: Partition D into k subsets, D1 , . . . , Dk , of approximately the
+same size.
+2: result ← 0
+3: for i = 1Sto k do
+b←
+4:
+D
+j6=i Dj
+?
+b δ, ρ− , m)
+5:
+π ← arg maxπ f † (µα,π0 ,π , D,
+6:
+result ← result +f † (µα,π0 ,π? , Di , δ, ρ− , m)
+7: end for
+8: return result/k
+
+5. Daedalus
+The P OLICY I MPROVEMENT†‡ algorithm is a batch method
+that can be applied to an existing data set, D. However,
+it can also be used in an incremental manner by executing
+new safe policies whenever they are found. The user might
+choose to change ρ− at each iteration, e.g., to reflect an estimate of the performance of the best policy found so far
+or the most recently proposed policy. However, for simplicity in our pseudocode and experiments, we assume that
+the user fixes ρ− as an estimate of the performance of the
+initial policy. This scheme for selecting ρ− is appropriate
+when trying to convince a user to deploy an RL algorithm
+
+to tune a currently fixed initial policy, since it guarantees
+with high confidence that it will not decrease performance.
+Our algorithm maintains a list, C, of the policies that it
+has deemed safe. When generating new trajectories, it
+always uses the policy in C that is expected to perform
+best. C is initialized to include a single initial policy,
+π0 , which is the same as the baseline policy used by
+G ET C ANDIDATE P OLICY†k-fold . This online safe learning
+algorithm is presented in Algorithm 8.6 It takes as input
+an additional constant, β, which denotes the number of trajectories to be generated by each policy. If β is not already specified by the application, it should be selected
+to be as small as possible, while allowing DAEDALUS†‡
+to execute within the available time. We name this algorithm DAEDALUS†‡ after the mythological character who
+promoted safety when he encouraged Icarus to use caution.
+Algorithm 8 DAEDALUS†‡ (π0 , δ, ρ− , β)
+Incremental policy improvement algorithm.
+1: C ← {π0 }
+2: Dtrain ← Dtest ← ∅
+3: while true do
+b ← Dtrain
+4: D
+b
+5: π? ← arg maxπ∈C g(π|D)
+6: Generate β trajectories using π ? and append dβ/5e to
+Dtrain and the rest to Dtest
+7: πc ←P OLICY I MPROVEMENT†‡ (Dtrain , Dtest , δ, ρ− )
+b ← Dtrain
+8: D
+b > maxπ∈C g(π|D)
+b then
+9: if πc 6= NSF and g(πc |D)
+10:
+C ← C ∪ πc
+11:
+Dtest ← ∅
+12:
+end if
+13: end while
+
+The benefits of ‡ = k-fold are biggest when
+only a few trajectories are available, since then
+G ET C ANDIDATE P OLICY†None is prone to overfitting.
+When there is a lot of data, overfitting is not a big problem,
+and so the additional computational complexity of k-fold
+cross-validation is not justified. In our implementations
+of DAEDALUS†k-fold , we therefore only use ‡ = k-fold
+until the first policy is successfully added to C, and ‡ =
+None thereafter. This provides the early benefits of k-fold
+cross-validation without incurring its full computational
+complexity.
+The DAEDALUS†‡ algorithm ensures safety with each newly
+proposed policy. That is, during each iteration of the whileloop, the probability that a new policy, π, where ρ(π) <
+ρ− , is added to C is at most δ. The multiple comparison
+problem is not relevant here because this guarantee is periteration. However, if we consider the safety guarantee over
+multiple iterations of the while-loop, it applies and means
+6
+If trajectories are available a priori, then Dtrain , Dtest , and C
+can be initialized accordingly.
+
+High Confidence Policy Improvement
+
+that the probability that at least one policy, π, where ρ(π) <
+ρ− , is added to C over k iterations is at most min{1, 2δ}.
+We define DAEDALUS 2†‡ to be DAEDALUS†‡ but with line
+12 removed. The multiple hypothesis testing problem does
+not affect DAEDALUS 2†‡ more than DAEDALUS†‡ , since the
+safety guarantee is per-iteration. However, a more subtle
+problem is introduced: the importance weighted returns
+from the trajectories in the testing set, ρ̂(πc |τiDtest , πiDtest ),
+are not necessarily unbiased estimates of ρ(πc ). This happens because the policy, πc , is computed in part from
+the trajectories in Dtest that are used to test it for safety.
+This dependence is depicted in Figure 2. We also modb ←
+ify DAEDALUS 2†‡ by changing lines 4 and 8 to D
+Dtrain ∪ Dtest , which introduces an additional minor depenj
+dence of πc on the trajectories in Dtest
+.
+ଵ
+‫୲ܦ‬୰ୟ୧୬
+
+ߨ଴
+
+ଵ
+‫୲ܦ‬ୣୱ୲
+
+ߨ௖ଵ
+
+Safety Testሺߨ௖ଵ ሻ
+
+ߨଵ
+
+ଶ
+‫୲ܦ‬୰ୟ୧୬
+ଶ
+‫୲ܦ‬ୣୱ୲
+
+ߨ௖ଶ
+
+Safety Testሺߨ௖ଶ ሻ
+
+ߨଶ
+
+Figure 2. This diagram depicts influences as DAEDALUS 2†‡ runs.
+1
+1
+First, π0 is used to generate sets of trajectories, Dtrain
+and Dtest
+,
+1
+where superscripts denote the iteration. Next Dtrain
+is used to select the candidate policy, πc1 . Next, πc1 is tested for safety us1
+ing the trajectories in Dtest
+(this safety test occurs on line 2 of
+†
+P OLICY I MPROVEMENT‡ ). The result of the safety test influences
+which policy, π1 , will be executed next. These policies are then
+2
+2
+1
+used to produce Dtrain
+and Dtest
+as before. Next, both Dtrain
+and
+2
+2
+Dtrain are used to select the candidate policy, πc . This policy is
+1
+2
+then tested for safety using the trajectories in Dtest
+and Dtest
+. The
+result of this test influences which policy, π2 , will be executed
+1
+next, and the process continues. Notice that Dtest
+is used when
+2
+testing πc for safety (as indicated by the dashed blue line) even
+though it also influences πc2 (as indicated by the dotted red path).
+This is akin to performing an experiment, using the collected data
+1
+(Dtest
+) to select a hypothesis (πc2 is safe), and then using that same
+data to test the hypothesis. DAEDALUS†‡ does not have this problem because the dashed blue line is not present.
+
+Although our theoretical analysis applies to DAEDALUS†‡ ,
+we propose the use of DAEDALUS 2†‡ because the ability of
+i
+the trajectories, Dtest
+, to bias the choice of which policy to
+test for safety in the future (πcj , where j > i) towards a poli
+icy that Dtest
+will deem safe, is small. However, the benefits
+of DAEDALUS 2†‡ over DAEDALUS†‡ are significant—the set
+of trajectories used in the safety tests increases in size with
+each iteration, as opposed to always being of size β. So,
+in practice, we expect the over-conservativeness of ρCI
+− to
+†
+far outweigh the error introduced by DAEDALUS 2‡ . Notice that DAEDALUS 2CI
+‡ is safe (not just semi-safe) if we
+consider its execution up until the first change of the policy, since then the trajectories are always generated by π0 ,
+which is not influenced by any of the testing data.
+
+6. Case Studies
+We present three case studies: a discrete 4 × 4 gridworld, the canonical Mountain Car domain (Sutton &
+Barto, 1998), which has continuous state variables, and a
+digital marketing domain. The digital marketing domain
+involves optimizing a policy that targets advertisements towards each user that visits a webpage, and uses real data
+collected from a Fortune 20 company. The mountain car
+and digital marketing domains are almost identical to those
+used by Thomas et al. (2015). The only difference is that
+the digital marketing domains use data collected from different companies. Due to space restrictions, we refer the
+reader to Thomas et al. (2015) for additional details about
+these two domains.
+The gridworld domain uses four actions: up, down, left,
+and right, which deterministically move the agent in the
+specified direction. The top left and bottom right states are
+the initial and terminal states, respectively, and a rewards
+are always −1. We use T = 10 and a decent handcrafted
+initial policy that leaves room for improvement.
+In all of the experiments that we present, we selected ρ− to
+be an empirical estimate of the performance of the initial
+policy and δ = 0.05. We used CMA-ES (Hansen, 2006) to
+solve all arg maxπ , where π was parameterized by a vector
+of policy parameters using linear softmax action selection
+(Sutton & Barto, 1998) with the Fourier basis (Konidaris
+et al., 2011).
+First we ran P OLICY I MPROVEMENT†None on the Mountain
+Car domain for all three values of †. The results are provided in Fig. 3. As expected, the CI approach requires more
+data to ensure safe policy improvement than the TT approach, and BCa requires the least data. All three methods
+jump to an optimal policy given 5,000 trajectories. Notice that the CI approach, which is safe (not just semisafe) is able to produce safe policy improvement using
+900 trajectories. In results that are not shown here, using
+P OLICY I MPROVEMENTCI
+k-fold reduces this to only 400 trajectories.
+Next, for each domain, we executed DAEDALUS 2†‡ with
+† ∈ {CI, TT, BCa} and ‡ ∈ {None, k-fold}. Ideally, we
+would use β = 1 for all domains. However, as β decreases,
+the runtime increases. We selected β = 100 for the gridworld, β = 50 for Mountain Car, and β ∈ [50, 100, 500] for
+the digital marketing domain. β increases with the number
+of trajectories in the digital marketing domain so that the
+plot can span the number of trajectories required by the CI
+approach without requiring too many calls to the computationally demanding P OLICY I MPROVEMENTBCa
+k-fold method.
+We did not tune β for these experiments—it was set solely
+to limit the runtime.
+The performance of DAEDALUS 2†‡ on these three domains
+
+High Confidence Policy Improvement
+
+0.6
+
+0.06
+
+0.2
+
+0.22
+0
+
+700
+Number of Trajectories
+
+1400
+
+(a) 4 × 4 gridworld results.
+
+0.2
+
+Expected Normalized Return
+
+Expected Normalized Return
+
+Expected Normalized Return
+
+0.61
+
+Expected Normalized Return
+
+1
+
+1
+
+0
+
+450
+Number of Trajectories
+
+900
+
+(b) Mountain Car results.
+
+1
+
+None, CI
+None, TT
+
+0.6
+
+None, BCa
+k-fold, CI
+k-fold, TT
+k-fold, BCa
+
+0.2
+
+0
+
+0
+
+450
+1500
+3000900
+Number Number
+of Episodes
+of Trajectories
+
+(c) Digital marketing results.
+
+Expected Normalized Return
+
+Figure 4. Performance of DAEDALUS 2†‡ . The legend specifies ‡, †.
+1
+
+0.5
+
+0
+n=50
+
+n=200
+CI
+
+TT
+
+n=900
+
+n=5000
+
+BCa
+
+Figure 3. Mean performance (100 trials) of the policies produced
+by P OLICY I MPROVEMENT†None for Mountain Car, where † is
+specified in the legend and the number of trajectories, n = |D|,
+is specified on the horizontal axis. Using † = CI with n = 50
+never resulted in a change to the policy, and so it specifies the
+performance of the initial policy.
+
+is provided in Figure 4. The expected normalized returns
+in Figures 4(a), 4(b), and 4(c) are computed using 100,000,
+10,000, and 20,000 Monte Carlo rollouts, respectively. The
+curves are also averaged over 100, 100, and 10 trials, respectively, with standard error bars provided when they do
+not cause too much clutter.
+First, consider the different values for †. As expected,
+the CI approaches (solid curves) are the most conservative,
+and therefore require the most trajectories in order to guarantee improvement. The BCa approaches (dashed lines)
+perform the best, and are able to provide high-confidence
+guarantees of improvement with as few as 50 trajectories.
+The TT approach (dotted lines) perform in-between the CI
+and BCa approaches, as expected (since the t-test tends to
+produce overly conservative lower bounds for distributions
+with heavy upper tails).
+Next, consider the different values of ‡. Using k-fold crossvalidation provides an early boost in performance by limiting overfitting when there are few trajectories in the training set. Although the results are not shown, we experimented with using ‡ = k-fold for the entire runtime (rather
+than just until the first policy improvement), but found that
+while it did increase the runtime significantly, it did not
+produce much improvement.
+
+Next, we computed the empirical error rates—the probability that a policy was incorrectly declared safe. In the gridworld and digital marketing domains, the empirical error
+rates were zero (no errors were made in any trials). In the
+Mountain Car domain the empirical error rates were below
+0.6% for all † and ‡, which is far below the allowed 5%
+error rate. Also, although there are often concerns about
+the performance of off-policy evaluation methods as policies become deterministic, we observed no complications
+or instabilities as the policies produced by DAEDALUS 2†‡
+approached the deterministic optimal policies.
+Lastly,
+notice that using n trajectories with
+P OLICY I MPROVEMENT†None tends to result in a worse
+policy than using DAEDALUS 2†None for n trajectories.
+For example, when † ∈ {TT, BCa} and n = 200,
+P OLICY I MPROVEMENT†None achieves a mean normalized return of approximately 0.6 (see Fig. 3), while
+DAEDALUS 2†None achieves a mean normalized return
+between 0.7 and 0.86 (see Fig. 4(b)). This is because
+DAEDALUS 2†‡ collects trajectories from increasingly good
+regions of policy space, which allows it to produce tighter
+lower bounds on the performance of even better policies.
+
+7. Conclusion
+We have presented batch and incremental policy improvement algorithms that provide (exact and approximate) statistical guarantees about the performance of policies that
+they propose. These guarantees can be tuned by the user to
+account for the acceptable level of risk in each application.
+We showed on a real world digital marketing problem that
+our algorithms can use a realistic amount of data to provide
+guaranteed policy improvements with confidence 95%.
+
+Acknowledgments
+We would like to thank everyone who assisted with this
+work, particularly Bruno Scherrer, Alessandro Lazaric, Andrew Barto, Sridhar Mahadevan, Lucas Janson, and the reviewers.
+
+High Confidence Policy Improvement
+
+References
+Benjamin, Y. and Hochberg, Y. Controlling the false discovery rate: A practical and powerful approach to multiple testing. Journal of the Royal Statistical Society, 57
+(1):289–300, 1995.
+Bottou, L., Peters, J., Quiñonero-Candela, J., Charles,
+D. X., Chickering, D. M., Portugaly, E., Ray, D., Simard,
+P., and Snelson, E. Counterfactual reasoning and learning systems: The example of computational advertising.
+Journal of Machine Learning Research, 14:3207–3260,
+2013.
+
+Kakade, S. On the Sample Complexity of Reinforcement
+Learning. PhD thesis, University College London, 2003.
+Kakade, S. and Langford, J. Approximately optimal approximate reinforcement learning. In Proceedings of the
+Nineteenth International Conference on Machine Learning, pp. 267–274, 2002.
+Konidaris, G. D., Osentoski, S., and Thomas, P. S. Value
+function approximation in reinforcement learning using the Fourier basis. In Proceedings of the TwentyFifth Conference on Artificial Intelligence, pp. 380–395,
+2011.
+
+Carpenter, J. and Bithell, J. Bootstrap confidence intervals:
+when, which, what? a practical guide for medical statisticians. Statistics in Medicine, 19:1141–1164, 2000.
+
+Lagoudakis, M. and Parr, R. Model-free least-squares policy iteration. In Neural Information Processing Systems:
+Natural and Synthetic, pp. 1547–1554, 2001.
+
+Champless, L. E., Folsom, A. R., Sharrett, A. R., Sorlie,
+P., Couper, D., Szklo, M., and Nieto, F. J. Coronary
+heard disease risk prediction in the atherosclerosis risk
+in communities (ARIC) study. Journal of Clinical Epidemiology, 56(9):880–890, 2003.
+
+Moore, B., Panousis, P., Kulkarni, V., Pyeatt, L., and Doufas, A. Reinforcement learning for closed-loop propofol anesthesia: A human volunteer study. In Innovative
+Applications of Artificial Intelligence, pp. 1807–1813,
+2010.
+
+Davison, A. C. and Hinkley, D. V. Bootstrap Methods and
+their Application. Cambridge University Press, Cambridge, 1997.
+
+Pirotta, M., Restelli, M., Pecorino, A., and Calandriello,
+D. Safe policy iteration. In Proceedings of the 30th
+International Conference on Machine Learning, 2013.
+
+Efron, B. Better bootstrap confidence intervals. Journal of
+the American Statistical Association, 82(397):171–185,
+1987.
+
+Precup, D., Sutton, R. S., and Singh, S. Eligibility traces
+for off-policy policy evaluation. In Proceedings of the
+17th International Conference on Machine Learning, pp.
+759–766, 2000.
+
+Efron, B. and Tibshirani, R. J. An Introduction to the Bootstrap. Chapman and Hall, London, 1993.
+Ernst, D., Geurts, P., and Wehenkel, L. Tree-based
+batch mode reinforcement learning. Journal of Machine
+Learning Research, 6:503–556, 2005.
+Folsom, A. R., Chambless, L. E., Duncan, B. B., Gilbert,
+A. C., and Pankow, J. S. Prediction of coronary heart
+disease in middle-aged adults with diabetes. Diabetes
+Care, 26(10):2777–2784, 2003.
+Hansen, N. The CMA evolution strategy: a comparing review. In Lozano, J.A., Larranaga, P., Inza, I., and Bengoetxea, E. (eds.), Towards a new evolutionary computation. Advances on estimation of distribution algorithms,
+pp. 75–102. Springer, 2006.
+Jonker, J., Piersma, N., and den Poel, D. Van. Joint optimization of customer segmentation and marketing policy
+to maximize long-term profitability. Expert Systems with
+Applications, 27(2):159–168, 2004.
+Kaelbling, L. P., Littman, M. L., and Moore, A. W. Reinforcement learning: A survey. Journal of Artificial Intelligence Research, 4:237–285, 1996.
+
+Sutton, R. S. and Barto, A. G. Reinforcement Learning: An
+Introduction. MIT Press, Cambridge, MA, 1998.
+Thomas, P. S., Theocharous, G., and Ghavamzadeh, M.
+High confidence off-policy evaluation. In Proceedings of
+the Twenty-Ninth Conference on Artificial Intelligence,
+2015.
+
+

@@ -1,0 +1,1482 @@
+A Multitask Point Process Predictive Model
+Wenzhao Lian1
+WL 89@ DUKE . EDU
+Ricardo Henao1
+R . HENAO @ DUKE . EDU
+Vinayak Rao2
+VARAO @ PURDUE . EDU
+Joseph Lucas3
+JOE @ STAT. DUKE . EDU
+Lawrence Carin1
+LCARIN @ DUKE . EDU
+1
+Department of Electrical and Computer Engineering, Duke University, Durham, NC 27708, USA
+2
+Department of Statistics, Purdue University, West Lafayette, IN 47907, USA
+3
+Center for Predictive Medicine, Duke Clinical Research Institute, Durham, NC 27708, USA
+
+Abstract
+Point process data are commonly observed in
+fields like healthcare and the social sciences. Designing predictive models for such event streams
+is an under-explored problem, due to often scarce
+training data. In this work we propose a multitask point process model, leveraging information
+from all tasks via a hierarchical Gaussian process (GP). Nonparametric learning functions implemented by a GP, which map from past events
+to future rates, allow analysis of flexible arrival
+patterns. To facilitate efficient inference, we propose a sparse construction for this hierarchical
+model, and derive a variational Bayes method for
+learning and inference. Experimental results are
+shown on both synthetic data and as well as real
+electronic health-records data.
+
+1. Introduction
+Point process data have seen increased attention in fields
+like biomedical research (Rad & Paninski, 2011; Lian et al.,
+2014), electronic commerce (Xu et al., 2014), and healthcare analysis (Lasko, 2014). One thread of work focuses on
+learning arrival rates by imposing smoothness on a latent
+rate function (Adams et al., 2009; Rao & Teh, 2011; Lloyd
+et al., 2014). Another consists of predicting future arrivals
+as a direct function of past observations (Pillow et al., 2008;
+Gunawardana et al., 2011). Taking healthcare analysis as a
+motivating example, we focus on the latter problem: given
+a patient’s hospital visit history up to time t, (i) when will
+the next visit happen? and (ii) how many visits will the patient have in [t, t + L]? Answering such questions provides
+Proceedings of the 32 nd International Conference on Machine
+Learning, Lille, France, 2015. JMLR: W&CP volume 37. Copyright 2015 by the author(s).
+
+a quantitative evaluation of the patient’s risk, which helps
+to make treatment plans and allocate hospital resources efficiently (Amarasingham et al., 2010). Similar problems
+also arise in other fields, such as predicting purchasing behavior for individual customers, or predicting failures in
+distributed computer systems.
+A few works have explored the prediction problem in point
+processes by learning a functional mapping from history
+features to the current intensity rate (Pillow et al., 2008; Rajaram et al., 2005; Gunawardana et al., 2011). In Gunawardana et al. (2011), the intensity function is constrained
+to be piecewise-constant, learned using decision trees and
+used for prediction. In our proposed multitask point process model, we build upon this piecewise-constant intensity model. To allow for flexibility of the function mapping
+from history features to future rate, and to capture the uncertainty of estimation, we use a nonparametric method,
+by imposing a Gaussian process (GP) prior on the intensity
+rate. However, when building such predictive models for
+event arrival processes, one difficulty is that the available
+training data are scarce for each subject/task. Therefore,
+we treat each individual arrival process as a task and follow
+a multitask learning approach to share information from all
+tasks in a hierarchical manner.
+Methods for learning GPs from multiple tasks have been
+proposed (Yu et al., 2005), but involve a shared global mean
+function, inferred at all observed inputs (history features)
+across all the tasks. The posterior of this function cannot
+be directly updated due to non-conjugacy of the point process likelihood to GP priors. One approximation method,
+variational Bayes, is often applied, leading to the number
+of unknown parameters scaling as O(N 2 ), where N is the
+number of unique features from all tasks. Borrowing from
+the framework of pseudo inputs in the GP literature (Snelson & Ghahramani, 2006; Titsias, 2009), we constrain the
+rate functions to an M -dimensional latent space, where
+
+A Multitask Point Process Predictive Model
+
+M  N , reducing the parameter space to O(M 2 + M P ),
+where P is the GP input dimension. By adjusting the locations of the pseudo inputs, we can effectively share data
+across tasks and efficiently represent these functions.
+Learning the history-to-rate mapping functions allows one
+to predict future events by analytical integration or forward
+sampling. We consider both, evaluating our model and
+inference methodology on both synthetic and a real Electronic Health Records (EHR) dataset. The latter involves
+different categories of health problems, and we demonstrate that future hospital visits for some types of diseases
+are predictable even with simple history features. Our work
+has two main contributions: (i) providing an efficient approach to share data/parameters in hierarchical/multitask
+GP models; and (ii) building a predictive model for arrival
+data from multiple event streams, using point processes in
+a multitask scheme.
+
+2. Related Work
+GP-modulated point processes are a popular approach for
+modeling event streams (Adams et al., 2009; Rao & Teh,
+2011; Lloyd et al., 2014; Lasko, 2014). Assuming a
+smoothly varying intensity function, the intensity rate, as
+well as its uncertainty, can be estimated from observed
+streams. Extrapolation can be used for short-term prediction. There are two main limitations of these models. First,
+the smoothness assumption does not hold in many scenarios. Sudden rate changes often happen upon event arrivals,
+e.g., the risk of a patient’s hospital visit might change significantly after a single visit. Second, these models involve
+a common modulating GP, so that multiple streams have to
+be aligned, something not always appropriate or possible.
+For example, similar arrival patterns might appear at different periods of time for different streams, which cannot be
+captured by such models.
+Another relevant line of work on point process predictive modeling comes from the neural decoding literature
+(Kulkarni & Paninski, 2007; Rad & Paninski, 2011; Pillow
+et al., 2008), where multiple subjects/neurons are affected
+by common stimuli (features), generating event streams. A
+generalized linear model can be trained on the stimuli or
+spiking history to learn the rate function, and further predict future spiking events. Meanwhile, the network structure across neurons can be inferred, which in turn, helps
+with prediction. However, temporal alignment is also assumed in these models, which is valid in the setting of neural decoding, but not in the cases we consider.
+Also related is the work of Weiss & Page (2013),
+which integrates the multiplicative forest Continuous Time
+Bayesian Network (mfCTBN) with the piecewise-constant
+intensity model of Gunawardana et al. (2011). More pre-
+
+cisely, they learn forests mapping from demographic and
+event history features to intensity rates, but under the assumption that all subjects have the same function, i.e., each
+event stream is a realization trajectory of some underlying
+model. In our work, we consider a different setting, where
+the variability across subjects cannot be ignored. This difference is crucial in scenarios such as healthcare analysis
+and electronic commerce, where variability among members of a population affects arrival pattern discovery and
+predictive performance.
+
+3. Piecewise-constant Conditional Intensity
+Model
+Multi-task point process observations are sequences of arrival time stamps {ynu }, with n = 1, · · · , Du and u =
+1, · · · , U , where ynu represents the time stamp of the n-th
+arrival of subject/task u. Our goal is to model the sequences
+and make predictions for future event arrivals.
+The event streams can be naturally modeled using an intensity model, with a hazard rate function γ(t). In an infinitesimal time interval ∆, the probability of an event occuring
+in this interval is given by ∆γ(t). To build the temporal
+dependency between past observations and future events,
+we choose the hazard rate as a function of past observations h(t), denoted as γ(t|h(t)), in which h(t) summarizes the history of past observations (Gunawardana et al.,
+2011); details on the potential form of h(t) are discussed
+u
+subsequently. Denoting Y u = {y1u , · · · , yD
+u } as the set of
+arrival time stamps in task u, the likelihood is
+u
+yn+1
+
+u
+
+u
+
+p(Y ) =
+
+D
+Y
+
+γ
+
+n=1
+
+u
+
+(ynu |hu (ynu )) exp(−
+
+Z
+u
+yn
+
+γ u (τ |hu (τ ))dτ ) .
+
+Assuming γ u (t|hu (t)) as piecewise constant with N u
+u
+u
+change points (pieces) at {tui }N
+i=1 , and piece length ∆i =
+tui+1 − tui , we have the likelihood
+u
+
+u
+
+p(Y ) =
+
+N
+Y
+i=1
+
+γ u (tui |hu (tui ))
+×
+
+u
+I(tu
+i ∈Y )
+
+(1)
+
+exp{−∆ui γ u (tui |hu (tui ))} .
+
+Many approaches exist to extract features h(t) from past
+event arrivals. One possible feature-construction approach
+uses empirical rates at recent time points (Rajaram et al.,
+u u
+u
+2005), i.e., hu (tui ) ∈ RP
++ with hp (ti ) = γ̄(ti − Lp )
+for L1 , L2 , · · · , LP predefined lengths of memory. Here
+γ̄(tui − Lp ) refers to the empirically computed rate at time
+tui − Lp . Keeping the algorithm simple, we adopt a construction similar in spirit to Gunawardana et al. (2011):
+hu (tui ) is P dimensional, where its p-th element denotes
+the count of arrivals in [tui − Lp , tui ]. Therefore, hu (t)
+
+A Multitask Point Process Predictive Model
+
+is a piecewise constant function. Revisiting the likelihood
+in (1), we observe that N u is the number of change points
+(pieces) of the feature function hu (t) going through the
+u
+u
+whole event stream {ynu }D
+n=1 , and that N scales linearly
+u
+with D (the number of events). Side information in the
+form of covariates can also be considered as a natural extension, by augmenting the feature space. Constructing
+richer features from history observations is left as an interesting direction for future work.
+To complete the intensity model, the functional mapping
+from feature space to intensity rate must be specified. Define the space of the history features hu (tui ) as H, where
+each point hu (tui ) , hui ∈ H is a possible feature vector. Here we impose a GP prior on a set of functions
+f u (·) : H → R, followed by a transformation to ensure the non-negativity of intensity rates. We use a square
+transformation (γ u (·) = {f u (·)}2 ) rather than the common γ u (·) = exp{f u (·)}, because the uncertainty of f u (·)
+cannot be properly estimated in the latter construction, as
+discussed by Lloyd et al. (2014); this issue is addressed
+thoroughly in Section 5. To resolve the ambiguity caused
+by {f u (·)}2 = {−f u (·)}2 , a prior specification favoring
+the positive half-space is imposed and works well in practice.
+
+4. Multitask Point Process Predictive Model
+As mentioned in Section 1, sharing information across
+tasks is necessary when learning the rate functions from
+sparse data. Accordingly, we consider a hierarchical GP
+construction. Denote the rate at feature vector hui as γiu ,
+u
+with the corresponding transformed rate denoted as fN,i
+.
+The generative process from history features to rates may
+be described as follows
+
+
+1
+0
+(2)
+µN ∼ GP g, KN N ,
+ξ
+
+u
+fN
+∼ N µ0N , KN N ,
+(3)
+γiu
+
+=
+
+u
+{fN,i
+}2 .
+
+(4)
+
+In (2), g is a prior mean, which may be set according to
+prior knowledge or the empirical average intensity rate over
+all tasks. Parameter ξ controls the complexity of the hyperprior. The covariance matrix KN N can be obtained from
+a squared-exponential or Matérn function with automatic
+relevance determination (ARD) covariance kernel, for example,
+!
+P
+2
+X
+(h
+−
+h
+)
+pi
+pj
++ σ 2 I(i = j) ,
+KN N,ij = τ 2 exp −
+2λ2p
+p=1
+(5)
+where hi ∈ H may be any possible history feature. In (2),
+µ0N determines the global mean function of transformed
+
+u
+rate functions, fN
+, from all U tasks. For each individu
+ual task, the task-specific transformed rate function, fN
+,
+0
+is a “noisy version” of the global mean function µN . Our
+construction is inspired by Yu et al. (2005), which can be
+shown analogous to a hierarchical construction of the multitask linear regression model
+
+
+1
+(6)
+w0 ∼ N v, I ,
+ξ
+
+wu ∼ N w0 , I ,
+(7)
+
+
+>
+u
+fN,i
+(8)
+∼ N wu hi , σ 2 ,
+
+where w0 and wu are the global and task-specific regression parameters, respectively, and v is the hypermean for w0 . Choosing a linear kernel for (2) and (3)
+(KN N,ij = hTi hj ), and letting v = g = 0, the construction through (2)-(3) is equivalent to the multitask linear regression model in (6)-(8) on a finite observed dataset.
+u
+
+If there exists enough training data, i.e., {hui }N
+i=1 densely
+u
+is mainly determined by the
+covers the feature space H, fN
+u
+is significantly affected by
+data in task u. Otherwise, fN
+0
+the prior µN , which pools together information from rate
+u
+functions {fN
+} from all tasks.
+However, a problem with the hierarchal GP construction
+u
+is
+using (2) and (3) is that the dimension of µ0N and fN
+typically massive, in fact it is not smaller than the number
+u
+of unique history features from all tasks, i.e., |∪u {hui }N
+i=1 |,
+where |S| refers to the cardinality of a set S. Thus, the
+number
+PUof unknown parameters
+PU in the model scales with
+O(U u=1 N u ), or O(U ( u=1 N u )2 ) if variance estimation is also considered. In point process models in particular, this is impractical because the influence of the likelihood is weak and noise levels are high. Therefore, we propose an alternative approach inspired by the pseudo input
+framework for GPs (Snelson & Ghahramani, 2006; Titsias,
+2009). Specifically, we propose a two-step process by inu
+troducing an M -dimension vector fM
+for each task, where
+u
+M  | ∪u {hui }N
+|.
+Then,
+using
+a
+so-called conditional
+i=1
+Gaussian Processes, we define the generative process as
+
+
+1
+µ0M ∼ N g, KM M ,
+(9)
+ξ
+
+u
+fM
+∼ N µ0M , KM M ,
+(10)
+u
+u
+fN
+|fM
+
+∼
+
+−1
+u
+u
+GP g + KN
+M KM M (fM − g),
+
+1
+u
+(1 + )(KN
+N
+ξ
+
+(11)
+
+>
+−1
+u
+u
+− KN
+K
+K
+)
+,
+M
+NM
+MM
+
+u
+where fN
+contains the transformed rates at all possible
+u
+u
+feature vectors {hui }N
+i=1 in task u, while fM is a M dimensional vector, consisting of the transformed rates at
+M feature-vector locations {si }M
+i=1 .
+
+In (11), for each task u, only the function values at feature
+vectors appearing in task u are required, while in (3), for
+
+A Multitask Point Process Predictive Model
+
+significant difference in performance against just a point
+estimate, and for easier interpretability, focus on the latter.
+
+U
+Yu
+
+u
+1:N u
+
+f uN
+
+u
+fM
+
+2
+
+, ⌧,
+
+1:P , s1:P
+
+µ0M
+
+g, ⇠
+
+Figure 1. Graphical model representation (filled circle are observed, empty circles denotes latent variables, rectangles refer to
+model parameters, and the rest are free hyper-parameters).
+
+each task, the function values1 at all feature vectors appearing in all tasks need to be specified.
+
+u
+u
+Maintaining p(fM
+, fN
+|Y, Θ), the full posterior distribution over the intensity functions of each task is important
+for transfer learning across tasks with different numbers of
+observations. However, this is not straightforward due to
+the non-conjugate point process likelihood, and borrowing
+ideas from variational learning for sparse GPs (Lloyd et al.,
+2014; Titsias, 2009), we propose a variational form to apu
+u
+proximate the posterior p(fM
+, fN
+|Y, Θ). Letting Y refer
+to the complete collection of event streams Y 1 , · · · , Y U ,
+we use
+
+u
+u
+u
+u
+u
+q(fN
+, fM
+) = p(fN
+|fM
+)q(fM
+)
+
+u
+u
+u
+= p(fN
+|fM
+)N (fM
+; µu , Σu ) .
+
+(12)
+
+Following the GP literature (Titsias, 2009), we refer to {si }
+as pseudo inputs. These need not appear in any of the tasks
+(or even H); we only require that a distance can be properly
+defined between si and huj . And similar to (5), KM M and
+u
+KN
+M can be obtained through the squared-exponential or
+the Matérn function with ARD kernel, with huj and si as
+covariates. Specifically,
+!
+P
+2
+X
+(s
+−
+s
+)
+pi
+pj
+KM M,ij = τ 2 exp −
++ σ 2 I(i = j) ,
+2
+2λ
+p
+p=1
+!
+P
+X
+(hupi − spj )2
+u
+2
+KN M,ij = τ exp −
+.
+2λ2p
+p=1
+
+Note that we allow a free-form Gaussian distribution for
+u
+fM
+, the task-specific transformed rates at the pseudo inputs. However the transformed rates evaluated at all
+u
+, are constrained by the lowfeatures in each task, fN
+u
+dimensional function fM via (11). In the following,
+u
+) =
+we use a simplified notation q u to denote q(fM
+u
+u
+u
+N (fM ; µ , Σ ). Because of the special factorized form
+in (12), {µu , Σu } are the only variational parameters in
+the algorithm.
+
+It can be shown that the construction through (9)-(11) reu
+as
+sults in the same marginal prior distribution for fN
+(2)-(3) (see supplemental material) while having a significantly reduced computational cost. Overfitting problems
+can also be alleviated because model complexity is reduced. This is especially beneficial when sophisticated features are constructed, resulting in very large history feature spaces, however, with the rate function likely living
+in a low-dimensional manifold. As a result, assuming
+u
+{si , fM,i
+}M
+i=1 captures the characteristics of the function
+u
+u
+u
+{hi , fN,i }N
+i=1 , while achieving computational savings, and
+improved estimation accuracy. The proposed full generative model is summarized by equations (9)-(11), (4) and
+(1), as demonstrated in Figure 1.
+
+log p(Y, Θ) ≥ log p(Θ)
+(13)
+
+
+U
+u
+u
+X
+p(Y u , fN
+, fM
+)
+u ) [log
++
+Eq(fNu ,fM
+.
+u , fu ) ]
+q(f
+N
+M
+u=1
+
+5. Inference
+Model parameters Θ include the pseudo-input locations,
+the global mean of transformed rates, and the GP hyper0
+2 2
+P
+paramters: Θ = {{sm }M
+m=1 , µM , σ , τ , {λp }p=1 }. Ob0
+taining a full posterior distribution for µM is straightforward due to local conjugacy. However we observed no
+
+The inference objective is to maximize the variational
+lower bound (Beal, 2003) (called ELBO for evidence lower
+bound optimization):
+
+u
+u
+u
+u
+Note that in (13), q(fN
+, fM
+) and p(Y u , fN
+, fM
+) implicitly depend on Θ. Since we only impose a Gaussian prior
+on µ0M in (9), log p(Θ) is simplified to log p(µ0M ). Priors on other model parameters may also be imposed, e.g.,
+a log-normal prior on GP hyper-parameters, but here we
+learn their maximum likelihood estimate (MLE) instead.
+To show explicit dependence, we denote the ELBO as
+F(q 1 , · · · , q U , Θ). We maximize F(q 1 , · · · , q U , Θ) in
+(13), giving a variational Expectation Maximization (EM)
+algorithm guaranteed to converge to a local optimum (Beal,
+2003). In practice, we alternate between a variational Estep, where Θ is fixed and F(q 1 , · · · , q U , Θ) is maximized
+u U
+w.r.t. {q u }U
+u=1 , and a variational M-step, where {q }u=1
+1
+U
+is fixed and F(q , · · · , q , Θ) is maximized w.r.t. Θ.
+Derivation details are standard; we list the key steps below:
+
+A Multitask Point Process Predictive Model
+
+F(q 1 , · · · , q U , Θ) =
+U
+X
+
++
+
+u=1
+
+U
+X
+u=1
+
+h
+i
+u u
+u ) [log p(Y |f
+Equ Ep(fNu |fM
+N )]
+
+
+u
+Eq log
+
+
+u
+p(fM
+|µ0M )
+0
+u |µu , Σu ) + log p(µM )
+q(fM
+
+, F1 + F2 + F3 .
+
+(14)
+
+The first term F1 (15) measures how the functions
+specified by q u (determining the distribution of function values at pseudo inputs) fit the observations.
+Because of the sparsity assumption of the condiu
+tional Gaussian process, we can integrate out fN
+and
+u
+u
+leave F1 as a function of only {µ , Σ } and Θ:
+F1 =
+
+U Z
+X
+
+u
+u
+u
+q(fN
+|µu , Σu ) log p(Y u |fN
+)dfN
+
+u=1
+
+(15)
+
+u
+
+N
+U X
+X
+ u
+	
+u 2
+u 2
+I(ti ∈ Y u )E[log(fN,i
+) ] − ∆ui E[(fN,i
+) ] ,
+=
+u=1 i=1
+
+u
+|µu , Σu ) = N (bu , B u ),
+The expectation is w.r.t. q(fN
+with parameters in (16) and (17):
+
+−1
+u
+u
+KN
+M KM M (µ
+
+u
+
+b =g+
+− g) ,
+(16)
+
+
+
+1
+>
+−1
+u
+u
+u
+Bu = 1 +
+KN
+N − KN M KM M KN M
+ξ
+−1
+−1 >
+u
+u
+u
++ KN
+M KM M Σ (KN M KM M ) .
+
+(17)
+
+u 2
+) ] in (15) can be calculated using confluent hyE[log(fN,i
+pergeometric functions (Lloyd et al., 2014). Further details can be found in the Supplemental Material, where
+we also provide a robust approximation to tackle the wellknown numerical instability issue in confluent hypergeometric function evaluations (Ancarani & Gasaneo, 2008).
+
+As a side note on why we prefer a squared transformation over the exponential, when using the
+latter, F1 is modified as (18), denoted as F̃1 :
+u
+
+F̃1 =
+
+U X
+N
+X
+u
+u
+{I(tui ∈ Y u )E[fN,i
+] − ∆ui E[exp(fN,i
+)]} , (18)
+
+u=1 i=1
+
+u
+u
+Now the variance of fN,i
+does not affect E[fN,i
+] at event
+u
+u
+times ti ∈ Y (Lloyd et al., 2014), but only contributes
+u
+to the second term through E[exp(fN,i
+)]. This leads to instability issues during inference. We also implemented the
+algorithm using this transformation, but the estimated function f u diverged even with strong prior constraints.
+
+F2 , as specified in (19), penalizes the task-specific function’s deviation from the global mean function µ0M .
+This is especially important for tasks with few training data, e.g., short event streams or few event arrivals.
+
+U
+P
+F2 = − U2 log |KM M | + 12
+log |Σu |
+(19)
+u=1
+h
+
+i
+PU
+>
+>
+−1
+u u>
+− u=1 12 tr KM
++ Σu +µ0M µ0M − 2µu µ0M
+.
+M µ µ
+
+F3 involves the hyper-prior on the global function µ0M , with ξ controlling the belief strength:
+F3 =
+
+1
+−1
+−1
+0
+0
+>
+{log |ξKM
+M | − tr(ξKM M (µM − g)(µM − g) )} .
+2
+
+Having defined the variational objective, we can maximize
+the objective alternately w.r.t. to {µu , Σu } and Θ. In the
+variational E-step, we update the variational parameters µu
+and Σu using gradient descent methods. As a practical
+consideration, to preserve the positive definiteness of Σu ,
+we optimize it instead over its lower Cholesky decomposition, Lu , where Σu = Lu Lu > , and with positiveness
+constraints on the diagonal elements. In the variational Mstep, updates for µ0M are obtained in closed form due to
+local conjugacy. Gradient methods are needed for updating other parameters, including locations of pseudo inputs
+and GP hyperparameters (see Supplemental Material for
+details).
+When the number of tasks is large, the algorithm can be
+readily distributed over a cluster, with the E-step optimization procedures for tasks distributed over individual
+cores/machines.
+
+6. Experiments
+We evaluate our model on both synthetic data as well as an
+EHR dataset. At any time t, the basic challenge is to predict
+the event arrival patterns in the interval [t, t+L]. One baseline is a simplified model where each task is learned independently (fixing µ0M in (10) to g) to demonstrate the benefit of sharing across tasks. We refer to our proposed model
+as MTPP (for multitask point process model), and the simplified model as IPP (for independent point process model).
+Another baseline is Poisson regression (PoiR), specialized
+for the prediction problem considered. Here, at each time
+stamp t, using observations in a window of length LP (the
+maximum memory length), we calculate the history features h(t), and treat them as predictors for the number of
+arrivals in the succeeding window [t, t + L]. While this
+is not a generative processs, the Poisson regression model
+can be trained using observations and tested on prediction
+tasks.
+6.1. Synthetic Experiments
+For the first experiment, we synthesize a rate function for
+each of U = 10 tasks using a two step process. First
+the rates at M = 10 feature locations (pseudo inputs) are
+generated from a common Gaussian distribution. The rate
+
+A Multitask Point Process Predictive Model
+3
+
+−10
+True Model
+MTPP
+IPP
+
+−12
+
+−14
+
+40
+
+50
+
+60
+70
+80
+90
+Observation Length T
+
+100
+
+MTPP
+IPP
+
+2.5
+
+0.4
+
+5
+
+0.2
+
+2
+
+0
+
+1.5
+
+0
+
+0
+
+1
+
+2
+
+3
+
+0.4
+
+1
+0.5
+50
+
+60
+70
+80
+90
+Observation Length T
+
+4
+
+5
+
+6
+
+7
+
+8
+
+9 10 11 12
+
+True Model
+MTPP
+IPP
+Observed count
+
+0.2
+40
+
+100
+
+Figure 2. Left: Predictive log-likelihood per unit time; Right:
+mean normalized estimation error of intensity rates.
+
+function is then drawn conditioned on these, as specified by
+(11). The features constructed at time t are the event counts
+in intervals [t − 5, t] and [t − 1, t]. The GP hyperparameters
+are set as, λ1 = λ2 = 4, τ = 1.2, and σ = 0.01, to produce moderate rate functions, e.g., the empirical average
+rate over each event stream is between 0.05 and 1.5. Using
+the conditional intensity model introduced in Section 3, we
+generate event streams for each of the U tasks. We train
+the models using observations up to time T , and perform
+forward prediction.
+For inference, the pseudo points were initialized using Kmeans clustering over the history features appearing in the
+training set. The GP hyperparameters are initialized setting
+the length-scale parameters, {λp }, as the standard deviation of observed feature vectors, the magnitude, τ , as the
+standard deviation of square roots of empirical rates (computed via binning methods), and the noise term, σ 2 , as a
+small value, 0.01τ 2 . The algorithm converges within 20 iterations, after which the relative successive increase of the
+variational objective is negligible.
+Model fit: We first evaluate the model and inference by
+comparing MTPP and IPP with the ground truth model. We
+vary the observation length of the training set T ; the experiments for each setting are repeated for 15 runs, with mean
+and standard deviation reported.
+The left panel of Figure 2 compares the predictive loglikelihood per unit time (data log-likelihood discounted by
+event stream length) on unseen streams. We see that with
+an increasing length of training observations, the predictive
+log-likelihood of both MTPP and IPP gradually approaches
+the log-likelihood obtained with the true model. When T is
+small, which is true in many practical scenarios, IPP cannot
+fit the data well while MTPP learns the model accurately.
+This is again illustrated in the right panel of Figure 2, where
+for both MTPP and IPP, we compute the rate estimation error (`2 -norm), normalized w.r.t. the true rates, and averaged
+over all history features occurred in the data. We observe
+that MTPP outperforms IPP, especially in scarce-data scenarios, demonstrating the benefit of sharing across tasks.
+Forward prediction: We evaluate the prediction performance using two metrics (mirroring the two questions
+
+0
+
+MTPP
+IPP
+
+4
+
+0
+
+1
+
+2
+
+3
+
+4 5 6 7 8
+Event count
+
+9 10 11 12
+
+KL divergence
+
+−8
+
+Rate Estimation Error
+
+Log−Likelihood
+
+−6
+
+3
+2
+1
+0
+
+40
+
+50
+
+60
+70
+80
+90
+Observation Length T
+
+100
+
+Figure 3. Left: Predicted empirical distributions of event counts
+in [t, t+5]; Right: KL divergence between predicted distributions
+of event counts in [t, t + 5] using the learned and the true model.
+
+posed in Section 1). The first is a binary classification
+problem on whether at least one event occurs in [t, t + L],
+and the second, estimating the distribution of event arrival
+counts in [t, t+L]. For the former, at time t, the probability
+of no event occurring until t + L can be analytically comR t+L
+puted as exp(− t
+γ(τ |h(τ ))dτ ). This is easily solvable because h(τ ) is piecewise-constant. For the latter, because the intensity model is trained given observations, i.e.,
+the history-to-rate functions are learned, at time t, we can
+generate sample paths in a forward manner. Using Monte
+Carlo sampling, we estimate the quantities of interest, e.g.,
+the distribution of event arrival counts in [t, t + L].
+To better illustrate how the model performs forward prediction, the left panel of Figure 3, shows for one testing instance, the empirical distribution of event arrival counts obtained from 100 Monte Carlo sample paths. Qualitatively,
+the distribution predicted by MTPP matches the one predicted by the true model best. The actual observed count
+can be considered as a draw from the distribution produced
+by the true model. To quantitively measure the performance, we compute the KL divergence between predicted
+distributions using the learned models and the true model,
+varying with observation length T . As indicated in the right
+panel of Figure 3, the KL divergence between predicted
+distributions using IPP and the true model is large for short
+streams, decreasing only with longer streams. For MTPP,
+there is a much smaller divergence (which decreases to a
+value around 0.75).
+We next compare prediction results from MTPP, IPP, and
+PoiR, where for PoiR all tasks are trained independently.
+The testing instances are constructed by taking a sequence
+of snapshots on the unseen streams. In particular, we start
+at T with a length L sliding window, extract history features, record the event count, and move forward with stepsize L2 until the end of the stream. Figure 4 demonstrates
+the prediction performance as a function of prediction window L. Shown in the left panel is the Area Under the
+Curve (AUC) for the binary problem of whether at least
+one event occurs in [t, t + L]. MTPP performs best, and is
+closest to the AUC achieved using the true model. The in-
+
+A Multitask Point Process Predictive Model
+8
+
+Mean Absolute Error
+
+1
+
+Area Under Curve
+
+0.8
+0.6
+0.4
+0.2
+0
+0
+
+True Model
+MTPP
+IPP
+PoiR
+2
+
+4
+6
+8
+Prediction Window L
+
+10
+
+6
+
+split visit sequences for each patient into training and testing (split at the time stamp when half of the number of
+visits are observed).
+
+True Model
+MTPP
+IPP
+PoiR
+
+4
+
+2
+
+0
+0
+
+2
+
+4
+6
+8
+Prediction Window L
+
+10
+
+Figure 4. Left: AUC of binary prediction on whether at least one
+event occurs in [t, t + L]; Right: MAE of event arrival counts in
+[t, t + L].
+
+dependent models perform poorly due to insufficient training data. One interesting phenomenon is that the prediction accuracy increases first and starts decreasing after a
+change point. This phenomenon results from a trade-off between two effects. First, for small L, the probability of no
+event occurring decreases from a moderate value (around
+0.5) to 0, leading to an easier prediction problem. Second, as L increases further, the accumulating Poisson noise
+makes it harder. When L is small, the first effect dominates
+leading to a higher AUC. However, after a change point,
+the accumulated Poisson noise dominates, driving prediction accuracy down. The right panel of Figure 4 shows
+the Mean Absolute Error (MAE) of event arrival counts in
+[t, t + L]. Unlike the AUC for binary prediction, the MAE
+for all methods increases monotonically as prediction window length increases. MTPP outperforms other baselines,
+achieving the MAE closest to the one obtained by the true
+model. The increment is linear because of the linearly accumulating Poisson noise.
+6.2. Applications on Electrical Health Records
+We now consider a real-world application involving an
+EHR dataset. We use the New Zealand national minimum
+dataset 1 , covering the years 2007 through 2011 (inclusive).
+The data contains approximately 3.3 million inpatient visits from 1.5 million unique individuals with ages from 18
+to 65. Available variables include ICD-10-AM (Australian
+Modification) diagnosis and procedure codes which are
+grouped into 22 broad categories (World Health Organization, 2010).
+We focus on hospital visits for each disease category, associated with a block of ICD-10-AM billing codes (e.g.
+billing codes in the range C00 to D48 all refer to neoplasms). Treating clinical data as point process observations is a relatively novel approach to the best of our knowledge, and has only been adopted in Lasko (2014). In our
+experiments, for each disease category, we record all patients’ visits associated with billing codes belonging to it,
+filter out patients with infrequent visits (fewer than 50), and
+1
+
+http://www.health.govt.nz/nz-health-statistics
+
+After preprocessing, we have visit streams of multiple patients for each disease category, with the number of patients
+varying from 36 to 118, and the number of visits per patient varying from 51 to 98. In total, we analyze 6 disease types, listed in Table 1, mostly related with chronic
+diseases. For example, neoplasms include malignant and
+benign ones, and metabolic problems include type-I and
+type-II diabetes. Note we are not exploring the correlation across visits for different disease types, which is also
+interesting, and left as future work. The aim of this application to EHR data is to show that using the multitask
+point process model proposed, with a simple feature construction approach, the visit patterns for some disease types
+are reasonably predictable. For each patient’s visit stream
+of a disease category, the features constructed include the
+number of his/her hospital visits for this disease in the previous week, month, and six months. For inference, we set
+the number of pseudo inputs M = 15, and the initialization
+procedure is the same as in the synthetic experiments. The
+algorithm generally converges in tens of iterations.
+Similar with the above synthetic experiments, we evaluate
+the algorithm from two perspectives: model fit and predictive ability. For model fit, we evaluate the data loglikelihood, comparing with two state-of-the-art approaches
+using GP modulated renewal processes: a direct inference
+method in Lasko (2014) and a thinning approach in Rao &
+Teh (2011). For the prediction tasks, unlike the synthetic
+experiments, we do not have access to the ground truth
+model, i.e., knowledge about heterogeneity across population/tasks. Thus, we use the test dataset to compare MTPP
+with PoiR, using the same model for all patients for the latter. We also evaluated IPP, but because the patients’ visits
+are sparse, the individual models learned with this scarce
+training data perform poorly. Hence only results of pooled
+MTPP and PoiR are reported.
+Model Fit: GP modulated renewal processes are trained
+using both direct inference as in Lasko (2014) and thinning approach as in Rao & Teh (2011), for each patient’s
+visit sequence in the neoplasm category. We then compare
+these two methods with MTPP on the data log-likelihood
+per time unit (day) over all sequences. As shown in the topleft panel of Figure 5, MTPP is comparable with the other
+two methods, with a smaller variation due to the sharing
+across patients. Shown in the top-right and bottom panels
+are the mean intensity functions inferred of anonymous patients (error bars are omitted for clarity), each associated
+with the raster plot of the hospital visits in the bottom. Relative dates, instead of calendar dates are used for confidentiality. As can be seen, the two temporal GP methods infer
+
+−0.2
+
+0.3
+
+−0.3
+−0.4
+−0.5
+
+0
+
+Direct
+
+0.4
+
+0
+
+Thinning
+
+16
+24
+Time, months
+
+32
+
+40
+
+Direct
+Thinning
+MTPP
+
+0.3
+0.25
+Intensity
+
+0.2
+
+8
+
+0.35
+
+Direct
+Thinning
+MTPP
+
+0.3
+Intensity
+
+0.2
+0.1
+
+MTPP
+
+Direct
+Thinning
+MTPP
+
+0.2
+0.15
+0.1
+
+0.1
+
+15
+
+0.06
+
+10
+
+0.04
+
+5
+
+0.02
+
+0
+0
+
+8
+
+0.08
+
+20
+
+5
+10
+15
+Arrival Count in [t−7, t]
+
+20
+
+0
+
+MTPP
+PoiR
+Mean Absolute Error
+
+0.4
+
+Arrival Count in [t−30, t]
+
+−0.1
+
+Intensity
+
+Data log−likelihood
+
+A Multitask Point Process Predictive Model
+
+6
+
+4
+
+2
+
+0
+0
+
+20
+40
+60
+80
+Prediction Window L (days)
+
+100
+
+Figure 6. Neoplasms results. Left: Global rate function inferred
+by MTPP as a function of the number of arrivals in windows [t −
+7, t] and [t − 30, t]; Right: MAE as a function of the prediction
+window length, L, in days.
+
+0.05
+0
+
+0
+0
+
+3
+
+6
+9
+Time, months
+
+12
+
+15
+
+0
+
+8
+
+16
+24
+Time, months
+
+32
+
+40
+
+Figure 5. Model fit results. Top-left: Comparison of data loglikelihood per day of MTPP, direct inference, and thinning approach; Top-right and bottom row: Intensity functions inferred of
+anonymous patients’ arrival sequences.
+
+a smooth function modeling the rate, which fails to capture sudden changes. For example, see the small-to-large
+change rate around the 33rd month in the top-right panel.
+Also note in the bottom-left panel, MTPP performs well at
+the beginning and ending of the sequence, with no boundary effects of GPs. Such differences are consistent over the
+dataset. Note that the intensity function inferred via our
+method is piecewise-constant, with change points located
+where recent history changes. The goodness of fit suggests
+this current rate’s dependence on history enables forward
+prediction.
+Forward Prediction: Figure 6 (left panel) shows the
+learned history-to-rate mapping function globally shared
+by all patients in the neoplasm category. In particular,
+we plot the value of the function in terms of two features, namely, number of arrivals in windows [t − 7, t] and
+[t − 30, t] (the previous week and month). As indicated, a
+patient with many visits in a month and few visits in a week
+has a larger rate of a revisit.
+The right panel in Figure 6 shows that for neoplasms, the
+MAE increases monotonically as the prediction window
+length increases up to 90 days. This is consistent with the
+results from synthetic data shown in Figure 4. Interestingly,
+because PoiR requires a separate model for each prediction
+interval, no noise variance accumulates in the model, and
+the increase in MAE results from the data itself. On the
+other hand, we just train MTPP once and generate sample
+paths for different window lengths, resulting in a Poisson
+noise that increases linearly with prediction interval. As a
+result, for MTPP the MAE diverges faster than for PoiR as
+L increases.
+Results in Table 1 show AUC values for the 6 disease cate-
+
+gories considered. Two settings for the length of the prediction windows, namely, 1 week and 1 month are evaluated.
+We see that consistent with the results for artificial data in
+Figure 4, AUCs tend to increase for moderate sizes of L.
+We also verified (results not shown) that further increasing the prediction window size has an accordingly negative
+impact on the AUCs. In fact, predictions become no better
+than random as L approaches 6 months for some disease
+types. When comparing MTPP to PoiR, we observe that the
+former outperforms the latter in 4 of 6 disease types. This
+supports the hypothesis that the changes of hospital visit
+patterns among the population are disease specific. However, correlations across diseases and clustering of patient
+subpopulations could be exploited, and are left as future
+work.
+Table 1. AUC of binary predictions of events occurring in weekly
+and monthly windows for 6 disease types.
+1 WEEK
+1 MONTH
+D ISEASE T YPE
+MTPP
+P OI R
+MTPP
+P OI R
+N EOPLASMS
+0.7379
+0.7249
+0.8136
+0.8058
+0.6807
+0.6170
+0.6778
+0.6195
+M ETABOLIC
+N ERVOUS
+0.6926
+0.7241
+0.7978
+0.7167
+0.6807
+0.6778 0.6170
+0.6195
+C IRCULATORY
+R ESPIRATORY
+0.5733
+0.6302
+0.6308
+0.6322
+0.6050
+0.5562
+0.6555
+0.6170
+D IGESTIVE
+
+7. Conclusions and Future Work
+We have considered the problem of analyzing multiple
+streaming point processes in a multi-task setting, and have
+proposed a simple predictive strategy. The proposed model,
+using hierarchical GPs, leverages information across the
+tasks in a nonparametric manner. Exploring multi-task
+marked point processes, designing richer feature construction approaches for predictive models, and clustering tasks
+based on their arrival patterns, are left as interesting open
+problems.
+
+Acknowledgements
+The research reported here was supported in part by ARO,
+DARPA, DOE, NGA and ONR.
+
+A Multitask Point Process Predictive Model
+
+References
+Adams, Ryan P., Murray, Iain, and MacKay, David J. C.
+Tractable nonparametric Bayesian inference in Poisson
+processes with Gaussian process intensities. In Proceedings of the 26th International Conference on Machine
+Learning, 2009.
+Amarasingham, Ruben, Moore, Billy J., Tabak, Ying P.,
+Drazner, Mark H, Clark, Christopher A., Zhang, Song,
+Reed, W. Gary, Swanson, Timothy S., Ma, Ying, and
+Halm, Ethan A. An automated model to identify heart
+failure patients at risk for 30-day readmission or death
+using electronic medical record data. Medical Care, 48
+(11):981–988, 2010.
+Ancarani, L. U. and Gasaneo, G. Derivatives of any order of the confluent hypergeometric function. Journal of
+Mathematical Physics, 49, 2008.
+Beal, Matthew James. Variational algorithms for approximate Bayesian inference. PhD thesis, U. London, 2003.
+Gunawardana, Asela, Meek, Christopher, and Xu, Puyang.
+A model for temporal dependencies in event streams. In
+Advances in Neural Information Processing Systems, pp.
+1962–1970, 2011.
+
+Rajaram, Shyamsundar, Graepel, Thore, and Herbrich,
+Ralf. Poisson-networks: A model for structured point
+processes. In Proceedings of the 10th International
+Workshop on Artificial Intelligence and Statistics, pp.
+277–284, 2005.
+Rao, Vinayak and Teh, Yee Whye. Gaussian process modulated renewal processes. In Advances in Neural Information Processing Systems, pp. 2474–2482, 2011.
+Snelson, Ed and Ghahramani, Zoubin. Sparse Gaussian
+processes using pseudo-inputs. In Advances in Neural
+Information Processing Systems, pp. 1257–1264, 2006.
+Titsias, Michalis. Variational learning of inducing variables
+in sparse Gaussian processes. In Proceedings of the 12th
+International Conference on Artificial Intelligence and
+Statistics, 2009.
+Weiss, Jeremy C. and Page, David. Forest-based point process for event prediction from electronic health records.
+In Machine Learning and Knowledge Discovery in
+Databases, pp. 547–562. 2013.
+World Health Organization, Geneva. International classification of diseases, 10th revision (ICD-10). 2010.
+
+Kulkarni, Jayant E. and Paninski, Liam. Common-input
+models for multiple neural spike-train data. Network:
+Computation in Neural Systems, 18(4):375–407, 2007.
+
+Xu, Lizhen, Duan, Jason A, and Whinston, Andrew. Path
+to purchase: A mutually exciting point process model for
+online advertising and conversion. Management Science,
+2014.
+
+Lasko, Thomas A. Efficient inference of Gaussian process
+modulated renewal processes with application to medical event data. In Uncertainty in Artificial Intelligence,
+2014.
+
+Yu, Kai, Tresp, Volker, and Schwaighofer, Anton. Learning
+Gaussian processes from multiple tasks. In Proceedings
+of the 22nd International Conference on Machine Learning, pp. 1012–1019, 2005.
+
+Lian, Wenzhao, Rao, Vinayak, Eriksson, Brian, and Carin,
+Lawrence. Modeling correlated arrival events with latent
+semi-markov processes. In Proceedings of the 31st International Conference on Machine Learning, pp. 396–404,
+2014.
+Lloyd, Chris, Gunter, Tom, Osborne, Michael A., and
+Roberts, Stephen J. Variational inference for Gaussian
+process modulated Poisson processes. arXiv:1411.0254,
+2014.
+Pillow, Jonathan W, Shlens, Jonathon, Paninski, Liam,
+Sher, Alexander, Litke, Alan M, Chichilnisky, EJ, and
+Simoncelli, Eero P. Spatio-temporal correlations and visual signalling in a complete neuronal population. Nature, 454(7207):995–999, 2008.
+Rad, Kamiar R. and Paninski, Liam. Information rates and
+optimal decoding in large neural populations. In Advances in Neural Information Processing Systems, pp.
+846–854, 2011.
+
+

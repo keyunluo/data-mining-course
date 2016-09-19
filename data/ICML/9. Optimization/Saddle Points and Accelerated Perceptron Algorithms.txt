@@ -1,0 +1,1144 @@
+Saddle Points and Accelerated Perceptron Algorithms
+
+Adams Wei Yu†
+Fatma Kılınç-Karzan‡
+Jaime G. Carbonell†
+†
+School of Computer Science, Carnegie Mellon University, Pittsburgh, PA, USA
+‡
+Tepper School of Business, Carnegie Mellon University, Pittsburgh, PA, USA
+
+Abstract
+In this paper, we consider the problem of finding
+a linear (binary) classifier or providing a nearinfeasibility certificate if there is none. We bring
+a new perspective to addressing these two problems simultaneously in a single efficient process,
+by investigating a related Bilinear Saddle Point
+Problem (BSPP). More specifically, we show that
+a BSPP-based approach provides either a linear classifier or an -infeasibility certificate. We
+show that the accelerated primal-dual algorithm, Mirror Prox, can be used for this purpose
+and√achieves the
+best known convergence rate of
+√
+log n
+n
+O( ρ(A)
+)(O( log
+)), which is almost indepen
+dent of the problem size, n. Our framework also
+solves kernelized and conic versions of the problem, with the same rate of convergence. We support our theoretical findings with an empirical study on synthetic and real data, highlighting the
+efficiency and numerical stability of our algorithm, especially on large-scale instances.
+
+1. Introduction
+One of the central tasks in supervised learning is to train a
+binary classifier: Given a training data set A ∈ Rm×n of
+size n, where each column Aj ∈ Rm is an instance with
+label either 1 or -1; find a binary (linear) classifier that separates data into two groups based on their labels. Without
+loss of generality, we assume that A does not contain a zero
+column. After reversing the sign of each negative instance
+(Blum & Dunagan, 2002) (for simplicity, we still denote the
+data matrix A), training a classifier is equivalent to finding
+a feasible solution to the following system of homogeneous
+Proceedings of the 31 st International Conference on Machine
+Learning, Beijing, China, 2014. JMLR: W&CP volume 32. Copyright 2014 by the author(s).
+
+WEIYU @ CS . CMU . EDU
+FKILINC @ ANDREW. CMU . EDU
+JGC @ CS . CMU . EDU
+
+linear inequalities w.r.t. y ∈ Rm :
+AT y > 0.
+
+(1)
+
+We refer (1) as Linear Dual Feasibility Problem (LDFP),
+and its solutions as linear classifiers or feasibility (separability) certificates. When the training data is not linearly
+separable, an infeasibility (inseparability) certificate is given by a solution to the Linear Alternative Problem (LAP)
+of (1):
+Ax = 0, 1T x = 1, x ≥ 0,
+
+(2)
+
+n
+
+where 1 ∈ R denotes the vector with all coordinates equal
+to 1. LDFP and LAP are Linear Feasibility Problems (LFP)
+that are dual to each other: (1) is feasible if and only if (2) is
+infeasible (by Gordon’s Theorem (Chvatal, 1983)). In particular, a feasible solution of one problem is an infeasibility
+certificate of the other. Often, instead of seeking an exact
+infeasibility certificate, it is more practical to opt for an infeasibility certificate for LDFP, i.e., finding an -solution
+for LAP, x , such that kAx k2 ≤ , 1T x = 1, x ≥ 0.
+Without loss of generality, we assume kAj k2 = 1, for all j. Note that such a transformation does not change the
+feasibility status of either LDFP or LAP but simplifies our
+analysis.
+Given that (1) and (2) are convex (in fact just linear)
+optimization problems, quite a few algorithms including
+polynomial-time Interior Point methods (IPMs) can be
+used to solve them. Nonetheless, in real-life classification
+scenarios, these problems, especially the ones with “dense”
+data, e.g., “dense” A matrices, remain challenging for IPMs. In these cases, each iteration of IPMs requires O(n3 )
+arithmetic operations (a.o.), resulting in unacceptable overall runtimes. As a result, algorithms with computationally
+cheap iterations, i.e., first-order methods (FOMs) like gradient descent, are more attractive despite their inferior rate
+of convergences. In fact, the first algorithm suggested to
+solve (1), the perceptron algorithm by (Rosenblatt, 1958)
+is precisely from this class. This class of FOM algorithms,
+including perceptron and its variants, involves only elementary operations in each iteration. The time complexity per
+
+Saddle Points and Accelerated Perceptron Algorithms
+
+iteration is dominated by simple matrix-vector multiplication, and thus it is O(mn). Due to their scalability, our
+focus in this paper is also limited to this class of FOMs.
+Most of the FOMs directly address either (1) or (2) separately, or both simultaneously. Assuming that a.o. involved
+in their iterations are of the same order, one can compare
+the efficiency of these algorithms based on their rate of
+convergence, i.e., the number of iterations needed to find
+a feasible solution for LDFP or an -solution for LAP, The
+convergence rates of these algorithms are usually measured
+in terms of the parameters n, m , and the margin, ρ(A):
+uT Aj
+.
+kuk2 =1 j=1,...,n kAj k2
+
+ρ(A) := max
+
+min
+
+(3)
+
+For example, (Novikoff, 1962) established that the rate of
+1
+convergence of perceptron algorithm is O( ρ(A)
+2 ). Among
+these quantities, ρ(A), in fact, provides a measure of the
+difficulty of solving LDFP or LAP, or equivalently of determining the separability of data, A. LDFP is feasible if
+ρ(A) > 0, and LAP is feasible if ρ(A) < 0 (see (Li & Terlaky, 2013)). The smaller its magnitude, |ρ(A)|, the harder
+is to solve the corresponding problem. With our normalization (kAj k2 = 1 for all j), we have |ρ(A)| ≤ 1. Unfortunately, in real classification scenarios, |ρ(A)| is rather
+1
+tiny, so the complexity O( ρ(A)
+2 ) of the original perceptron
+algorithm seems not so promising, despite that it is completely independent of the size (n) of the problem.
+In this paper, we suggest a single algorithm, which solves
+(1) or (2) simultaneously by providing either a fesibility
+(separability) certificate or an almost infeasibility (inseparability) certificate. While doing so, our algorithm, not only
+enjoys the best rate of convergence in terms of its dependence on ρ(A), but also retains the simplicity of each iteration. To achieve this, we circumvent dealing directly with
+(1) or (2), and thus, we avoid making any assumptions on
+the feasibility status of either one of them. Instead, bringing
+a new perspective and a simplified analysis, we show that
+by solving a related Bilinear Saddle Point Problem (BSPP)
+via a primal-dual algorithm, one can obtain either a feasible
+solution for LDFP or an -solution for LAP depending on
+the feasibility status of the respective problem. To solve BSPP, we adopt the Mirror Prox (MP) algorithm, an accelerated primal-dual FOM introduced by (Nemirovski, 2004).
+While our suggested framework Mirror Prox for Feasibility Problems (MPFP) maintains the same iteration efficiency
+as perceptron, i.e., O(mn) per iteration,√we establish that
+log(n)
+
+MP achieves a convergence rate of O( |ρ(A)| ) for LDF√
+log(n)
+P and O(  ) for LAP. To the best of our knowledge,
+this is the first algorithm that simultaneously solves both
+of these problems at these rates. Unlike perceptron algorithm, the overall rate of convergence
+p of the MP algorithm
+has a very mild dependence, O( log(n)), on the number
+
+p
+of training data. Nonetheless, O( log(n)) is in fact almost a constant factor even for extremely large n, such as
+n ∈ [1010 , 1020 ], and thus we claim (and also empirically show) that MP has quite competitive performance in the
+case of large scale classification problems. Note that such
+dependency is consistent with the existing literature in the
+case of LDFP. It is also strictly better (in terms of convergence rates) than the recent
+p results for LAP, because MP
+has a factor of only O( log(n)),
+√ whereas the competing
+algorithms have a factor of O( n), significantly limiting
+their computational performance. We further confirm the
+efficiency and scalability of our algorithms via a numerical study on both synthetic and real data. In addition to
+their excellent theoretical and practical performance, our
+study also revealed that MP-based algorithms are numerically more stable than the other state-of-the-art methods.
+MPFP also offers great flexibility in adjusting to the geometry of the problem. In particular, we show that by proper customization, our framework can easily be extended to
+handle two important generalizations: the kernelized feasibility problems and the general conic feasibility problems.
+In both of these generalizations, we maintain the same rate
+of convergence as the original version while also retaining
+a cheap iteration cost. The connections of classification
+with saddle point problems, and the efficiency and flexibility of the MP framework discussed in this paper, open
+up further strikingly important possibilities for acceleration
+based on randomization. Particularly, the sublinear time
+behavior achieved by MP variants introduced in (Juditsky
+et al., 2013) is of great interest for future research.
+
+2. Related Work
+There is an extensive literature on deterministic and stochastic FOMs for solving classification problems (Cristianini & Shawe-Taylor, 2000; Schölkopf & Smola, 2002;
+Cotter et al., 2012) as well as the perceptron algorithm and
+its variants. In this paper, we limit our focus to deterministic FOMs and the most relevant literature. We categorize
+the representative literature into two parts in terms of the
+types of certificates, e.g., solutions to LDFP and LAP, the
+corresponding algorithms provide. Table 1 summarizes the
+rate of convergence of these algorithms. We note that the
+overall number of a.o. involved in each iteration of any one
+of these algorithms is O(mn) and thus the comparison presented in Table 1 is in fact meaningful.
+The first category of algorithms in Table 1 assumes that
+LDFP is feasible and only provides solutions for LDFP,
+e.g., feasibility (separability) certificates. The original per1
+ceptron (PCT) algorithm (Rosenblatt, 1958) with O( ρ(A)
+2)
+rate of convergence is an example for this type of algorithms. As observed in (Saha et al., 2011), acceleration of
+perceptron algorithm via (Nesterov, 2005)’s extra gradient
+
+Saddle Points and Accelerated Perceptron Algorithms
+
+PCT
+SPCT
+VN
+ISPVN
+MPFP
+
+LAP -solution
+N/A
+
+LDFP
+1
+O( ρ(A)
+)
+√ 2
+log(n)
+O( |ρ(A)| )
+1
+O( ρ(A)
+2)
+
+N/A
+1
+1
+O(min( 12 , ρ(A)
+2 log  ))
+
+n
+1
+log |ρ(A)|
+)
+O( |ρ(A)|
+√
+log(n)
+O( |ρ(A)| )
+
+n
+log 1 )
+O( max{|ρ(A)|,}
+√
+log(n)
+O(
+)
+
+
+√
+
+y∈Y x∈X
+
+√
+
+Table 1. Summary of convergence rate of different algorithms.
+
+based smoothing technique is possible. This technique underlies the Smooth Perceptron (SPCT) algorithm suggested√by (Soheili & Peña, 2012), which terminates in at most
+2
+
+Bilinear Saddle Point Problem (BSPP) forms the backbone
+of our analysis. In its most general form a BSPP is defined
+as
+max min φ(x, y)
+(S)
+
+2 log(n)
+−1 iterations.Under the assumption that LDFP is
+ρ(A)
+
+feasible, SPCT achieves the same theoretical iteration complexity as MPFP. However, SPCT does not provide infeasibility (inseparability) certificates, and verifying the feasibility status of LDFP is equivalent to solving LDFP.
+Another vein of algorithms aims to either solve LDFP
+or provide an -solution to LAP simultaneously, without
+any assumption on their feasibility status beforehand. The
+von Neumann (VN) algorithm (Dantzig, 1992), is a wellknown example of such a method. Combining the analysis of (Dantzig, 1992) and (Epelman & Freund, 2000),
+one can conclude that i) if LAP is feasible, then in at
+1
+1
+most O(min( 12 , ρ(A)
+2 log  )) iterations VN returns an solution; ii) if LAP is infeasible, then VN provides a feasi1
+ble solution to LDFP within O( ρ(A)
+2 ) iterations. Recently, based on SPCT and VN algorithms, (Soheili & Peña,
+2013) suggested the Iterated Smooth Perceptron-Von Neumann (ISPVN) algorithm.
+ISPVN finds a feasible solution
+√
+n
+1
+for LDFP within O( |ρ(A)| log ( |ρ(A)|
+)) iterations provided that LDFP is feasible,
+or
+otherwise,
+gives an -solution
+√
+n
+to LAP within O( |ρ(A)|
+log ( 1 )) iterations. Also, an extention of ISPVN to the kernelized setting, with the same
+convergence rate, (c.f., Theorem 4 in (Ramdas & Peña,
+2014)) is possible. We note that compared to ISPVN, MPFP achieves a significantly better performance in terms of
+its dependence
+on both the dimension,
+n, of the problem
+p
+√
+(O( log(n)) as compared to O( n)), and the condition
+number ρ(A). On the other hand, the complexities of MPFP and ISPVN to find an -solution of LAP indicates a tradeoff between n, ρ(A) and  so that they are not comparable.
+Moreover, the improved complexity of MPFP in terms of
+its dependence on n, also gives an affirmative answer to
+the conjecture of (Ramdas & Peña, 2014).
+
+3. Notation and Preliminaries
+We first introduce some notation and key concepts related
+to our setup and analysis. Throughout this paper, we use
+Matlab notation to denote vector and matrices, i.e., [x; y]
+denotes the concatenation of two column vectors x, y.
+
+where φ(x, y) = υ + ha1 , xi + ha2 , yi + hy, Bxi; X, Y are
+nonempty convex compact sets in Euclidean spaces Ex , Ey
+and Z := X × Y , hence φ(x, y) : Z → R. Note that
+(S) gives rise to two convex optimization problems that
+are dual to each other:
+Opt(P ) = minx∈X [φ(x) := maxy∈Y φ(x, y)]
+Opt(D) = maxy∈Y [φ(y) := minx∈X φ(x, y)]
+
+(P )
+(D)
+
+with Opt(P ) = Opt(D) = Opt, and to the variational inequality (v.i.), i.e., find z∗ ∈ Z, such that
+hF (z), z − z∗ i ≥ 0 for all z ∈ Z,
+
+(4)
+
+where F : Z 7→ Ex × Ey is the affine monotone operator
+defined by
+
+
+∂φ(x, y)
+∂φ(x, y)
+; Fy (x) = −
+.
+F (x, y) = Fx (y) =
+∂x
+∂y
+It is well known that the solutions to (S) — the saddle
+points of φ on X × Y — are exactly the pairs z = [x; y]
+comprised of optimal solutions to problems (P ) and (D).
+They are also solutions to the v.i. (4). For BSPP (S), the
+accuracy of a candidate solution z = [x; y] is quantified by
+the saddle point residual
+sad (z)
+
+= φ(x) − φ(y)
+
+ 
+
+= φ(x) − Opt(P ) + Opt(D) − φ(y) .
+|
+{z
+} |
+{z
+}
+≥0
+
+≥0
+
+4. General Mirror Prox Framework
+MP algorithm is quite flexible in terms of adjusting to the
+geometry of the problem characterized by the domain of
+BSPP (S), e.g., X, Y . The following components are standard in forming the MP setup for given domains X, Y , and
+analyzing its convergence rate:
+• Norm: k · k on the Euclidean space E where the domain Z = X × Y of (S) lives, along with the dual
+norm kζk∗ = max hζ, zi.
+kzk≤1
+
+• Distance-Generating Function (d.g.f.): ω(z), which
+is convex and continuous on Z, admits continuous on
+the set Z o = {z ∈ Z : ∂ω(z) 6= ∅} selection ω 0 (z) of
+subgradient (here ∂ω(z) is a subdifferential of ω taken
+at z), and is strictly convex with modulus 1 w.r.t. k · k:
+∀z 0 , z 00 ∈ Z o : hω 0 (z 0 )−ω 0 (z 00 ), z 0 −z 00 i ≥ kz 0 −z 00 k2 .
+
+Saddle Points and Accelerated Perceptron Algorithms
+
+• Bregman distance: Vz (u) = ω(u)−ω(z)−hω 0 (z), u−
+zi, where z ∈ Z o and u ∈ Z.
+• Prox-mapping: Given a prox center z ∈ Z o ,
+Proxz (ξ) = argmin {hξ, wi + Vz (w)} : E → Z o .
+
+iteration t ≥ 1, the corresponding solution, zt = [xt ; yt ]
+satisfies xt ∈ X, yt ∈ Y , and we have
+φ(xt ) − φ(yt ) = sad (zt ) ≤
+
+w∈Z
+
+ΩL
+.
+t
+
+• ω-center: zω = argmin ω(z) ∈ Z o of Z.
+z∈Z
+
+• Ω = Ωz := max Vzω (z) ≤ max ω(z) − min ω(z).
+z∈Z
+
+z∈Z
+
+z∈Z
+
+• Lipschitz constant: L of F from k·k to k·k∗ , satisfying
+kF (z) − F (z 0 )k∗ ≤ Lkz − z 0 k, ∀z, z 0 .
+Based on this setup, the general template of Mirror Prox
+algorithm for Feasibility Problems (MPFP) is given in Algorithm 1. We refer the customizations of Algorithm 1 to
+handle linear, kernelized, and conic feasibility problems as
+MPLFP, MPKFP, and MPCFP, respectively.
+Algorithm 1 MPFP
+1: Input: ω-center zω , step size {γt } and .
+2: Output: zt (= [xt ; yt ]).
+3: t = 1; v1 = zω ;
+4: while φ(yt ) ≤ 0 and sad (zt ) >  do
+5:
+wt = Proxvt (γt F (vt ));
+6:
+vt+1 = Proxvt (γt F (wt ));
+hP
+i−1 P
+t
+t
+7:
+zt =
+γ
+s=1 s
+s=1 γs ws ;
+8:
+t = t + 1;
+9: end while
+The standard customization of MPFP is based on associating a norm, k · kx , and a d.g.f., ωx (·), with domain X, and
+similarly k · ky , ωy (·) with domain Y . Then, given two scalars αx , αy > 0, we build the d.g.f. and ω-center, zω , for
+Z = X × Y as:
+ω(z) = αx ωx (x) + αy ωy (y)
+
+and
+
+zω = [xωx ; yωy ],
+
+where ωx (·) and ωy (·) as well as xωx and yωy are customized based on the geometry of the domains X, Y . Also, by letting ξ = [ξx ; ξy ], z = [x; y], our prox mapping
+becomes decomposable as
+ 
+
+ 
+ξx
+ξy
+ωx
+ωy
+Proxz (ξ) = Proxx
+; Proxy
+,
+αx
+αy
+ωy
+x
+where Proxω
+x (·) and Proxy (·) are respectively prox mappings w.r.t. ωx (x) in domain X and ωy (y) in domain Y .
+Because of space limitation, we provide the detailed derivation of the prox-mapping operators and the rationale behind
+our parameter choices, αx , αy , in the appendix.
+
+The convergence rate of MP algorithm for solving BSPP
+was established by (Nemirovski, 2004) as follows:
+Theorem 1. (Nemirovski, 2004) Suppose the step sizes in
+the Mirror Prox algorithm satisfy γt = L−1 . Then at every
+
+5. Linear Feasibility Problems
+In this section, we first associate a BSPP for the linear feasibility problems LDFP and LAP, and establish close connections between the solutions of these problems. Then,
+we discuss customization of general MPFP framework, e.g.
+Section 4, for simultaneously solving LDFP and LAP, and
+the computational complexity of the resulting MPLFP. We
+provide customization of MPFP to the kernelized and conic
+feasibility problems in Section 6. Because of space limitation, all of the proofs are provided in appendix.
+5.1. BSPP Formulation for Linear Feasibility Problems
+To address the linear feasibility problems, LDFP (1) or
+LAP (2) simultaneously, we consider the BSPP:
+Opt = max min y T Ax,
+
+(5)
+
+y∈Bm x∈∆n
+
+where the domains
+Pn X, Y of the variables x, y are ∆n :=
+{x ∈ Rn :
+i=1 xi = 1, x ≥ 0}, i.e., a standard ndimensional simplex, and Bm := {y ∈ Rm : kyk2 ≤
+1}, a unit Euclidean ball in Rm , respectively. Then Z =
+∆n × Bm . Also, φ(x, y) = y T Ax, φ(x) = max y T Ax,
+y∈Bm
+
+φ(y) = min y T Ax, and F (x, y) = [AT y; −Ax].
+x∈∆n
+
+The connections between LDFP, LAP and BSPP, and their
+solutions, play an important role in our main result given in
+Theorem 3. These are explored in the next section.
+5.2. Connections between LDFP/LAP and BSPP
+We first establish a close connection between ρ(A) and the
+objective value of BSPP (5) in Lemma 1, and then relate
+solutions of BSPP (5) and LDFP/LAP in Theorem 2.
+Lemma 1. (a) ρ(A) = max min y T Ax; (b) Whenever
+kyk2 =1 x∈∆n
+
+ρ(A) > 0, then ρ(A) = max min y T Ax = Opt.
+kyk2 ≤1 x∈∆n
+
+Moreover, for any primal-dual algorithm solving BSPP (5),
+we have the following relations:
+Theorem 2. Let zt = [xt ; yt ] be the solution at iteration
+t of a primal-dual algorithm for solving problem (5). Suppose that the algorithm terminates at step t, when either
+φ(yt ) > 0 or sad (zt ) ≤ . Then we have
+(a) If φ(yt ) > 0, then AT yt > 0; otherwise,
+(b) If sad (zt ) ≤ , then kAxt k2 ≤ .
+
+Saddle Points and Accelerated Perceptron Algorithms
+
+Theorem 2 reveals that, depending on the sign of ρ(A), the
+primal-dual solution pair zt = [xt ; yt ] for BSPP (5) indeed
+corresponds to that of either LDFP or LAP. In fact, part
+(a) of the theorem corresponds to the case when LDFP is
+feasible, (since ρ(A) > φ(yt ) > 0), and yt is a feasible
+solution of LDFP; part (b) is essentially the case when xt
+is an -solution of LAP. The merit of such a primal-dual
+algorithm stated in Theorem 2 is that it can automatically
+identify whether LDFP or LAP is feasible during the execution and provide the corresponding solution. As a result,
+we do not need to assess the feasibility of either of LDFP
+or LAP upfront, which is already as difficult as solving the
+original feasibility problems.
+Any primal-dual algorithm capable of solving BSPP (5)
+can be customized to fit the conditions of Theorem 2, and
+thus, is suitable for simultaneously solving LDFP/LAP. Yet
+the convergence rates of these algorithms can significantly
+differ in terms of their dependence on ρ(A). In Section
+5.4, we show that Mirror Prox algorithm achieves the best
+known performance in terms of ρ(A). Further generalizations of the MP algorithm to handle kernelized and conic
+feasibility problems are possible as well. These generalizations retain the same rate of convergence given in Theorem
+1, yet they may differ in terms of the a.o. needed for their
+iterations. We discuss these in Section 6.
+5.3. MPLFP: Customization of MPFP for LDFP/LAP
+For LDFP and LAP, we haveP
+Z = X × Y = ∆n × Bm ,
+n
+and hence we pick ωx (x) = i=1 xi ln(xi ) and ωy (y) =
+1 T
+2 y y, which leads to, for i = 1, . . . , n and j = 1, . . . , m
+xi exp{−ζi }
+x
+[Proxω
+, and
+x (ζ)]i = Pn
+k=1 xk exp{−ζk }
+(
+yj − ζj , if ky − ζk2 ≤ 1
+ωy
+[Proxy (ζ)]j =
+.
+yj −ζj
+otherwise
+ky−ζk2 ,
+Therefore, each iteration of Algorithm 1, involves only the
+computation of F (ξ) = [AT ξy ; −Aξx ], and
+
+
+T
+ωx γA ξy
+ωy −γAξx
+Proxz (γF (ξ)) = Proxx (
+); Proxy (
+) .
+αx
+αy
+
+
+This choice of d.g.f. leads to zω = xωx ; yωy where
+xωx = n1 1 ∈ Rn , and yωy = 0m , the zero vector in Rm .
+We compute the associated Ω = Ωz and L following the
+derivations in the appendix, and set γt = L1 .
+5.4. Convergence Analysis for MPLFP
+In the specific case of linear feasibility problems LDFP and
+LAP, following the derivation of αx and αy presented in
+appendix,
+optimally select αx and αy to achieve
+p one can p
+ΩL ≤ log(n) + 1/2. Hence by combining Theorems
+1 and 2, we arrive at the following main result:
+
+Theorem 3. Let the step sizes of MPFP be γt = L−1 . Then
+(a) When ρ(A) >
+√ 0, MPFP
+√ terminates in at most N =
+log(n)+ 1/2
+ΩL
++ 1 iterations with a feaρ(A) + 1 ≤
+ρ(A)
+sible solution to LDFP given by yN .
+(b) When ρ(A) <
+√ 0, MPFP
+√ terminates in at most N =
+log(n)+ 1/2
+ΩL
++ 1 iterations with an  + 1 ≤
+
+solution for LAP given by xN .
+Complexity per Iteration of MPLFP: Each iteration t
+involves the following elementary computations with the
+given a.o. complexity: (1) Axt , AT yt : O(mn). (2) Prox
+mapping: O(m + n). (3) φ(xt ) = kAxt k2 : O(m). (4)
+φ(yt ) = mini∈{1,...,n} (ATi yt ) : O(n). Therefore, the overall a.o. involved in each iteration of MPLFP is O(mn),
+which is the same as that of the perceptron algorithm.
+
+6. Generalized Feasibility Problems
+There are two important extensions of the basic MPFP framework, namely the Kernelized Feasibility Problems
+(KDFP, KAP) and the Conic Feasibility Problems (CDFP,
+CAP). Both of these extensions merely require customization of the MPFP framework to the geometry of the problem by using proper representation or proper selection of
+prox mappings. Hence, these can easily be handled within
+the existing MPFP framework while still enjoying the same
+convergence rate of MPLFP. To the best of our knowledge,
+√
+log(n)
+
+the extension of MP to the KDFP achieving O( |ρ(Ψ)| )
+√
+log(n)
+(or O(  ) in the case of KAP) performance is novel
+and the same performance of MP for the conic feasibility
+problem (in terms of its dependence on n and ρ(A)) is far
+superior to all of the other competing algorithms.
+6.1. Kernelized Feasibility Problems
+In the kernelized classification problems, along with the
+data A, we are given, a feature map Φ(·) : Rm → F,
+which maps each data point, Ai , to a new feature in the
+Reproducing Kernel Hilbert Space, F = Rd . The feature map is specified implicitly via a kernel, KΦ (a, a0 ) :=
+hΦ(a), Φ(a0 )i, with the motivation that explicitly computing Φ(a) can be rather time consuming, but instead the
+inner product computation, hΦ(a), Φ(a0 )i, via the kernel
+KΦ (a, a0 ) is much easier to obtain (see (Schölkopf & Smola, 2002)). Therefore, kernelized algorithms are designed
+under the assumption that only “black box” access to the kernel is available (i.e., our methods work for any kernel, as
+long as we can compute KΦ (a, a0 ) efficiently). By normalization, we assume that KΦ (a, a) = 1, and KΦ (a, a0 ) ≤ 1
+for all a, a0 ∈ Rm , and in our runtime analysis, we assume kernel matrix associated with data A, i.e., GΦ where
+
+Saddle Points and Accelerated Perceptron Algorithms
+
+[GΦ ]i,j = KΦ (Ai , Aj ), is known.
+Let Q be a diagonal matrix, where Qii = 1 or − 1 is
+the label of the ith data point, Ai . In order to simplify
+the notation in our analysis, we work with the feature map
+Ψ(Ai ) = Qii Φ(Ai ) and the resulting kernel is given by
+K(Ai , Aj ) = hΨ(Ai ), Ψ(Aj )i = hQii Φ(Ai ), Qjj Φ(Aj )i
+which is the (i, j)-th element of the kernel matrix G :=
+QT GΦ Q. For notational convenience, we also let Ψ :=
+[Ψ(A1 ), . . . , Ψ(An )].
+Thus the kernelized classification problem is equivalent to
+finding a feasible solution to the following Kernelized Dual
+Feasibility Problem (KDFP): y T Ψ > 0.When no such solution exists, an inseparability certificate is provided by an
+-solution for the Kernelized Alternative Problem (KAP):
+Ψx = 0, 1T x = 1, x ≥ 0.Therefore, one can equivalently
+consider the following Kernelized BSPP:
+
+so relies only on the kernel function K. Hence it is suffix
+cient to keep only the (perhaps normalized) term, g + γξ
+αy ,
+ωy
+after each Proxy (·) operation.
+Complexity: (1) Per Iteration: Given K, the complexity
+within each  iteration is O(n2 ) due to Ggt ,
+
+γξx
+x
+K g + γξ
+αy , g + αy , φ(yt ) and φ(xt ). (2) Convergence
+Rate: As the domains X = ∆n and Y = Bd remain the
+same as MPLFP, MPKFP shares the same convergence rate
+as the former, except that ρ(A) is replaced by ρ(Ψ).
+Remark: Let (x∗ , g ∗ ) be the output of MPKFP. Then, if
+the data is separable in the feature space, we use g ∗ for
+classification as follows: For a new testing data point, A0 ,
+its
+sign of (Φ(A0 ))T Ψg ∗ =
+Pnclass label is determined∗by theP
+n
+∗
+Q
+hΦ(A
+),
+Φ(A
+)ig
+=
+0
+i
+i
+i=1 ii
+i=1 Qii KΦ (A0 , Ai )gi .
+Otherwise, the -inseparability certificate, i.e., an solution for KAP, is given by Qx∗ .
+
+max min y T Ψx.
+
+y∈Bd x∈∆n
+
+By a simple customization, the MPFP framework can be
+generalized to solve kernelized BSPP using only black box
+kernel oracle. Throughout the algorithm, in order avoid
+any explicit computation involving Ψ, we keep track of two vectors xt , gt ∈ Rn . While the role of xt in MPKFP
+remains the same, we use gt as a surrogate for yt . In particular, we let g0 = 0n implying
+y0 = Ψg0 , and initialize the
+
+algorithm with zω = n1 1; 0d = [x0 ; y0 ]. And, in all subsequent iterations, we always maintain the relation yt =
+Ψgt implicitly. This is the key modification in MPKFP.
+T
+T
+The
+Pn benefit of this modification is that Ψ yt = Ψ Ψgt =
+i=1 K(Ai , Ai )(gt )i , hence we can avoid explicit computations involving Ψ. In particular, at each iteration t, the
+corresponding kernelized BSPP solution is given by zt =
+hP
+i−1 P
+t
+t
+s=1 γs
+s=1 γs [xt ; Ψgt ]. Based on zt , the corresponding lower and upper bounds are given by φ(yt ) =
+Pn
+min (yt )T Ψ(Ai ) = min
+j=1 (gt )j K(Aj , Ai ), and
+i=1,...,n
+i=1,...,n
+p
+φ(xt ) = kΨxt k2 = K(xt , xt ), using only the kernel K.
+
+6.2. Conic Feasibility Problems
+The second extension we discuss is the Conic Dual Feasible Problem (CDFP) of the form
+A∗ y ∈ int(K∗ )
+
+(6)
+
+where A∗ is the conjugate linear map of a linear map A, and
+K ∈ Rn is a proper (closed, convex, pointed with nonempty interior) cone with its dual cone K∗ .
+Note that A∗ y ∈ int(K∗ ) is equivalent to requiring
+hx, A∗ yi > 0 for all x ∈ K \ {0}. Let e be a vector from
+int(K∗ ), as the selection of e depends on K, below we will
+specify it separately for each K. Define ∆(K) = {x ∈ K :
+he, xi = 1}, which is the base of the cone K given by the
+vector e. Hence hx, A∗ yi > 0 for all x ∈ K \ {0} is equivalent to minx {hx, A∗ yi : x ∈ ∆(K)} > 0. Moreover, the
+Conic Alternative Problem (CAP) is given by:
+Ax = 0, he, xi = 1, x ∈ K.
+
+(7)
+
+Based on the same rationale of previous sections, we conMoreover, for y = Ψg, the prox mapping computations are
+sider the following conic version of BSPP:
+given by
+γΨT ξy
+x◦η
+x
+max min y T Ax.
+(8)
+Proxω
+)= T ,
+x (
+y∈Bm x∈∆(K)
+αx
+x η
+h
+i
+γ(Gg)n
+1
+Once again, (8), analogous to (5), is a BSPP albeit with
+where η = exp {− γ(Gg)
+},
+.
+.
+.
+,
+exp
+{−
+}
+, and ◦
+αx
+αx
+different domains, and hence it can still be solved within
+is the elementwise product, and,
+the MPFP framework, achieving the same iteration com
+γξx
+γξx
+ Ψ(g + αy ), ifkΨ(g + αy )k2 ≤ 1 plexity given in Theorem 3. The main customization of
+ωy −γΨξx
+x
+Ψ(g+ γξ
+. the MPFP applied to (8) as opposed to (5) is in selecting
+Proxy (
+)=
+αy )
+
+αy
+,
+otherwise
+γξx
+various algorithm parameters, and prox-mapping operators
+kΨ(g+ αy )k2
+for the corresponding domains. In particular, one needs
+ωx
+to specify an efficient prox-mapping operator customized
+Note that Proxx (·) computation
+does not use Ψ, and in
+r 
+
+to the domain ∆(K). We present several interesting casγξx
+γξx
+x
+y
+Proxω
+K g + γξ
+y (·), kΨ(g + αy )k2 =
+αy , g + αy , ales of K, where such efficient prox-mapping onto ∆(K)
+
+Saddle Points and Accelerated Perceptron Algorithms
+
+exists. These include K = Rn+ , the nonnegative orthant,
+q
+K = Ln = {x ∈ Rn : xn ≥
+x21 + . . . + x2n−1 },
+the second order cone, and K = Sn+ = {X ∈ Rn×n :
+X = X T , aT Xa ≥ 0 ∀a ∈ Rn }, the positive semidefinite cone. The basic settings of these cases as suggested in
+(Nemirovski, 2004; Juditsky et al., 2013) are as follow:
+Nonnegative orthant: K = K∗ = Rn+ . This is precisely
+the case we have addressed for linear feasibility problems
+(see Section 5.3).
+Second order cone: K = K∗ = Ln .
+• e = [0, ..., 0, 1]T , ∆(K) = Bn−1 × {1}.
+n−1
+P 2
+• d.g.f: ω(x) = 12
+xi ;
+Ωx ≤ 12 with xωx =
+i=1
+
+selecting ω(·) and thus Proxz (·). Besides, for the aforementioned cones, the computational cost of each iteration
+of MPCFP is quite low. While ISPVN is capable of handling the same conic feasibility problems, the analysis of
+(Soheili & Peña, 2013; Ramdas & Peña, 2014) is based
+on Euclidean d.g.f.’s, and thus the respective operations involved for projections onto these domains are much more
+expensive (involving sorting operations), and hence they
+are inferior to the ones presented above.
+
+7. Numerical Experiments
+In this section, we conduct an empirical study on the MPFP
+framework and compare it with other baseline algorithms,
+using both synthetic data (for MPLFP and LAP) and real data (for MPKFP). All the codes are written in Matlab
+2011b, and are ran in a single-threaded fashion on a Linux
+server with 6 dual core 2.8GHz CPU and 64 GB memory.
+
+[0, ..., 0, 1]T .
+• Given x ∈ ∆(K), ξ ∈ Rn , for i = 1, . . . , n − 1,
+(
+Pn−1
+xi − ξi ,
+if i=1 (xi − ξi )2 ≤ 1 In the implementation of MPLFP or MPKFP, we select
+[Proxx (ξ)]i = P xi −ξi
+αx , αy as described in the appendix, for a normalized ma, otherwise
+n−1
+2
+i=1 (xi −ξi )
+trix A, i.e., kAi k2 = 1 for all i. We implemented the Sand [Proxx (ξ)]n = 1. Note that the computational
+mooth Perceptron (SPCT) (Soheili & Peña, 2012), normalcomplexity of this prox mapping is O(n) as discussed
+ized Perceptron (PCT) (Ramdas & Peña, 2014) and the norin the MPLFP setup (see Section 5.3).
+malized Von-Neumann (VN) algorithm (Soheili & Peña,
+2012) for comparison. We also implemented the ISPVN
+Positive semi-definite cone: K = K∗ = Sn+ .
+(Soheili & Peña, 2013) and ISNKPVN (Ramdas & Peña,
+For any two symmetric matrices A, B, we let hA, Bi =
+2014), but as the authors do not provide a parameter selecTr(AB) as the corresponding inner product.
+tion strategy, we did a search on the space and choose the
+one with the best performance, i.e., the parameter denoted
+• e = In , ∆(K) = {X ∈ Sn+ : X  0, Tr(X) =
+by γ in (Soheili & Peña, 2013) (Theorem 1) was set to 2.
+1}(Flat Spectrahedron).
+We note that our numerical study is based on the compari• d.g.f:
+matrix
+entropy
+ω(X)
+=
+Entr(λ(X))
+=
+son of the basic implementations of all of these algorithms
+P
+including ours as well. There may be ways for small imi λi (X) log(λi (X)), where λi (X) is the i-th eigenvalue of X and resulting ΩX ≤ 4 log(n) with xωx =
+provement leading better computational performance for
+Diag( n1 ).
+any one of them. Nevertheless, guided by our theoretical
+• Given X ∈ Sn+ , Ξ ∈ Sn , computing ProxX (Ξ) refindings, we do not expect any major changes in the overall
+duces to computing the eigenvalue decomposition of
+conclusions drawn.
+the matrix X, which also leads to the computation of
+ω 0 (X), and subsequent eigenvalue decomposition of
+7.1. Synthetic data
+the matrix H = Ξ − ω 0 (X). Let H = U Diag(h)U T
+We first compare the performance of different algorithms
+be the eigenvalue decomposition of H, where Diag(h)
+(non-kernelized versions) on synthetic data. In our instance
+stands for the diagonal matrix with diagonal elegeneration for LDFP, κ serves as a proxy for the condition
+ments from h. Then computing ProxX (Ξ) reduces
+number ρ(A), i.e., a larger κ corresponds to a larger ρ(A)
+to constructing the matrix W = U Diag(w)U T where
+in (3). We provide details of our instance generation for
+w = argminz∈Rn {hDiag(h), Diag(z)i + ω(Diag(z)) :
+both LDFP and LAP in the appendix.
+Diag(z) ∈ ∆(K)}, which is identical to the computation of the Prox function in the simplex setup.
+Experimental Setup. We test the methods on a wide specThe computational complexity of this prox mapping
+trum of (m, n) combinations. Given a combination, we
+is O(n3 ) per iteration due to the two singular value
+generate 20 instances for LDFP and 20 for LAP on which
+decompositions (O(n3 )) and simple a.o. of O(n).
+all the methods are tested. For each method, the iteration
+Discussion of MPCFP and conic ISPVN: The MPFP
+framework is quite flexible: in particular, it can be easily adjusted to handle a variety of domains Z by properly
+
+limit is 106 and runtime limit is 5 × 104 s. When either
+one of these limits is reached, we report a “TO (Timeout)”.
+We empirically observe that, occasionally, SPCT suffers
+
+Saddle Points and Accelerated Perceptron Algorithms
+
+Performance on LDFP. We set κ = 1 for the case LDFP,
+and, by varying m, n, we generate normalized instances of
+A ∈ Rm×n such that kAj k2 = 1 for all j. In all of the
+instances generated, ISPVN algorithm failed, and hence
+we omitted it from comparison. As indicated by Table
+2, MPLFP outperforms all the other methods in terms of
+runtime for any pair of (m, n). The runner-up algorithm
+SPCT is obviously much slower while PCT and VN perform even equally worse. Moreover, as (m, n) increases,
+the time savings achieved by MPLFP become more significant. More importantly, even on the very large size
+of high-dimensional data (m = 103 , n = 5 × 106 ), MPLFP finds a feasible solution for LDFP within 10 hours,
+while the baseline methods either run out of time (PCT and
+VN) or fail (SPCT and ISPVN) on large scale problems
+(m = 102 , n = 5 × 105 ). This highlights the suitability of
+MPLFP for large-scale learning.
+The Effect of ρ(A). We tested the performance of algorithms by varying κ as a proxy for ρ(A) on instances with
+(m, n) = (100, 5000) and kAj k2 = 1 for all j. For various
+values of κ ∈ [1, 10] (i.e., for feasible LDFP), the runtime
+of each algorithm is reported in Figure 1. It is not surprising that as κ(ρ(A)) becomes larger, which means that the
+data become “more separable,” the runtime is shorter for all
+of the methods. Nonetheless, MPLFP is still considerably
+faster than its closest competitor in all cases.
+(m, n)
+(102 , 5 × 103 )
+(103 , 5 × 103 )
+(102 , 5 × 104 )
+(103 , 5 × 104 )
+(102 , 5 × 105 )
+(103 , 5 × 105 )
+
+With column-normalized matrix, A
+MPLFP
+SPCT
+PCT
+VN
+1.3
+4.3
+98.5
+127.3
+5.5
+16.2
+142.2 141.5
+112.7
+455.0
+TO
+TO
+318.1
+1301.0
+TO
+TO
+25506
+Fail
+TO
+TO
+22471
+Fail
+TO
+TO
+
+Table 2. Runtime (second) of all methods for LDFP (κ = 1). Iteration limit is 106 and runtime limit is 5 × 104 s.
+
+7.2. Real Data: CIFAR-10 Image Classification
+We test the efficiency of MPKFP in training classifiers with kernel method. For comparison, we also implement the Kernelized Perceptron (KPCT), Kernelized VonNeumann (KVN), and ISNKVPN (Ramdas & Peña, 2014).
+Our testbed is the CIFAT-10 (Krizhevsky, 2009) dataset1 ,
+1
+
+http://www.cs.utoronto.ca/˜kriz/cifar.html
+
+2
+
+10
+
+0.9
+
+MPLFP
+SPCT
+PCT
+VN
+
+10
+
+0.85
+
+Prediction Error Rate
+
+1
+
+Runtime(s)
+
+from numerical overflow, and ISPVN, frequently, falls into
+a dead loop. We report a “Fail” in the table if a method fails
+in all of the 20 instances. Table 2 summarizes the average
+runtime for each algorithm over the instances that the algorithm successfully solved. Because of space limitations, we
+present the number of iterations for LDFP and for the effect
+of ρ(A), and our results on LAP instances in the appendix.
+
+0
+
+10
+
+0.8
+0.75
+0.7
+
+MPKFP
+ISNKPVN
+KPCT
+KVN
+
+0.65
+0.6
+0.55
+
+−1
+
+10
+
+1
+
+2
+
+3
+
+4
+
+5
+
+κ
+
+6
+
+7
+
+8
+
+9
+
+10
+
+Figure 1. κ (ρ(A)) v.s. runtime.
+
+0.5 1
+10
+
+2
+
+10
+
+Number of Iterations Per Classifier
+
+Figure 2. Iteration v.s. error.
+
+which contains 60,000 color images in 10 mutually exclusive classes, with 6,000 images per class. Each image
+Ai is encoded as a m = 3072 dimensional vector.2 We
+evenly pick around 1,000 images in each class to construct a training set of n = 10, 000 in total, and repeat this
+process to form a testing set of the same size. We train
+one-vs-rest binary classifier for each class, and hence obtain 10 classifiers in total. After that, each test image is
+run on by all the classifiers and its predicted label corresponds to the one that gives the largest output value.
+We choose Radial Basis Function (RBF) kernel given by
+KΦ (Ai , Aj ) = exp{−5.5(kAi − Aj k2 )}.
+We run all of the algorithms, and at different pre-specified
+iteration limits of N ∈ {10, 32, 100, 320, 1000}, we collect
+their respective solutions. We treat these solutions as the
+corresponding classifiers, and benchmark their prediction
+quality on the test set. Figure 2 shows how the prediction error rate drops as the training iteration number per
+classifier increases. It can be seen that, within the same
+iteration limit, MPKFP outperforms all the other methods in terms of the prediction error rate. In particular, the
+error rate obtained by perceptron after 1,000 iterations is
+still higher than that achieved within merely 10 iterations
+by MPKFP, which highlights the suitability of MPKFP for
+fast classification training scenarios.
+
+8. Conclusions
+We build a framework based on BSPP to either find a binary classifier (DFP) or return a near infeasibility certificate
+if there is none (AP). We adopt the accelerated primal-dual
+algorithm, Mirror Prox,√to solve the BSPP and achieve
+the
+√
+log n
+log n
+rate of convergence O( |ρ(A)| ) for DFP and O(  ) for
+AP. Our results also extend to the general kernelized and
+conic problems, all of which share the same rate of convergence. We further confirm the efficiency and numerical stability of our approach by a numerical study on both synthetic and real data. Future work includes exploring whether
+these methods can be modified to achieve sublinear time
+behavior, or allow for rapid incremental retraining in active
+learning scenarios.
+2
+To achieve a lower prediction error rate, one can use other
+advanced features,which is not this paper’s focus.
+
+3
+
+10
+
+Saddle Points and Accelerated Perceptron Algorithms
+
+References
+Blum, Avrim and Dunagan, John. Smoothed analysis of the
+perceptron algorithm for linear programming. In SODA,
+pp. 905–914, 2002.
+Chvatal, Vasek. Linear Programming. Macmillan, 1983.
+Cotter, Andrew, Shalev-Shwartz, Shai, and Srebro, Nathan.
+The kernelized stochastic batch perceptron. In ICML,
+2012.
+Cristianini, Nello and Shawe-Taylor, John. An Introduction to Support Vector Machines and Other Kernel-based
+Learning Methods. Cambridge University Press, 2000.
+Dantzig, George Bernard. An -precise feasible solution
+to a linear program with a convexity constraint in 1/2
+iterations independent of problem size. Technical Report
+92-5, Stanford University, 1992.
+Epelman, Marina and Freund, Robert M. Condition number complexity of an elementary algorithm for computing a reliable solution of a conic linear system. Math.
+Program., 88(3):451–485, 2000.
+Juditsky, Anatoli, Kılınç-Karzan, Fatma, and Nemirovski,
+Arkadi. Randomized first order algorithms with applications to `1 -minimization. Math. Program., 142(1-2):
+269–310, 2013.
+Krizhevsky, Alex. Learning multiple layers of features
+from tiny images. Master’s thesis, University of Toronto,
+2009.
+Li, Dan and Terlaky, Tamás. The duality between the perceptron algorithm and the von neumann algorithm. In
+Modeling and Optimization: Theory and Applications,
+volume 62, pp. 113–136. 2013.
+Nemirovski, Arkadi. Prox-method with rate of convergence o(1/t) for variational inequalities with lipschitz
+continuous monotone operators and smooth convexconcave saddle point problems. SIAM Journal on Optimization, 15(1):229–251, 2004.
+Nesterov, Yurii. Excessive gap technique in nonsmooth
+convex minimization. SIAM Journal on Optimization,
+16(1):235–249, 2005.
+Novikoff, Albert B. J. On convergence proofs for perceptrons. Technical report, 1962.
+Ramdas, Aaditya and Peña, Javier. Margins, kernels and
+non-linear smoothed perceptrons. In ICML, 2014.
+Rosenblatt, Frank. The perceptron: A probabilistic model for information storage and organization in the brain.
+Psychological Review, 65(6):386–408, 1958.
+
+Saha, Ankan, Vishwanathan, S. V. N., and Zhang, Xinhua.
+New approximation algorithms for minimum enclosing
+convex shapes. In SODA, pp. 1146–1160, 2011.
+Schölkopf, Bernhard and Smola, Alex J. Learning with
+kernels. The MIT Press, 2002.
+Soheili, Negar and Peña, Javier. A smooth perceptron algorithm. SIAM Journal on Optimization, 22(2):728–737,
+2012.
+Soheili, Negar and Peña, Javier. A primal-dual smooth
+perceptron-von neumann algorithm. In Discrete Geometry and Optimization, volume 69, pp. 303–320. 2013.
+
+

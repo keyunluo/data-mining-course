@@ -1,0 +1,1219 @@
+Finding Linear Structure in Large Datasets with
+Scalable Canonical Correlation Analysis
+
+Zhuang Ma
+ZHUANGMA @ WHARTON . UPENN . EDU
+Yichao Lu
+YICHAOLU @ WHARTON . UPENN . EDU
+Dean Foster
+DEAN @ FOSTER . NET
+Department of Statistics, The Wharton School, University of Pennsylvania, Philadelphia, PA 19104 U.S.A
+
+Abstract
+Canonical Correlation Analysis (CCA) is a
+widely used spectral technique for finding correlation structures in multi-view datasets. In
+this paper, we tackle the problem of large scale
+CCA, where classical algorithms, usually requiring computing the product of two huge matrices and huge matrix decomposition, are computationally and storage expensive. We recast CCA
+from a novel perspective and propose a scalable
+and memory efficient Augmented Approximate
+Gradient (AppGrad) scheme for finding top k
+dimensional canonical subspace which only involves large matrix multiplying a thin matrix of
+width k and small matrix decomposition of dimension k × k. Further, AppGrad achieves optimal storage complexity O(k(p1 +p2 )), compared
+with classical algorithms which usually require
+O(p21 + p22 ) space to store two dense whitening
+matrices. The proposed scheme naturally generalizes to stochastic optimization regime, especially efficient for huge datasets where batch algorithms are prohibitive. The online property
+of stochastic AppGrad is also well suited to the
+streaming scenario, where data comes sequentially. To the best of our knowledge, it is the
+first stochastic algorithm for CCA. Experiments
+on four real data sets are provided to show the
+effectiveness of the proposed methods.
+
+1. Introduction
+
+tool to characterize the relationship between two multidimensional variables, which finds a wide range of applications. For example, CCA naturally fits into multi-view
+learning tasks and tailored to generate low dimensional feature representations using abandunt and inexpensive unlabeled datasets to supplement or refine the expensive labeled
+data in a semi-supervised fashion. Improved generalization accuracy has been witnessed or proved in areas such
+as regression (Kakade & Foster, 2007), clustering (Chaudhuri et al., 2009; Blaschko & Lampert, 2008), dimension
+reduction (Foster et al., 2008; McWilliams et al., 2013),
+word embeddings (Dhillon et al., 2011; 2012), etc. Besides,
+CCA has also been succesfully applied to genome-wide association study (GWAS) and has been shown powerful for
+understanding the relationship between genetic variations
+and phenotypes (Witten et al., 2009; Chen et al., 2012).
+There are various equivalent ways to define CCA and here
+we use the linear algebraic formulation of (Golub & Zha,
+1995), which captures the very essense of the procedure,
+pursuing the directions of maximal correlations between
+two data matrices.
+Definition 1.1. For data matrices X ∈ Rn×p1 , Y ∈
+Rn×p2 Let Sx = X> X/n, Sy = Y> Y/n, Sxy =
+X> Y/n and p = min{p1 , p2 }. The canonical correlations λ1 , · · · , λp and corresponding pair of canonical vectors {(φi , ψi )}pi=1 between X and Y are defined recursively by
+(φj , ψj ) = arg
+
+max
+
+φ> Sx φ=1, ψ > Sy ψ=1
+φ> Sx φi =0, ψ > Sy ψi =0, 1≤i≤j−1
+
+λ j = φ>
+j Sxy ψj
+−1
+
+φ> Sxy ψ
+
+j = 1, · · · , p
+
+−1
+
+1.1. Background
+
+Lemma 1.1. Let Sx 2 Sxy Sy 2 = UDV> be the singular
+
+Canonical Correlation Analysis (CCA), first introduced in
+1936 by (Hotelling, 1936), is a foundamental statistical
+
+value decomposition. Then Φ = Sx 2 U, Ψ = Sy 2 V, and
+Λ = D where Φ = (φ1 , · · · , φp ), Ψ = (ψ1 , · · · , ψp ) and
+Λ = diag(λ1 , · · · , λp ).
+
+Proceedings of the 32 nd International Conference on Machine
+Learning, Lille, France, 2015. JMLR: W&CP volume 37. Copyright 2015 by the author(s).
+
+−1
+
+−1
+
+The identifiability of canonical vectors (Φ, Ψ) is equivalent to the identifiability of the singular vectors (U, V).
+
+Scalable Canonical Correlation Analysis
+
+Lemma 1.1 implies that the leading k dimensional CCA
+subspace can be solved by first computing the whitening
+−1
+−1
+matrices Sx 2 , Sy 2 and then perform a k-truncated SVD
+−1
+
+−1
+
+on the whitened covariance matrix Sx 2 Sxy Sy 2 . This
+classical algorithm is feasible and accurate when the data
+matrices are small but it can be slow and numerically unstable for large scale datasets which are common in modern
+natural language processing (large corpora, Dhillon et al.
+(2011; 2012)) and multi-view learning (abandunt and inexpensive unlabeled data, Hariharan & Subramanian (2014))
+applications.
+Throughout the paper, we call the step of orthonormalizing
+the columns of X and Y whitening step. The computational complexity of the classical algorithm is dominated
+by the whitening step. There are two major bottlenecks,
+• Huge matrix multiplication X> X, Y> Y to obtain
+Sx , Sy with computational complexity O(np21 + np22 )
+for general dense X and Y.
+−1
+
+• Large matrix decomposition to compute Sx 2 and
+−1
+Sy 2 with computational complexity O(p31 + p32 )
+(Even when X and Y are sparse, Sx , Sy are not necessarily sparse)
+Remark 1.1. The whitening step dominates the ktruncated SVD step because the top k dimensional singular
+vectors can be efficiently computed by randomized SVD algorithms (see Halko et al. (2011) and many others).
+Remark 1.2. Another classical algorithm (built-in function in Matlab) introduced in (Björck & Golub, 1973) uses
+a different way of whitening. It first carrys out a QR decomposition, X = Qx Rx and Y = Qy Ry and then
+performs a SVD on Q>
+x Qy , which has the same computational complexity O(np21 + np22 ) as the algorithm indicated
+by Lemma 1.1. However, it is difficult to exploit sparsity
+in QR factorization while X> X, Y> Y can be efficiently
+computed when X and Y are sparse.
+Besides computational issues, extra O(p21 + p22 ) space is
+−1
+
+−1
+
+necessary to store two whitening matrices Sx 2 and Sy 2
+(typically dense). In high dimensional applications where
+the number of features is huge, this can be another bottleneck considering the capacity of RAM of personal desktops
+(10-20 GB). In large distributed storage systems, the extra
+required space might incur heavy communication cost.
+Therefore, it is natural to ask: is there a scalable algorithm that avoids huge matrix decomposition and huge matrix multiplication? Is it memory efficient? Or even more
+ambitiously, is there an online algorithm that generates decent approximation given a fixed computational power (e.g.
+CPU time, FLOP)?
+
+1.2. Related Work
+Scalability begins to play an increasingly important role
+in modern machine learning applications and draws more
+and more attention. Recently lots of promising progress
+emerged in the literature concerning with randomized algorithms for large scale matrix approximations, SVD, and
+Principal Component Analysis (Sarlos, 2006; Liberty et al.,
+2007; Woolfe et al., 2008; Halko et al., 2011). Unfortunately, these techniques does not directly solve CCA due
+to the whitening step. Several authors have tried to devise a scalable CCA algorithm. Avron et al. (2013) proposed an efficient approach for CCA between two tall and
+thin matrices (p1 , p2  n) harnessing the recently developed tools, Subsampled Randomized Hadamard Transform, which only subsampled a small proportion of the n
+data points to approximate the matrix product. However,
+when the size of the features, p1 and p2 , are large, the sampling scheme does not work. Later, Lu & Foster (2014)
+consider sparse design matrices and formulate CCA as iterative least squares, where in each iteration a fast regression
+algorithm that exploits sparsity is applied.
+Another related line of research considers stochastic
+optimization algorithms for PCA (Arora et al., 2012;
+Mitliagkas et al., 2013; Balsubramani et al., 2013), which
+date back to Oja & Karhunen (1985). Compared with batch
+algorithms, the stochastic versions empirically converge
+much faster with similar accuracy. Further, these stochastic
+algorithms can be applied to streaming setting where data
+comes sequentially (one pass or several pass) without being stored. As mentioned in (Arora et al., 2012), stochastic
+optimization algorithm for CCA is more challenging and
+remains an open problem because of the whitening step.
+1.3. Main Contribution
+The main contribution of this paper is to directly tackle
+CCA as a nonconvex optimization problem and propose
+a novel Augmented Approximate Gradient (AppGrad)
+scheme and its stochastic variant for finding the top k dimensional canonical subspace. Its advantages over stateof-art CCA algorithms are three folds. Firstly, AppGrad
+scheme only involves large matrix multiplying a thin matrix of width k and small matrix decomposition of dimension k ×k, and therefore to some extent is free from the two
+bottlenecks. It also benefits if X and Y are sparse while
+classical algorithm still needs to invert the dense matrices
+X> X and Y> Y. Secondly, AppGrad achieves optimal
+storage complexity O(k(p1 + p2 )), the space necessary to
+store the output, compared with classical algorithms which
+usually require O(p21 + p22 ) for storing the whitening matrices. Thirdly, the stochastic (online) variant of AppGrad
+is especially efficient for large scale datasets if moderate
+accuracy is desired. It is well-suited to the case when com-
+
+Scalable Canonical Correlation Analysis
+
+putational resources are limited or data comes as a stream.
+To the best of our knowledge, it is the first stochastic algorithm for CCA, which partly gives an affirmative answer to
+a question left open in (Arora et al., 2012).
+The rest of the paper is organized as follows. We introduce
+AppGrad scheme and establish its convergence properties
+in section 2. We extend the algorithm to stochastic settings
+in section 3. Extensive real data experiments are presented
+in section 4. Concluding remarks and future work are summarized in section 5. Proof of Theorem 2.1 and Proposition 2.3 are relegated to the supplementary material.
+
+2. Algorithm
+For simplicity, we first focus on the leading canonical pair
+(φ1 , ψ1 ) to motivate the proposed algorithms. Results for
+general scenario can be obtained in the same manner and
+will be briefly discussed in the later part of this section.
+2.1. An Optimization Perspective
+Throughout the paper, we assume X and Y are of full rank.
+We use k · k for L2 norm. ∀ u ∈ Rp1 , v ∈ Rp2 , we define
+1
+1
+kukx = (u> Sx u) 2 and kvky = (v > Sy v) 2 , which are
+norms induced by X and Y.
+To begin with, we recast CCA as an nonconvex optimization problem (Golub & Zha, 1995).
+Lemma 2.1. (φ1 , ψ1 ) is the solution of
+1
+kXφ − Yψk2
+2n
+subject to φ> Sx φ = 1, ψ > Sy ψ = 1
+min
+
+Algorithm 1 CCA via Alternating Least Squares
+Input: Data matrix X ∈ Rn×p1 , Y ∈ Rn×p2 and initialization (φ0 , ψ 0 )
+Output :(φA LS , ψA LS )
+repeat
+1
+t
+kXφ − Yψ t k2 = S−1
+φt+1 = arg min 2n
+x Sxy ψ
+φ
+
+φt+1 = φt+1 /kφt+1 kx
+1
+t
+ψ t+1 = arg min 2n
+kYψ − Xφt k2 = S−1
+y Syx φ
+ψ
+
+ψ t+1 = ψ t+1 /kψ t+1 ky
+until convergence
+Algorithm 2 CCA via Naive Gradient Descent
+Input: Data matrix X ∈ Rn×p1 , Y ∈ Rn×p2 , initialization (φ0 , ψ 0 ), step size η1 , η2
+Output : NAN (incorrect algorithm)
+repeat
+φt+1 = φt − η1 X> (Xφt − Yψ t )/n
+φt+1 = φt+1 /kφt+1 kx
+ψ t+1 = ψ t − η2 Y> (Yψ t − Xφt )/n
+ψ t+1 = ψ t+1 /kψ t+1 ky
+until convergence
+
+Proposition 2.1. If leading canonical correlation λ1 6= 1
+and either φ1 is not an eigenvector of Sx or ψ1 is not an
+eigenvector of Sy , then ∀η1 , η2 > 0, the leading canonical pair (φ1 , ψ1 ) is not a fixed point of the naive gradient
+scheme in Algorithm 2. Therefore, the algorithm does not
+converge to (φ1 , ψ1 ).
+
+(1)
+
+Although (1) is a nonconvex (due to the nonconvex constraint), (Golub & Zha, 1995) showed that an alternating minimization strategy (Algorithm 1), or rather iterative least squares, actually converges to the leading canont
+ical pair. However, each update φt+1 = S−1
+x Sxy ψ is
+computationally intensive. Essentially, the alternating least
+squares acts like a second order method, which is usually
+recognized to be inefficient for large-scale datasets, especially when current estimate is not close enough to the optimum. Therefore, it is natural to ask: is there a valid first
+order method that solves (1)? Heuristics borrowed from
+convex optimization literature give rise to a projected gradient scheme summarized in Algorithm 2. Instead of completely solving a least squares in each iterate, a single gradient step of (1) is performed and then project back to the
+constrained domain, which avoids inverting a huge matrix.
+Unfortunately, the following proposition demonstrates that
+Algorithm 2 fails to converge to the leading canonical pair.
+
+Proof of Proposition 2.1. The proof is similar to the proof
+of Proposition 2.2 and we leave out the details here.
+The failure of Algorithm 2 is due to the nonconvex nature of (1). Although every gradient step might decrease
+the objective function, this property nolonger persists after projecting to	its nonconvex domain (φ, ψ) | φ> Sx φ =
+1, ψ > Sy ψ = 1 (the normalization step). On the contrary,
+decreases triggered by gradient descent is always maintained if projecting to a convex region.
+2.2. AppGrad Scheme
+As a remedy, we propose a novel Augmented Approximate
+Gradient (AppGrad) scheme summarized in Algorithm 3.
+It inherits the convergence guarantee of alternating least
+squares as well as the scalability and memory efficiency
+of first order methods, which only involves matrix-vector
+multiplication and only requires O(p1 + p2 ) extra space.
+AppGrad seems unnatural at first sight but has some nice
+intuitions behind as we will discuss later. The differences
+and similarities between these algorithms are subtle but
+
+Scalable Canonical Correlation Analysis
+
+Algorithm 3 CCA via AppGrad
+Input: Data matrix X ∈ Rn×p1 , Y ∈ Rn×p2 , initialization (φ0 , ψ 0 , φe0 , ψe0 ), step size η1 , η2
+Output: (φAG , ψAG , φeAG , ψeAG )
+repeat
+φet+1 = φet − η1 X> (Xφet − Yψ t )/n
+φt+1 = φet+1 / kφet+1 kx
+ψet+1 = ψet − η2 Y> (Yψet − Xφt )/n
+φt+1 = ψet+1 / kψet+1 ky
+until convergence
+
+crucial. Compared with the naive gradient descent, we introduce two auxiliary variables (φet , ψet ), an unnormalized
+version of (φt , ψ t ). During each iterate, we keep updating φet and ψet without scaling them to have unit norm,
+which in turn produces the ‘correct’ normalized counterpart, (φt , ψ t ). It turns out that (φ1 , ψ1 , λ1 φ1 , λ1 ψ1 ) is a
+fixed point of the dynamic system {(φt , ψ t , φet , ψet )}∞
+t=0 .
+Proposition 2.2. ∀ i ≤ p, let φei = λi φi , ψei = λi ψi , then
+(φi , ψi , φei , ψei ) are the fixed points of AppGrad scheme.
+To prove the proposition, we need the following lemma that
+characterizes the relations among some key quantities.
+Lemma 2.2. Sxy = Sx ΦΛΨ> Sy
+−1
+
+−1
+
+Proof of Lemma 2.2. By Lemma 1.1, Sx 2 Sxy Sy 2
+1
+2
+
+>
+
+=
+
+1
+2
+
+UDV , where U = Sx Φ, V = Sy Ψ and D = Λ. Then
+1
+
+1
+
+we have Sxy = Sx2 UDV> Sy2 = Sx ΦΛΨ> Sy .
+Proof of Proposition 2.2. Substitute (φt , ψ t , φet , ψet ) =
+(φi , ψi , φei , ψei ) into the iterative formula in Algorithm 3.
+φet+1 = φei − η1 (Sx φei − Sxy ψi )
+= φei − η1 (Sx φei − Sx ΦΛΨ> Sy ψi )
+= φei − η1 (Sx φei − λi Sx φi )
+= φei
+The second equality is direct application of Lemma 2.2.
+The third equality is due to the fact that Ψ> Sy Ψ = Ip .
+Then,
+φt+1 = φei /kφei kx = φei /λi = φi
+Therefore (φet+1 , φt+1 ) = (φet , φt ) = (φei , φi ). A symmetric argument will show that (ψet+1 , ψ t+1 ) = (ψet , ψ t ) =
+(ψei , ψi ), which completes the proof.
+The connection between AppGrad and alternating minimization strategy is not instaneous. Intuitively, when
+(φt , ψ t ) is not close to (φ1 , ψ1 ), solving the least squares
+completely as carried out in Algorithm 1 is a waste of computational power (informally by regarding it as a second
+
+order method, the Newton Step has fast convergence only
+when current estimate is close to the optimum). Instead
+of solving a sequence of possibly unrelevant least squares,
+the following lemma shows that AppGrad directly targets
+at the least squares that involves the leading canonical pair.
+Lemma 2.3. Let (φ1 , ψ1 ) be the leading canonical pair
+and (φe1 , ψe1 ) = λ1 (φ1 , ψ1 ). Then,
+1
+kXφ − Yψ1 k2
+φe1 = arg min
+φ 2n
+1
+ψe1 = arg min
+kYψ − Xφ1 k2
+ψ 2n
+
+(2)
+
+1
+kXφ − Yψ1 k2 ,
+Proof of Lemma 2.3. Let φ∗ = arg min 2n
+φ
+
+by optimality condition, Sx φ∗
+Lemma 2.2,
+
+=
+
+Sxy ψ1 .
+
+Apply
+
+φ∗ = Sx −1 Sx ΦΛΨ> Sy ψ1 = λ1 φ1 = φe1
+Similar argument gives ψ ∗ = ψe1
+Lemma 2.3 characterizes the relationship between leading canonical pair (φ1 , ψ1 ) and its unnormalized counterpart (φe1 , ψe1 ), which sheds some insight on how AppGrad
+works. The intuition is that (φt , ψ t ) and (φet , ψet ) are current estimations of (φ1 , ψ1 ) and (φe1 , ψe1 ), and the updates
+of (φet+1 , ψet+1 ) in Algorithm 3 are actually gradient steps
+of the least squares in (2), with the unknown truth (φ1 , ψ1 )
+approximated by (φt , ψ t ). In terms of mathematics,
+φet+1 = φet − η1 X> (Xφet − Yψ t )/n
+≈ φet − η1 X> (Xφet − Yψ1 )/n
+
+(3)
+
+1
+= φet − η1 ∇φ kXφ − Yψ1 k2 |φ=φet
+2n
+The normalization step in Algorithm 3 corresponds
+to generating new approximations of (φ1 , ψ1 ), namely
+(φt+1 , ψ t+1 ), using the updated (φet+1 , ψet+1 ) through the
+relationship (φ1 , ψ1 ) = (φe1 /kφe1 kx , ψe1 /kψe1 ky ). Therefore, one can interpret AppGrad as approximate gradient scheme for solving (2). When (φet , ψet ) converge to
+(φe1 , ψe1 ), its scaled version (φt , ψ t ) converge to the leading canonical pair (φ1 , ψ1 ).
+The following theorem shows that when the estimates enter
+a neighborhood of the true canonical pair, AppGrad is contractive. Define the error metric et = k∆φet k2 + k∆ψet k2
+where ∆φet = φet − φe1 , ∆ψet = ψet − ψe1 .
+Theorem 2.1. Assume λ1 > λ2 , ∃ L1 , L2 ≥ 1 such that
+λmax (Sx ), λmax (Sy ) ≤ L1 and λmin (Sx ), λmin (Sy ) ≥
+L−1
+2 , where λmin (·), λmax (·) denote smallest and largest
+eigenvalues. If e0 < 2(λ21 − λ22 )/L1 and set η1 = η2 =
+
+Scalable Canonical Correlation Analysis
+
+Algorithm 4 CCA via AppGrad (Rank-k)
+Input: Data matrix X ∈ Rn×p1 , Y ∈ Rn×p2 , initiale 0, Ψ
+e 0 ), step size η1 , η2
+ization (Φ0 , Ψ0 , Φ
+e AG , Ψ
+e AG )
+Output : (ΦAG , ΨAG , Φ
+repeat
+e t+1 = Φ
+e t − η1 X> (XΦ
+e t − YΨt )/n
+Φ
+t+1 >
+t+1
+e
+e
+SVD: (Φ ) Sx Φ
+= Ux D x U >
+x
+1
+−
+>
+t+1
+t+1
+2
+e
+Φ
+= Φ Ux Dx Ux
+e t+1 = Ψ
+e t − η2 Y> (YΨ
+e t − XΦt )/n
+Ψ
+t+1
+>
+t+1
+e
+e
+SVD: (Ψ
+) Sy Ψ
+= Uy Dy U>
+y
+
+1
+>
+2
+e t+1 Uy D−
+Ψ
+y Uy
+
+Ψt+1 =
+until convergence
+
+η = δ/6L1 , then AppGrad achieves linear convergence
+such that ∀ t ∈ N+
+
+δ 2 t
+e0
+et ≤ 1 −
+6L1 L2
+1
+
+2(λ21 −λ22 )−L1 e0 2
+where δ = 1 − 1 −
+>0
+2λ2
+
+step) these directions simultaneously. In this way, every
+normalization step is only performed on the potential k dimensional target CCA subspace and therefore only deals
+with a small k × k matrix.
+Parallel results of Lemma 2.1, Proposition 2.1, Proposition 2.2, Lemma 2.3 for this general scenario can be established in a similar manner. Here, to make Algorithm 4
+more clear, we state the fixed point result of which the proof
+is similar to Proposition 2.2.
+Proposition 2.3. Let Λk = diag(λ1 , · · · , λk ) be the diagonal matrix of top k canonical correlations and let Φk =
+(φ1 , · · · , φk ), Ψk = (φ1 , · · · , φk ) be the top k CCA vece k = Φk Λk and Ψ
+e k = Ψk Λk . Then
+tors. Also denote Φ
+e k, Ψ
+e k )Q
+for any k × k orthogonal matrix Q, (Φk , Ψk , Φ
+is a fixed point of AppGrad scheme.
+The top k dimensional canonical subspace is identifiable up
+to a rotation matrix and Proposition 2.3 shows that every
+optimum is a fixed point of AppGrad scheme.
+2.4. Kernelization
+
+1
+
+Remark 2.1. The theorem reveals that the larger is the
+eigengap λ1 −λ2 , the broader is the contraction region. We
+didn’t try to optimize the conditions above and empirically
+as shown in the experiments, a randomized initialization
+always suffices to capture most of the correlations.
+2.3. General Rank-k Case
+Following the spirit of rank-one case, AppGrad can be easily generalized to compute the top k dimesional canonical
+subspace as summarized in Algorithm 4. The only difference is that the original scalar normalization is replaced by
+its matrix counterpart, that is to multiply the inverse of the
+1
+e t+1 Ux Dx− 2 U> , ensuring
+square root matrix Φt+1 = Φ
+x
+that (Φt+1 )> X> XΦt+1 = Ik .
+Notice that the gradient step only involves a large matrix
+multiplying a thin matrix of width k and the SVD is performed on a small k × k matrix. Therefore, the computational complexity per iteration is dominated by the gradient
+step, of order O(n(p1 + p2 )k). The cost will be further reduced when the data matrices X, Y are sparse.
+Compared with classical spectral agorithm which first
+whitens the data matrices and then performs a SVD on
+the whitened covariance matrix, AppGrad actually merges
+these two steps together. This is the key of its efficiency. In
+a high level, whitening the whole data matrix is not necessary and we only want to whiten the directions that contain
+the leading CCA subspace. However, these directions are
+unknown and therefore for two-step procedures, whitening
+the whole data matrix is unavoidable. Instead, AppGrad
+tries to identify (gradient step) and whiten (normalization
+
+Sometimes CCA is restricted because of its linearity and
+kernel CCA offers an alternative by projecting data into a
+high dimensional feature space. In this section, we show
+that AppGrad works for kernel CCA as well. Let KX (·, ·)
+and KY (·, ·) be Mercer kernels, then there exists feature
+mappings fX : X → FX and fY : Y → FY such
+that KX (xi , xj ) = hfX (xi ), fX (xj )i and KY (yi , yj ) =
+hfY (yi ), fY (yj )i. Let FX = (fX (x1 ), · · · , fX (xn ))> and
+FY = (fY (y1 ), · · · , fY (yn ))> be the compact representation of the objects in the possibly infinite dimensional feature space. Since the top k dimensional canonical vectors
+lie in the space spaned by the features, say Φk = F>
+X WX
+n×k
+and Ψk = F>
+W
+for
+some
+W
+,
+W
+∈
+R
+. Let
+Y
+X
+Y
+Y
+>
+K X = FX F>
+,
+K
+=
+F
+F
+be
+the
+Gram
+matrices.
+SimY
+Y Y
+X
+ilar to Lemma 2.1, kernel CCA can be formulated as
+arg max
+
+WX ,WY
+
+kKX WX − KY WY k2F
+
+>
+subject to WX
+K X K X W X = Ik
+
+>
+WY
+KY KY WY = Ik
+
+Following the same logic as Proposition 2.3, a similar fixed
+point result can be proved. Therefore, Algorithm 4 can be
+directly applied to compute WX , WY by simply replacing
+X, Y with KX , KY .
+
+3. Stochastic AppGrad
+Recently, there is a growing interest in stochastic optimization which is shown to have better performance for
+large-scale learning problems (Bousquet & Bottou, 2008;
+Bottou, 2010). Especially in the so-called ‘data laden
+regime’, where data is abundant and the bottleneck is runtime, stochastic optimization dominate batch algorithms
+
+Scalable Canonical Correlation Analysis
+
+Algorithm 5 CCA via Stochastic AppGrad (Rank-k)
+Input: Data matrix X ∈ Rn×p1 , Y ∈ Rn×p2 , initiale 0, Ψ
+e 0 ), step size η1t , η2t , minibatch
+ization (Φ0 , Ψ0 , Φ
+size m
+e S AG , Ψ
+e S AG )
+Output : (ΦS AG , ΨS AG , Φ
+repeat
+Randomly pick a subset I ⊂ {1, 2, · · · , n} of size m
+e t+1 = Φ
+e t − η1t X> (XI Φ
+e t − YI Ψt )/m
+Φ
+I
+>
+t+1 > 1
+e t+1 = U> Dx Ux
+e
+SVD: (Φ ) ( m XI XI )Φ
+x
+1
+−
+e t+1 U> Dx 2 Ux
+Φt+1 = Φ
+x
+e t+1 = Ψ
+e t − η2t Y> (YI Ψ
+e t − XI Φt )/m
+Ψ
+I
+e t+1 = U> Dy Uy
+e t+1 )> ( 1 Y> YI )Ψ
+SVD: (Ψ
+m
+
+I
+
+y
+
+1
+
+2
+e t+1 U> D−
+Ψ
+=Ψ
+y Uy
+y
+until convergence
+
+t+1
+
+both empirically and theoretically. Given these advantages, lots of efforts have been spent on developing stochastic algorithms for principal component analysis (Oja &
+Karhunen, 1985; Arora et al., 2012; Mitliagkas et al., 2013;
+Balsubramani et al., 2013). Despite promising progress in
+PCA, as mentioned in (Arora et al., 2012), stochastic CCA
+is more challenging and remains an open problem due to
+the whitening step.
+As a gradient scheme, AppGrad naturally generalizes to the
+stochastic regime and we summarize in Algorithm 5. Compared with the batch version, only a small subset of samples are used to compute the gradient, which reduces the
+computational cost per iteration from O(n(p1 + p2 )k) to
+O(m(p1 + p2 )k) (m = |I| is the size of the minibatch).
+Empirically, this makes stochastic AppGrad much faster
+than the batch version as we will see in the experiments.
+Also, for large scale applications when fully calculating the
+CCA subspace is prohibitive, stochastic AppGrad can generate a decent approximation given a fixed computational
+power, while other algorithms only give a one-shot estimate after the whole procedure is carried out completely.
+Moreover, when there is a generative model, as shown in
+(Bousquet & Bottou, 2008), due to the tradeoff between
+statistical and numerical accuracy, fully solving an empirical risk minimization is unnecessary since the statistical
+error will finally dominate. On the contrary, stochastic optimization directly tackles the problem in the population
+level and therefore is more statistically efficient.
+It is worth mentioning that the normalization step is ac1
+complished using a sampled Gram matrix m
+X>
+I XI and
+1
+>
+Y
+Y
+.
+A
+key
+observation
+is
+that
+when
+m
+∈ O(k),
+I
+I
+m
+e t+1 )> ( 1 X> XI )Φ
+e t+1 ≈ (Φ
+e t+1 )> ( 1 X> X)Φ
+e t+1 us(Φ
+m I
+m
+ing standard concentration inequality, because the matrix
+e t+1 )> ( 1 X> X)Φ
+e t+1 is a k ×k
+we want to approximate (Φ
+m
+matrix, while generally O(p) sample is needed to have
+
+1
+>
+m XI XI
+
+≈ n1 X> X. As we have argued in previous section, this bonus is a byproduct of the fact that AppGrad
+tries to identify and whiten the directions that contains the
+CCA subspace simultaneously, or else O(p) samples are
+necessary for whitening the whole data matrices.
+
+4. Experiments
+In this section, we present experiments on four real datasets
+to evaluate the effectiveness of the proposed algorithms for
+computing the top 20 (k=20) dimensional canonical subspace. A short summary of the datasets is in Table 1.
+Mediamill is an annotated video dataset from the Mediamill Challenge (Snoek et al., 2006). Each image is a representative keyframe of a video shot annotated with 101
+labels and consists of 120 features. CCA is performed to
+explore the correlation structure between the images and its
+labels.
+MNIST is a database of handwritten digits. CCA is used to
+learn correlated representations between the left and right
+halves of the images.
+Penn Tree Bank dataset is extracted from Wall Street Journal, which consists of 1.17 million tokens and a vocabulary
+size of 43, 000 (Lamar et al., 2010). CCA has been successfully used on this dataset to build low dimensional word
+embeddings (Dhillon et al., 2011; 2012). The task here is
+a CCA between words and their context. We only consider
+the 10, 000 most frequent words to avoid sample sparsity.
+URL Reputation dataset (Ma et al., 2009) is extracted
+from UCI machine learning repository. The dataset contains 2.4 million URLs each represented by 3.2 million
+features. For simplicity we only use the first 2 million
+samples. 38% of the features are host based features like
+WHOIS info, IP prefix and 62% are lexical based features
+like Hostname and Primary domain. We run a CCA between a subset of host based features and a subset of lexical
+based features.
+4.1. Implementations
+Evaluation Criterion: The evaluation criterion we use
+for the first three datasets (Mediamill, MNIST, Penn Tree
+Bank) is Proportions of Correlations Captured (PCC). To
+introduce this term, we first define Total Correlations Captured (TCC) between two matrices to be the sum of their
+canonical correlations as defined in Lemma 1.1. Then, for
+b k, Ψ
+bk
+estimated top k dimensional canonical subspace Φ
+and true leading k dimensional CCA subspace Φk , Ψk ,
+PCC is defined as
+
+PCC =
+
+b k , YΨ
+b k)
+TCC(XΦ
+TCC(XΦk , YΨk )
+
+Scalable Canonical Correlation Analysis
+Table 1. Brief Summary of Datasets
+
+DATASETS
+M EDIAMILL
+M NIST
+P ENN T REE BANK
+URL R EPUTATION
+
+D ESCRIPTION
+I MAGE AND ITS LABELS
+LEFT AND RIGHT HALVES OF IMAGES
+W ORD C O - OCURRANCE
+
+H OST AND LEXICAL BASED FEATURES
+
+Intuitively PCC characterizes the proportion of correlations
+captured by certain algorithm compared with the true CCA
+subspace. Therefore, the higher is PCC the better is the
+estimated CCA subspace. This criterion has two major advantages over subspace distance kPΦ
+b k − PΦk k (PΩ is projection matrix of the column space of Ω). First, it is more
+natural and relevant considering that the goal of CCA is to
+capture most correlations between two data matrices. Second, when the eigengap ∆λ = λk −λk+1 is not big enough,
+the top k dimensional CCA subspace is ill posed while the
+correlations captured is well defined.
+We use the output of the standard spectral algorithms as the
+truth (Φk , Ψk ) to calculate the denominator of PCC. However, for URL Reputation dataset, the number of samples
+and features are too large for the algorithm to compute the
+true CCA subspace in a reasonable amount of time and inb k , YΨ
+b k)
+stead we only compare the numerator TCC(XΦ
+(monotone w.r.t. PCC) for different algorithms.
+Initialization We initialize (Φ0 , Ψ0 ) by first drawing i.i.d.
+samples from standard Gaussian distribution and then normalize such that (Φ0 )> Sx Φ0 = Ik and (Ψ0 )> Sy Ψ0 = Ik
+Stepsize For both AppGrad and stochastic AppGrad, a
+small part of the training set is held out and cross-validation
+is used to choose the step size adaptively.
+Regularization For all the algorithms, a little regularization is added for numerical stability which means we replace Gram matrix X> X with X> X + λI for some small
+positive λ.
+Oversampling Oversampling means when aiming for top
+k dimensional subspace, people usually computes top k + l
+dimesional subspace from which a best k diemsional subspace is extracted. In practice, l = 5 ∼ 10 suffices to
+improve the performance. We only do a oversampling of 5
+in the URL dataset.
+4.2. Summary of Results
+For the first three datasets (Mediamill, MNIST, Penn Tree
+Bank), both in-sample and out-of-sample PCC are computed for AppGrad and Stochastic AppGrad as summarized
+in Figure1. As you can see, both algorithms nearly capture
+most of the correlations compared with the true CCA subspace and stochastic AppGrad consistently achieves same
+
+p1
+100
+392
+10, 000
+100, 000
+
+p2
+120
+392
+10, 000
+100, 000
+
+n
+30, 000
+60, 000
+500, 000
+1, 000, 000
+
+PCC with much less computational cost than its batch version. Moreover, the larger is the size of the data, the bigger
+advantage will stochastic AppGrad obtain. One thing to notice is that, as revealed in Mediamill dataset, out-of-sample
+PCC is not necessarily less than in-sample PCC because
+both denominator and numerator will change on the hold
+out set.
+For URL Reputation dataset, as we mentioned earlier, classical algorithms fails on a typical desktop. The reason is
+that these algorithms only produce a one-shot estimate after the whole procedure is completed, which is usually prohibitive for huge datasets. In this scenario, the advantage
+of online algorithms like stochastic AppGrad becomes crucial. Further, the stochastic nature makes the algorithm
+cost-effective and generate decent approximations given
+fixed computational resources (e.g. FLOP). As revealed by
+Figure 2, as the number of iterations increases, stochastic
+AppGrad captures more and more correlations.
+Since the true CCA subspaces for URL dataset is too slow
+to compute, we compare our algorithm with some naive
+heuristics which can be carried out efficiently in large scale
+and catches a reasonable amount of correlation. Below is a
+brief description of them.
+• Non-Whitening (NW-CCA): directly perform SVD on
+the unwhitened covariance matrix XT Y. This strategy is also used in (Witten et al., 2009)
+• Diagnoally Whitening (DW-CCA) (Lu & Foster,
+2014): avoid inverting matrices by approximating
+1
+1
+−1
+−1
+Sx 2 , Sy 2 with (diag(Sx ))− 2 and (diag(Sy ))− 2 .
+• Whitening the leading m Principal Component Directions (PCA-CCA): First compute the leading m dimensional principal component subspace and project
+the data matrices X and Y to the subspace, denote
+them Ux and Uy . Then compute the top k dimensional CCA subspace of the pair (Ux , Uy ). At last,
+transform the CCA subspace of (Ux , Uy ) back to
+the CCA subspace of orginal matrix pair (X, Y).
+Specifically for this example, we choose m = 1200
+(log(FLOP)=35, dominating the computational cost of
+Stochastic AppGrad) .
+Remark 4.1. For all the heuristics mentioned above, SVD
+
+Scalable Canonical Correlation Analysis
+Mediamill AppGrad
+100
+
+Mnist AppGrad
+100
+
+insample
+outsample
+
+98
+
+PTB AppGrad
+100
+
+insample
+outsample
+
+insample
+outsample
+
+95
+
+95
+96
+
+90
+
+92
+90
+
+PCC
+
+90
+
+PCC
+
+PCC
+
+94
+
+85
+
+85
+80
+
+88
+
+80
+
+75
+
+86
+70
+
+75
+
+84
+24
+
+25
+
+26
+
+27
+
+28
+
+29
+
+30
+
+31
+
+26
+
+27
+
+28
+
+log(FLOP)
+
+30
+
+31
+
+33
+
+34
+
+log(FLOP)
+
+Mediamill S−AppGrad
+100
+
+29
+
+Mnist S−AppGrad
+100
+
+insample
+outsample
+
+95
+
+35
+
+36
+
+37
+
+log(FLOP)
+
+PTB S−AppGrad
+100
+
+insample
+outsample
+
+95
+
+insample
+outsample
+
+95
+90
+85
+
+PCC
+
+PCC
+
+90
+
+PCC
+
+90
+
+85
+
+85
+
+80
+
+80
+
+80
+75
+70
+65
+
+75
+
+21
+
+22
+
+23
+
+24
+
+75
+
+25
+
+60
+21
+
+21.5
+
+log(FLOP)
+
+22
+
+22.5
+
+23
+
+log(FLOP)
+
+23.5
+
+24
+
+24.5
+
+28.5
+
+29
+
+29.5
+
+30
+
+30.5
+
+31
+
+31.5
+
+log(FLOP)
+
+Figure 1. Proportion of Correlations Captured (PCC) by AppGrad and stochastic AppGrad on different datasets
+
+try to approximately whiten the data matrices. As suggested by Figure 2, stochastic AppGrad significantly captures much more correlations.
+
+URL Outsample
+18
+
+S−AppGrad
+PCA−CCA
+NW−CCA
+DW−CCA
+
+17
+16
+
+5. Conclusions and Future Work
+
+15
+
+TCC
+
+14
+13
+12
+11
+10
+9
+8
+
+28
+
+29
+
+30
+
+31
+
+32
+
+33
+
+log(FLOP)
+
+Figure 2. Total Correlations Captured (TCC) by NW-CCA, DWCCA, PCA-CCA and stochastic AppGrad on URL dataset. The
+dash lines indicate TCC for those heuristics and the colored
+dots denote corresponding computational cost. Red arrow means
+log(FLOP) of PCA-CCA is more than 33.
+
+and PCA steps are carried out using the randomized algorithms in (Halko et al., 2011). For PCA-CCA, as the
+number of Principal Components (m) increases, more correlation will be captured but the computational cost will
+also increase. When m = p, PCA-CCA is reduced to the
+orginal CCA.
+Essentially, all the heuristics are incorrect algorithms and
+
+In this paper, we present a novel first order method, AppGrad, to tackle large scale CCA as a nonconvex optimization problem. This bottleneck-free algorithm is both memory efficient and computationally scalable. More importantly, its online variant is well-suited to practical high
+dimensional applications where batch algorithm is prohibitive and data laden regime where data is abundant and
+runtime is main concern.
+Further, AppGrad is flexible and structure information can
+be easily incorporated into the algorithm. For example,
+if the canonical vectors are assumed to be sparse (Witten
+et al., 2009; Gao et al., 2014), a thresholding step can be
+added between the gradient step and normalization step to
+obtain sparse solutions while it is hard to add sparse constraint to the classical CCA formulation which is a generalized eigenvalue problem. Heuristics in (Witten et al.,
+2009) avoid this by simply skipping the whitening procedure (NW-CCA). (Gao et al., 2014) resorts to semidefinite
+programming and therefore is very slow. AppGrad with
+thresholding works well in simulations and we leave its theoretical properties for future research.
+
+Scalable Canonical Correlation Analysis
+
+References
+Arora, R, Cotter, A, Livescu, K, and Srebro, N. Stochastic
+optimization for pca and pls. In Communication, Control, and Computing (Allerton), 2012 50th Annual Allerton Conference on, pp. 861–868. IEEE, 2012.
+Avron, Haim, Boutsidis, Christos, Toledo, Sivan, and
+Zouzias, Anastasios. Efficient dimensionality reduction
+for canonical correlation analysis. In ICML (1), pp. 347–
+355, 2013.
+
+Foster, Dean P., Kakade, Sham M., and Zhang, Tong.
+Multi-view dimensionality reduction via canonical correlation analysis. Technical report, 2008.
+Gao, Chao, Ma, Zongming, and Zhou, Harrison H. Sparse
+cca: Adaptive estimation and computational barriers.
+arXiv preprint arXiv:1409.8565, 2014.
+Golub, Gene H and Zha, Hongyuan. The canonical correlations of matrix pairs and their numerical computation.
+Springer, 1995.
+
+Balsubramani, Akshay, Dasgupta, Sanjoy, and Freund,
+Yoav. The fast convergence of incremental pca. In Advances in Neural Information Processing Systems, pp.
+3174–3182, 2013.
+
+Halko, N., Martinsson, P. G., and Tropp, J. A. Finding
+structure with randomness: Probabilistic algorithms for
+constructing approximate matrix decompositions. SIAM
+Rev., 53(2):217–288, May 2011. ISSN 0036-1445.
+
+Björck, Åke and Golub, Gene H. Numerical methods for
+computing angles between linear subspaces. Mathematics of Computation, pp. 579–594, 1973.
+
+Hariharan, Cibe and Subramanian, Shivashankar. Large
+scale multi-view learning on mapreduce. 2014.
+
+Blaschko, Matthew B and Lampert, Christoph H. Correlational spectral clustering. In Computer Vision and Pattern Recognition, 2008. CVPR 2008. IEEE Conference
+on, pp. 1–8. IEEE, 2008.
+
+Hotelling, H. Relations between two sets of variables.
+Biometrika, 28:312–377, 1936.
+Kakade, Sham M. and Foster, Dean P. Multi-view regression via canonical correlation analysis. In In Proc. of
+Conference on Learning Theory, 2007.
+
+Bottou, Léon.
+Large-Scale Machine Learning with
+Stochastic Gradient Descent. In Lechevallier, Yves and
+Saporta, Gilbert (eds.), Proceedings of the 19th International Conference on Computational Statistics (COMPSTAT’2010), pp. 177–187, Paris, France, August 2010.
+Springer.
+
+Lamar, Michael, Maron, Yariv, Johnson, Mark, and Bienenstock, Elie. SVD and Clustering for Unsupervised
+POS Tagging. In Proceedings of the ACL 2010 Conference Short Papers, pp. 215–219, Uppsala, Sweden,
+2010. Association for Computational Linguistics.
+
+Bousquet, Olivier and Bottou, Léon. The tradeoffs of large
+scale learning. In Advances in neural information processing systems, pp. 161–168, 2008.
+
+Liberty, Edo, Woolfe, Franco, Martinsson, Per-Gunnar,
+Rokhlin, Vladimir, and Tygert, Mark. Randomized algorithms for the low-rank approximation of matrices. Proceedings of the National Academy of Sciences, 104(51):
+20167–20172, 2007.
+
+Chaudhuri, Kamalika, Kakade, Sham M, Livescu, Karen,
+and Sridharan, Karthik. Multi-view clustering via canonical correlation analysis. In Proceedings of the 26th annual international conference on machine learning, pp.
+129–136. ACM, 2009.
+Chen, Xi, Liu, Han, and Carbonell, Jaime G. Structured
+sparse canonical correlation analysis. In International
+Conference on Artificial Intelligence and Statistics, pp.
+199–207, 2012.
+Dhillon, Paramveer S., Foster, Dean, and Ungar, Lyle.
+Multi-view learning of word embeddings via cca. In
+Advances in Neural Information Processing Systems
+(NIPS), volume 24, 2011.
+Dhillon, Paramveer S., Rodu, Jordan, Foster, Dean P., and
+Ungar, Lyle H. Two step cca: A new spectral method for
+estimating vector models of words. In Proceedings of
+the 29th International Conference on Machine learning,
+ICML’12, 2012.
+
+Lu, Yichao and Foster, Dean P. Large scale canonical correlation analysis with iterative least squares. In Advances
+in Neural Information Processing Systems, pp. 91–99,
+2014.
+Ma, Justin, Saul, Lawrence K., Savage, Stefan, and
+Voelker, Geoffrey M. Identifying suspicious urls: An application of large-scale online learning. In In Proc. of the
+International Conference on Machine Learning (ICML,
+2009.
+McWilliams, Brian, Balduzzi, David, and Buhmann,
+Joachim. Correlated random features for fast semisupervised learning. In Advances in Neural Information
+Processing Systems, pp. 440–448, 2013.
+Mitliagkas, Ioannis, Caramanis, Constantine, and Jain, Prateek. Memory limited, streaming pca. In Advances in
+Neural Information Processing Systems, pp. 2886–2894,
+2013.
+
+Scalable Canonical Correlation Analysis
+
+Oja, Erkki and Karhunen, Juha. On stochastic approximation of the eigenvectors and eigenvalues of the expectation of a random matrix. Journal of mathematical analysis and applications, 106(1):69–84, 1985.
+Sarlos, Tamas. Improved approximation algorithms for
+large matrices via random projections. In Foundations of
+Computer Science, 2006. FOCS’06. 47th Annual IEEE
+Symposium on, pp. 143–152. IEEE, 2006.
+Shalev-Shwartz, Shai and Srebro, Nathan. Svm optimization: inverse dependence on training set size. In Proceedings of the 25th international conference on Machine learning, pp. 928–935. ACM, 2008.
+Snoek, Cees GM, Worring, Marcel, Van Gemert, Jan C,
+Geusebroek, Jan-Mark, and Smeulders, Arnold WM.
+The challenge problem for automated detection of 101
+semantic concepts in multimedia. In Proceedings of the
+14th annual ACM international conference on Multimedia, pp. 421–430. ACM, 2006.
+Witten, Daniela M, Tibshirani, Robert, and Hastie, Trevor.
+A penalized matrix decomposition, with applications to
+sparse principal components and canonical correlation
+analysis. Biostatistics, pp. kxp008, 2009.
+Woolfe, Franco, Liberty, Edo, Rokhlin, Vladimir, and
+Tygert, Mark. A fast randomized algorithm for the approximation of matrices. Applied and Computational
+Harmonic Analysis, 25(3):335–366, 2008.
+
+

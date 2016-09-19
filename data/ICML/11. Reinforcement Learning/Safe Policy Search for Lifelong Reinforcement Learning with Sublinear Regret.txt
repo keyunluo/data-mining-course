@@ -1,0 +1,2114 @@
+Safe Policy Search for Lifelong Reinforcement Learning with Sublinear Regret
+Haitham Bou Ammar
+HAITHAMB @ SEAS . UPENN . EDU
+Rasul Tutunov
+TUTUNOV @ SEAS . UPENN . EDU
+Eric Eaton
+EEATON @ CIS . UPENN . EDU
+University of Pennsylvania, Computer and Information Science Department, Philadelphia, PA 19104 USA
+
+Abstract
+Lifelong reinforcement learning provides a
+promising framework for developing versatile
+agents that can accumulate knowledge over a
+lifetime of experience and rapidly learn new
+tasks by building upon prior knowledge. However, current lifelong learning methods exhibit
+non-vanishing regret as the amount of experience
+increases, and include limitations that can lead to
+suboptimal or unsafe control policies. To address
+these issues, we develop a lifelong policy gradient learner that operates in an adversarial setting to learn multiple tasks online while enforcing safety constraints on the learned policies. We
+demonstrate, for the first time, sublinear regret
+for lifelong policy search, and validate our algorithm on several benchmark dynamical systems
+and an application to quadrotor control.
+
+1. Introduction
+Reinforcement learning (RL) (Busoniu et al., 2010; Sutton
+& Barto, 1998) often requires substantial experience before achieving acceptable performance on individual control problems. One major contributor to this issue is the
+tabula-rasa assumption of typical RL methods, which learn
+from scratch on each new task. In these settings, learning
+performance is directly correlated with the quality of the
+acquired samples. Unfortunately, the amount of experience
+necessary for high-quality performance increases exponentially with the tasks’ degrees of freedom, inhibiting the application of RL to high-dimensional control problems.
+When data is in limited supply, transfer learning can significantly improve model performance on new tasks by reusing
+previous learned knowledge during training (Taylor &
+Stone, 2009; Gheshlaghi Azar et al., 2013; Lazaric, 2011;
+Ferrante et al., 2008; Bou Ammar et al., 2012). Multitask learning (MTL) explores another notion of knowledge transfer, in which task models are trained simultaneProceedings of the 32 nd International Conference on Machine
+Learning, Lille, France, 2015. JMLR: W&CP volume 37. Copyright 2015 by the author(s).
+
+ously and share knowledge during the joint learning process (Wilson et al., 2007; Zhang et al., 2008).
+In the lifelong learning setting (Thrun & O’Sullivan,
+1996a;b), which can be framed as an online MTL problem, agents acquire knowledge incrementally by learning
+multiple tasks consecutively over their lifetime. Recently,
+based on the work of Ruvolo & Eaton (2013) on supervised lifelong learning, Bou Ammar et al. (2014) developed a lifelong learner for policy gradient RL. To ensure
+efficient learning over consecutive tasks, these works employ a second-order Taylor expansion around the parameters that are (locally) optimal for each task without transfer. This assumption simplifies the MTL objective into a
+weighted quadratic form for online learning, but since it is
+based on single-task learning, this technique can lead to parameters far from globally optimal. Consequently, the success of these methods for RL highly depends on the policy initializations, which must lead to near-optimal trajectories for meaningful updates. Also, since their objective
+functions average loss over all tasks, these methods exhibit
+non-vanishing regrets of the form O(R), where R is the
+total number of rounds in a non-adversarial setting.
+In addition, these methods may produce control policies
+with unsafe behavior (i.e., capable of causing damage to
+the agent or environment, catastrophic failure, etc.). This is
+a critical issue in robotic control, where unsafe control policies can lead to physical damage or user injury. This problem is caused by using constraint-free optimization over the
+shared knowledge during the transfer process, which may
+lead to uninformative or unbounded policies.
+In this paper, we address these issues by proposing the first
+safe lifelong learner for policy gradient RL operating in an
+adversarial framework. Our approach rapidly learns highperformance safe control policies based on the agent’s previously learned knowledge and safety constraints on each
+task, accumulating knowledge over multiple consecutive
+tasks to optimize overall performance. We theoretically analyze the regret exhibited by our algorithm,
+showing subp
+linear dependency of the form O( R) for R rounds, thus
+outperforming current methods. We then evaluate our approach empirically on a set of dynamical systems.
+
+Safe Policy Search for Lifelong Reinforcement Learning with Sublinear Regret
+
+2. Background
+2.1. Reinforcement Learning
+An RL agent sequentially chooses actions to minimize its
+expected cost. Such problems are formalized as Markov decision processes (MDPs) hX , U , P, c, i, where X ⇢ Rd is
+the (potentially infinite) state space, U 2 Rda is the set
+of all possible actions, P : X ⇥ U ⇥ X ! [0, 1] is a
+state transition probability describing the system’s dynamics, c : X ⇥ U ⇥ X ! R is the cost function measuring
+the agent’s performance, and 2 [0, 1] is a discount factor. At each time step m, the agent is in state xm 2 X
+and must choose an action um 2 U , transitioning it to a
+new state xm+1 ⇠ P (xm+1 |xm , um ) and yielding a cost
+cm+1 = c(xm+1 , um , xm ). The sequence of state-action
+pairs forms a trajectory ⌧ = [x0:M 1 , u0:M 1 ] over a
+(possibly infinite) horizon M . A policy ⇡ : X ⇥ U ! [0, 1]
+specifies a probability distribution over state-action pairs,
+where ⇡ (u|x) represents the probability of selecting an action u in state x. The goal of RL is to find an optimal policy
+⇡ ? that minimizes the total expected cost.
+Policy search methods have shown success in solving
+high-dimensional problems, such as robotic control (Kober
+& Peters, 2011; Peters & Schaal, 2008a; Sutton et al.,
+2000). These methods represent the policy ⇡↵ (u|x) using
+a vector ↵ 2 Rd of control parameters. The optimal policy
+⇡ ? is found by determining the parameters ↵? that minimize the expected average cost:
+n
+⇣
+⌘ ⇣
+⌘
+X
+l(↵) =
+p↵ ⌧ (k) C ⌧ (k) ,
+(1)
+k=1
+
+where n is the total number of trajectories, and p↵ ⌧ (k)
+and C ⌧ (k) are the probability and cost of trajectory ⌧ (k) :
+⇣
+⌘
+⇣
+⌘ MY1 ⇣
+⌘
+(k)
+(k)
+(k)
+p↵ ⌧ (k) = P0 x0
+P xm+1 |x(k)
+,
+u
+m
+m
+(2)
+m=0
+⇣
+⌘
+(k) (k)
+⇥ ⇡↵ um |xm
+M 1
+⇣
+⌘
+⌘
+1 X ⇣ (k)
+(k)
+c xm+1 , u(k)
+,
+x
+,
+C ⌧ (k) =
+m
+m
+M m=0
+
+(3)
+
+with an initial state distribution P0 : X ! [0, 1]. We handle a constrained version of policy search, in which optimality not only corresponds to minimizing the total expected cost, but also to ensuring that the policy satisfies
+safety constraints. These constraints vary between applications, for example corresponding to maximum joint torque
+or prohibited physical positions.
+2.2. Online Learning & Regret Analysis
+In this paper, we employ a special form of regret minimization games, which we briefly review here. A regret minimization game is a triple hK, F, Ri, where K is a nonempty decision set, F is the set of moves of the adversary
+
+which contains bounded convex functions from Rn to R,
+and R is the total number of rounds. The game proceeds
+in rounds, where at each round j = 1, . . . , R, the agent
+chooses a prediction ✓j 2 K and the environment (i.e., the
+adversary) chooses a loss function lj 2 F. At the end of the
+round, the loss function lj is revealed to the agent and the
+decision ✓j is revealed to the environment. In this paper,
+we handle the full-information case, where the agent may
+observe the entire loss function lj as its feedback and can
+exploit this in making decisions. The goal his to minimize
+i
+PR
+PR
+the cumulative regret j=1 lj (✓j ) infu2K
+j=1 lj (u) .
+When analyzing the regret of our methods, we use a variant
+of this definition to handle the lifelong RL case:
+2
+3
+R
+R
+X
+X
+RR =
+ltj (✓j ) inf 4
+ltj (u)5 ,
+u2K
+
+j=1
+
+j=1
+
+where ltj (·) denotes the loss of task t at round j.
+
+For our framework, we adopt a variant of regret minimization called “Follow the Regularized Leader,” which minimizes regret in two steps. First, the unconstrained solution
+✓˜ is determined (see Sect. 4.1) by solving an unconstrained
+optimization over the accumulated losses observed so far.
+˜ the constrained solution is then determined by
+Given ✓,
+learning a projection into the constraint set via Bregman
+projections (see Abbasi-Yadkori et al. (2013)).
+
+3. Safe Lifelong Policy Search
+We adopt a lifelong learning framework in which the agent
+learns multiple RL tasks consecutively, providing it the opportunity to transfer knowledge between tasks to improve
+learning. Let T denote the set of tasks, each element of
+which is an MDP. At any time, the learner may face any
+previously seen task, and so must strive to maximize its
+performance across all tasks. The goal is to learn optimal
+?
+?
+?
+policies ⇡↵
+for all tasks, where policy ⇡↵
+? , . . . , ⇡ ↵?
+? for
+t
+1
+|T |
+
+task t is parameterized by ↵?t 2 Rd . In addition, each
+task is equipped with safety constraints to ensure acceptable policy behavior: At ↵t  bt , with At 2 Rd⇥d and
+bt 2 Rd representing the allowed policy combinations. The
+precise form of these constraints depends on the application
+domain, but this formulation supports constraints on (e.g.)
+joint torque, acceleration, position, etc.
+At each round j, the learner observes a set of ntj trajecn
+o
+(nt )
+(1)
+tories ⌧tj , . . . , ⌧tj j from a task tj 2 T , where each
+trajectory has length Mtj . To support knowledge transfer
+between tasks, we assume that each task’s policy parameters ↵tj 2 Rd at round j can be written as a linear combination of a shared latent basis L 2 Rd⇥k with coefficient
+vectors stj 2 Rk ; therefore, ↵tj = Lstj . Each column
+of L represents a chunk of transferrable knowledge; this
+task construction has been used successfully in previous
+
+Safe Policy Search for Lifelong Reinforcement Learning with Sublinear Regret
+
+multi-task learning work (Kumar & Daumé III, 2012; Ruvolo & Eaton, 2013; Bou Ammar et al., 2014). Extending
+this previous work, we ensure that the shared knowledge
+repository is “informative” by incorporating bounding constraints on the Frobenius norm k · kF of L. Consequently,
+the optimization problem after observing r rounds is:
+r
+X
+⇥
+⇤
+2
+2
+min
+⌘tj ltj Lstj + µ1 ||S||F + µ2 ||L||F
+(4)
+L,S
+
+j=1
+
+s.t.
+
+Atj ↵tj  btj 8tj 2 Ir
+
+LLT
+p and max LLT  q ,
+where p and q are the constraints on kLkF , ⌘tj 2 R are
+design weighting parameters1 , Ir = {t1 , . . . , tr } denotes
+the set of all tasks observed so far through round r, and S
+is the collection
+⇢ of all coefficients
+sth if th 2 Ir
+S(:, h) =
+8h 2 {1, . . . , |T |} .
+0
+otherwise
+min
+
+The loss function ltj (↵tj ) in Eq. (4) corresponds to a policy gradient learner for task tj , as defined in Eq. (1). Typical policy gradient methods (Kober & Peters, 2011; Sutton
+et al., 2000) maximize a lower bound of the expected cost
+ltj ↵tj , which can be derived by taking the logarithm and
+applying Jensen’s inequality:
+2n
+3
+tj
+⇣
+⌘
+⇣
+⌘
+X
+⇥
+⇤
+(t
+)
+(k)
+(k)
+log ltj ↵tj = log4
+p↵tjj ⌧tj C (tj ) ⌧tj 5 (5)
+k=1
+
+⇥
+
+log ntj
+
+⇤
+
+2M 1
+3 nt
+tj
+h
+⇣
+⌘i j
+X
+j)
+j)
+5+ const .
++ E4
+log ⇡↵tj u(k,t
+| x(k,t
+m
+m
+m=0
+
+k=1
+
+Therefore, our goal is to minimize the following objective:
+0
+1
+nt j M t j 1
+r
+h
+⇣
+⌘i
+X
+X
+X
+⌘
+j)
+j)
+@ tj
+A
+er =
+log ⇡↵tj u(k,t
+| x(k,t
+m
+m
+n
+t
+j
+m=0
+j=1
+k=1
+
+2
+
+s.t.
+
+(6)
+
+2
+
++ µ1 kSkF + µ2 kLkF
+
+Atj ↵tj  btj 8tj 2 Ir
+min
+
+LLT
+
+p and
+
+max
+
+LLT  q .
+
+3.1. Online Formulation
+The optimization problem above can be mapped to the standard online learning framework by unrolling L and S into
+a vector ✓ = [vec(L) vec(S)]T 2 Rdk+k|T | . Choosing
+Pdk
+Pdk+k|T |
+⌦0 (✓) = µ2 i=1 ✓i2 + µ1 i=dk+1 ✓i2 , and ⌦j (✓) =
+⌦j 1 (✓) + ⌘tj ltj (✓), we can write the safe lifelong policy
+search problem (Eq. (6)) as:
+✓r+1 = arg min ⌦r (✓) ,
+(7)
+✓2K
+
+where K ✓ R
+is the set of allowable policies under
+the given safety constraints. Note that the loss for task tj
+dk+k|T |
+
+1
+We describe later how to set the ⌘’s later in Sect. 5 to obtain
+regret bounds, and leave them as variables now for generality.
+
+can be written as a bilinear product in ✓:
+tj
+tj
+
+⇣
+⌘
+1 X X
+(t )
+tj )
+(k, tj )
+log ⇡⇥jL ⇥s u(k,
+|
+x
+m
+m
+tj
+nt j
+m=0
+
+n
+
+ltj (✓) =
+
+M
+
+1
+
+k=1
+
+2
+
+✓1 . . .
+6 ..
+..
+⇥L = 4 .
+.
+✓d . . .
+
+✓d(k
+
+..
+.
+
+1)+1
+
+✓dk
+
+3
+
+2
+
+7
+6
+5 , ⇥ stj = 4
+
+✓dk+1
+..
+.
+✓(d+1)k+1
+
+3
+
+7
+5.
+
+We see that the problem in Eq. (7)
+equivalent to Eq. (6)
+Pis
+r
+by noting that at r rounds, ⌦r = j=1 ⌘tj ltj (✓) + ⌦0 (✓).
+
+4. Online Learning Method
+
+We solve Eq. (7) in two steps. First, we determine the
+unconstrained solution ✓˜r+1 when K = Rdk+k|T | (see
+Sect. 4.1). Given ✓˜r+1 , we derive the constrained
+⇣
+⌘ solution
+ˆ
+˜
+✓r+1 by learning a projection Proj⌦r ,K ✓r+1 to the constraint set K ✓ Rdk+k|T | , which amounts to minimizing
+the Bregman divergence over ⌦r (✓) (see Sect. 4.2)2 . The
+complete approach is given in Algorithm 1 and is available
+as a software implementation on the authors’ websites.
+4.1. Unconstrained Policy Solution
+Although Eq. (6) is not jointly convex in both L and S, it
+is separably convex (for log-concave policy distributions).
+Consequently, we follow an alternating optimization approach, first computing L while holding S fixed, and then
+updating S given the acquired L. We detail this process for
+two popular PG learners, eREINFORCE (Williams, 1992)
+and eNAC (Peters & Schaal, 2008b). The derivations of the
+update rules below can be found in Appendix A.
+These updates are governed by learning rates and that
+decay over time; and can be chosen using line-search
+methods as discussed by Boyd & Vandenberghe (2004). In
+our experiments, we adopt a simple yet effective strategy,
+where = cj 1 and = cj 1 , with 0 < c < 1.
+Step 1: Updating L Holding S fixed, the latent repository
+can be updated according to:
+L
+L
+
++1
++1
+
+=L
+=L
+
+⌘L rL er (L, S)
+⌘L G
+
+1
+
+(eREINFORCE)
+
+(L , S )rL er (L, S)
+
+(eNAC)
+
+with learning rate ⌘L 2 R, and G 1 (L, S) as the inverse
+of the Fisher information matrix (Peters & Schaal, 2008b).
+In the special case of Gaussian policies, the update for L
+2
+In Sect. 4.2, we linearize the loss around the constrained solution of the previous round to increase stability and ensure convergence. Given the linear losses, it suffices to solve the Bregman
+divergence over the regularizer, reducing the computational cost.
+
+Safe Policy Search for Lifelong Reinforcement Learning with Sublinear Regret
+
+can be derived in a closed form as L
+
+= ZL 1 vL , where
+
++1
+
+nt j M t j 1
+
+ZL = 2µ2 Idk⇥dk +
+
+r
+X
+⌘tj X X ⇣ T ⌘⇣
+vec stj
+n 2
+m=0
+j=1 tj tj
+
+T
+
+k=1
+
+n
+
+vL =
+
+M
+
+⌘
+⌦sT
+tj
+
+1
+
+tj
+tj
+⇣
+⌘
+X ⌘ tj X
+X
+tj )
+vec u(k,
+sT
+,
+m
+tj
+2
+nt j t j
+m=0
+j
+
+k=1
+
+is the covariance of the Gaussian policy for a task tj ,
+⇣
+⌘
+(k, t )
+and =
+xm j denotes the state features.
+2
+tj
+
+Step 2: Updating S Given the fixed basis L, the coefficient matrix S is updated column-wise for all tj 2 Ir :
+s
+
+(tj )
++1
+
+=s
+
+(tj )
++1
+
+s
+
+(tj )
++1
+
+=s
+
+(tj )
++1
+
+1
+
+(L , S )rstj er (L, S)
+
+(eNAC)
+
+with learning rate ⌘S 2 R. For Gaussian policies, the
+closed-form of the update is stj = Zst1 vstj , where
+j
+
+Zstj = 2µ1 Ik⇥k +
+
+X
+
+tk =tj
+
+v tj =
+
+X
+
+tk =tj
+
+⌘ tj
+nt j
+
+⌘ tj
+nt j
+
+nt j M t j 1
+
+X X
+
+L
+2
+tj k=1 m=0
+
+nt j M t j 1
+
+X X
+
+tj ) T
+u(k,
+L
+m
+2
+tj k=1 m=0
+
+T
+
+T
+
+fˆtr
+
+✓ˆr
+
+2
+
+=4
+
+r✓ ltr (✓)
+ltr (✓)
+
+✓ˆr
+
+(9)
+
+û ,
+
+✓ˆr
+
+✓ˆr
+
+5,
+
+û =
+
+and LLT
+
+
+
+u
+1
+
+.
+
+✓
+
++ 2µ2 trace L
+
+✓˜r+1
+
+L
+
+◆
+
+qI .
+
+To solve the optimization problem above, we start by converting the inequality constraints to equality constraints
+by introducing slack variables ctj
+0. We also guarantee that these slack variables are bounded by incorporating
+kctj k  cmax , 8tj 2 {1, . . . , |T |}:
+
+T
+
+✓ˆr
+
+r✓ ltr (✓)
+
+LLT  pI
+
+ctj > 0
+
+3
+
+S
+
+◆
+
+s.t. Atj Lstj  btj 8tj 2 Ir
+
+s.t. Atj Lstj = btj
+
+Solving Eq. (8) is computationally expensive since ⌦r (✓)
+includes the sum back to the original round. To remedy this
+problem, ensure the stability of our approach, and guarantee that the constrained solutions for all observed tasks
+lie within a bounded region, we linearize the current-round
+loss function ltr (✓) around the constrained solution of the
+previous round ✓ˆr :
+
+where
+
+✓˜r+1
+
+✓˜r+1
+
+.
+
+✓˜r+1
+
+✓ˆr
+
+min µ1 kSk2F + µ2 kLk2F
+L,S
+✓
++ 2µ1 trace S T
+
+L,S,C
+
+Once we have obtained the unconstrained solution ✓˜r+1
+(which satisfies Eq. (7), but can lead to policy parameters in unsafe regions), we then derive the constrained
+solution to
+⇣ ensure
+⌘ safe policies. We learn a projection
+˜
+Proj⌦r ,K ✓r+1 from ✓˜r+1 to the constraint set:
+⇣
+⌘
+✓ˆr+1 = arg min B⌦r ,K ✓, ✓˜r+1 ,
+(8)
+✓2K
+⇣
+⌘
+where B⌦r ,K ✓, ✓˜r+1 is the Bregman divergence over ⌦r :
+⇣
+⌘
+B⌦r ,K ✓, ✓˜r+1 = ⌦r (✓) ⌦r (✓˜r+1 )
+✓
+⇣
+⌘◆
+˜
+trace r✓ ⌦r (✓)
+✓ ✓r+1 .
+
+T
+
+Consequently, determining safe policies for lifelong policy
+search reinforcement learning amounts to solving:
+
+min µ1 kSk2F + µ2 kLk2F
+✓
++ 2µ2 trace LT
+
+L
+
+4.2. Constrained Policy Solution
+
+ltr (û) = fˆtr
+
+✓2K
+
+(eREINFORCE)
+
+⌘S rstj er (L, S)
+⌘S G
+
+Given the above linear form, we can rewrite the optimization problem in Eq. (8) as:
+⇣
+⌘
+✓ˆr+1 = arg min B⌦0 ,K ✓, ✓˜r+1 .
+(10)
+
+◆
+✓
+L + 2µ1 trace S T
+
+✓˜r+1
+
+ctj 8tj 2 Ir
+
+S
+
+◆
+
+and kctj k2  cmax 8tj 2 Ir
+
+LL  pI
+
+and LLT
+
+qI .
+
+⇣
+⌘
+With this formulation, learning Proj⌦r ,K ✓˜r+1 amounts
+to solving second-order cone and semi-definite programs.
+4.2.1. S EMI -D EFINITE P ROGRAM FOR L EARNING L
+This section determines the constrained projection of the
+shared basis L given fixed S and C. We show that L can be
+acquired efficiently, since this step can be relaxed to solving
+a semi-definite program in LLT (Boyd & Vandenberghe,
+2004). To formulate the semi-definite program, note that
+✓
+◆ X
+k
+(i) T
+trace LT
+L =
+lr+1
+li
+✓˜r+1
+
+✓˜r+1
+
+i=1
+
+
+
+k
+X
+
+(i)
+
+lr+1
+
+i=1
+
+✓˜r+1 2
+
+v
+u k
+uX (i)
+t
+lr
+i=1
+
+= L
+
+✓˜r+1
+
+F
+
+✓˜r+1 2
+
+q
+
+with
+
+v
+u
+t
+
+k
+2 uX
+i=1
+
+2
+
+||li ||2
+
+trace (LLT ) .
+
+From the constraint set, we recognize:
+⇣
+⌘T
+T
+†
+T
+sT
+L
+=
+b
+c
+A
+t
+t
+tj
+tj
+j
+j
+T
+T
+=) sT
+tj L Lstj = atj atj
+
+kli k2
+
+atj = A†tj btj
+
+c tj
+
+.
+
+Safe Policy Search for Lifelong Reinforcement Learning with Sublinear Regret
+
+Algorithm 1 Safe Online Lifelong Policy Search
+1: Inputs: Total number of rounds R, weighting factor
+p
+⌘ = 1/ R, regularization parameters µ1 and µ2 , constraints p and q, number of latent basis vectors k.
+2: S = zeros(k, |T |), L = diagk (⇣) with p  ⇣ 2  q
+3: for j = 1 to R do
+4:
+tj
+sampleTask(), and update Ij
+5:
+Compute unconstrained solution ✓˜j+1 (Sect. 4.1)
+6:
+Fix S and C, and update L (Sect. 4.2.1)
+7:
+Use updated L to derive S and C (Sect. 4.2.2)
+8: end for
+9: Output: Safety-constrained L and S
+Since spectrum LLT = spectrum LT L , we can write:
+p
+min µ2 trace(X) + 2µ2 L
+trace (X)
+✓˜r+1
+
+X⇢S++
+
+s.t.
+
+sT
+tj Xstj
+
+=
+
+aT
+tj a tj
+
+F
+
+8tj 2 Ir
+
+qI , with X = LT L .
+
+X  pI and X
+
+4.2.2. S ECOND -O RDER C ONE P ROGRAM FOR
+L EARNING TASK P ROJECTIONS
+
+s.t.
+
+j=1
+
+Atj Lstj = btj
+ctj > 0
+
+j=1
+
+✓ˆr
+
+ctj
+
+kctj k22
+
+
+
+c2max
+
+8tj 2 Ir .
+
+5. Theoretical Guarantees
+
+Theorem 1 (Sublinear Regret). After R rounds and choosing 8tj 2 IR ⌘tj = ⌘ = p1R , L
+= diagk (⇣), with
+✓ˆ1
+
+diagk (·) being a diagonal matrix among the k columns of
+✓ˆ1
+
+We start by stating essential lemmas for Theorem 1; due to
+space constraints, proofs for all lemmas are available in the
+supplementary material. Here, we bound the gradient of a
+loss function ltj (✓) at round r under Gaussian policies3 .
+Assumption 1. We assume that the policy for a task tj is
+Gaussian, the action set U is bounded by umax , and the
+feature set is upper-bounded by max .
+Lemma 1. Assume task tj ’s policy
+r is given ◆
+by
+✓ at round
+⇣
+⌘
+⇣
+⌘
+(tj )
+(k, tj ) (k, tj )
+(k,
+t
+)
+xm j , t j ,
+⇡↵ t j u m
+|xm
+= N ↵T
+tj
+for states
+
+(k, t )
+xm j
+1
+nt j
+
+ltj ↵ t j =
+
+actions
+2 Utj . For
+h
+⇣
+⌘i
+X X
+(t )
+tj ) (k, tj )
+log ⇡↵tjj u(k,
+|xm
+, the
+m
+
+k=1 m=0
+
+gradient r↵tj ltj ↵tj
+Mt j
+2
+tj
+
+= 0k⇥|T | , the safe lifelong rein-
+
+forcement learner exhibits sublinear regret of the form:
+R
+⇣ ⌘
+⇣p ⌘
+X
+ltj ✓ˆj
+ltj (u) = O
+R for any u 2 K.
+j=1
+
+Proof Roadmap: The remainder of this section completes
+our proof of Theorem 1; further details are given in Appendix B. We assume linear losses for all tasks in the constrained case in accordance with Sect. 4.2. Although linear
+
+✓ˆr
+(k, t )
+um j
+
+2 Xtj and
+nt j M t j 1
+
+umax + max
+tk 2Ir
+
+1
+
+✓ˆr
+
+satisfies r↵tj ltj ↵tj
+
+A+
+tk
+
+2
+
+✓ˆr
+
+||btk ||2 + cmax
+
+2
+
+
+!
+
+max
+
+for all
+and all tasks,
+with u⌘
+max o =
+n trajectories
+o
+n
+⇣
+(k, tj )
+(k, tj)
+max um
+and max = max
+xm
+.
+k,m
+
+This section quantifies the performance of our approach by
+providing formal analysis of the regret after R rounds. We
+show that the safe lifelong reinforcement learner exhibits
+sublinear regret in the total number of rounds. Formally,
+we prove the following theorem:
+
+L, p  ⇣ 2  q, and S
+
+5.1. Bounding tj ’s Gradient Loss
+
+✓ˆr
+
+Having determined L, we can acquire S and update C
+by solving a second-order cone program (Boyd & Vandenberghe, 2004) of the following form:
+r
+r
+X
+X
+min
+µ1
+kstj k22 + 2µ1
+sT
+st j
+tj
+st1 ,...,stj ,ct1 ,...,ctj
+
+losses for policy search RL are too restrictive given a single
+operating point, as discussed previously, we remedy this
+problem by generalizing to the case of piece-wise linear
+losses, where the linearization operating point is a resultant
+of the optimization problem. To bound the regret, we need
+to bound the dual Euclidean norm (which is the same as the
+Euclidean norm) of the gradient of the loss function, then
+prove Theorem 1 by bounding: (1) task tj ’s gradient loss
+(Sect. 5.1), and (2) linearized losses with respect to L and
+S (Sect. 5.2).
+
+k,m
+
+2
+
+5.2. Bounding Linearized Losses
+As discussed previously, we linearize the loss of task tr
+around the constraint solution of the previous round ✓ˆr . To
+acquire the regret bounds in Theorem 1, the next step is to
+?
+
+bound the dual norm, fˆtr
+can be easily seen
+fˆtr
+
+✓ˆr 2
+
+ ltr (✓)
+| {z
+
+✓ˆr 2
+
+✓ˆr
+
+constant
+
+= fˆtr
+
+✓ˆr 2
+
++ r✓ ltr (✓)
+} |
+{z
+
+Lemma 2
+
++ r✓ ltr (✓)
+
+✓ˆr 2
+
+of Eq. (9). It
+
+✓ˆr 2
+
+(11)
+
+}
+
+⇥ ✓ˆr
+.
+| {z }2
+Lemma 3
+
+3
+Please note that derivations for other forms of log-concave
+policy distributions could be derived in similar manner. In this
+work, we focus on Gaussian policies since they cover a broad
+spectrum of real-world applications.
+
+max
+
+Safe Policy Search for Lifelong Reinforcement Learning with Sublinear Regret
+
+Since ltr (✓)
+
+✓ˆr
+
+can be bounded by
+
+the next step is to bound r✓ ltr (✓)
+
+(see Sect. 2),
+
+lt r
+✓ˆr 2
+
+, and k✓ˆr k2 .
+
+j
+
+Lemma 2. The norm of the gradient of the loss function
+evaluated at ✓ˆr satisfies
+2
+
+r✓ ltr (✓)
+✓
+
+2d/p2
+
+✓ˆr
+
+max
+
+tk 2Ir
+
+1
+
+2
+
+⇢
+
+ r↵tr ltr (✓)
+A†tk
+
+2
+2
+
+⇣
+
+2
+✓ˆr
+
+2
+
+2
+
+||btk ||2 + c2max
+
+To finalize the bound of fˆtr
+
+✓ˆr 2
+
+q⇥d
+⌘
+
++1
+
+◆!
+
+.
+
+as needed for deriving
+
+Lemma 3. The L2 norm of the constraint solution at round
+r 1, k✓ˆr k22 is bounded by
+"
+1
+2
+ˆ
+k✓r k2  q ⇥ d 1 + |Ir 1 | 2
+p
+#
+⇢
+tk 2Ir
+
+where |Ir
+
+1
+
+A†tk
+
+2
+2
+
+||btk ||2 + cmax
+
+2
+
+,
+
+1 | is the number of unique tasks observed so far.
+
+Given the previous two lemmas, we can prove the bound
+for fˆtr
+
+✓ˆr 2
+
+:
+
+Lemma 4. The L2 norm of the linearizing term of ltr (✓)
+around ✓ˆr , fˆtr
+fˆtr
+
+✓ˆr 2
+
+, is bounded by
+
+ r✓ ltr(✓)
+
+✓ˆr 2
+
+
+where
+1 (r)
+
+ltr
+
+=
+
+1 (r) (1
+
++ max
+✓
+
+⇣
+⌘
+1+k✓ˆr k2 + ltr(✓)
+
+✓ˆr 2
+
+2 (r))
+
++
+
+lt r
+
+1
+
+2
+
+1 ˆ
+✓j
+2
+
+We have:
+✓ˆj
+
+✓ˆj+1
+
+2
+
+✓ˆj+1
+
+ ⌘tj fˆtj
+
+2
+
+j=1
+
++ ⌦0 (u)
+
+2
+✓ˆj 2
+
+⌦0 (✓ˆ1 ) .
+
+Assuming that 8tj ⌘tj = ⌘, we can derive:
+r ⇣
+r
+2
+⇣ ⌘
+⌘
+X
+X
+ltj ✓ˆj
+ltj (u)  ⌘
+fˆtj
+j=1
+
+✓ˆj 2
+
+⇣
+
+E
+
+.
+
+✓ˆj 2
+
+j=1
+
+j=1
+
+✓ˆj+1
+
+.
+
+2
+
+Therefore, for any u 2 K
+r
+r
+⇣ ⇣ ⌘
+⌘ X
+X
+⌘tj ltj ✓ˆj
+ltj (u) 
+⌘tj fˆtj
+
+⌦0 (✓ˆ1 )
+
++ 1/⌘ ⌦0 (u)
+
+⌘
+
+.
+
+The following lemma finalizes the proof of Theorem 1:
+
+Lemma 5. After R rounds with 8tj ⌘tj = ⌘ = p1R , for any
+⇣p ⌘
+PR
+u 2 K we have that j=1 ltj (✓ˆj ) ltj (u)  O
+R .
+Proof. From Eq. (12), it follows that
+fˆtj
+
+✓ˆr
+
+(12)
+
+✓ˆr 2
+
+||btk ||2 + cmax
+
+max
+
+!
+
+✓ˆr
+
+
+
+
+,
+
+tj
+
+A+
+tk
+
+✓ˆj
+
+2
+
+is the constant upper-bound on ltr (✓)
+"
+1
+umax
+2
+
+nt j
+
+tk 2Ir
+
++
+
+j
+
+From the convexity of the regularizer, we obtain:
+⇣ ⌘
+⇣
+⌘ D
+⇣
+⌘
+⌦0 ✓ˆj
+⌦0 ✓ˆj+1 + r✓ ⌦0 ✓ˆj+1 , ✓ˆj
++
+
+the regret, we must derive an upper-bound for k✓ˆr k2 :
+
+max
+
+results developed by Abbasi-Yadkori et al. (2013), it is easy
+to see that ⇣ ⌘
+⇣
+⌘
+r✓ ⌦0 ✓˜j
+r✓ ⌦0 ✓˜j+1 = ⌘t fˆt
+.
+
+, and
+
+3 (R)
+
+3 (R)
+
+⇥ max
+tk 2IR
+
+with
+
+3 (R)
+
+=
+
+4
+
++4
+
++8
+
+1
+
+n
+
+2
+2
+1 (R) 2 (R)
+
+d
+p2
+
+2
+1 (R)qd
+
+kA†tk k2
+
+2
+1 (R)
+
+1 + |IR
+
+(kbtk k2 + cmax )
+
++ 2 maxtj 2IR
+2
+
+max
+
+#
+
+r
+n
+o p ◆
+dp
+† 2
+2
+2
+⇥
+2q max kAtk k2 (kbtk k2 + cmax ) + qd
+tk 2Ir 1
+p
+p
+q⇥d
+2 (r) 
+s
+⇢
+p
+2
+1
+2
++ |Ir 1 | 1+ 2 max
+A†tk
+||btk ||2 + cmax
+.
+p tk 2Ir 1
+2
+5.3. Completing the Proof of Sublinear Regret
+Given the lemmas in the previous section, we now can derive the sublinear regret bound given in Theorem 1. Using
+
+2
+
+2
+tj .
+
+o
+
+!
+
+Since
+
+ |T |, we have that fˆtj
+ 5 (R)|T | with
+✓ˆr 2
+n
+o
+2
+= 8d/p2 q 12 (R) max kA†tk k22 (kbtk k2 + cmax ) .
+
+|IR
+5
+
+1
+
+1|
+
+1|
+
+tk 2IR
+
+1
+
+Given that ⌦0 (u)  qd + 5 (R)|T |, with
+constant, we have:
+r ⇣ ⇣ ⌘
+r
+⌘
+X
+X
+ˆ
+ltj ✓j ltj(u)  ⌘
+5 (R)|T |
+j=1
+
+j=1
+
++
+
+1⇣
+qd +
+⌘
+
+5 (R)|T
+
+Initializing L and S: We initialize L
+p  ⇣ 2  q and S
+
+5 (R)
+
+✓ˆ1
+
+✓ˆ1
+
+|
+
+being a
+
+⌘
+⌦0 (✓ˆ1 ) .
+
+= diagk (⇣), with
+
+= 0k⇥|T | to ensure the invertibility
+
+Safe Policy Search for Lifelong Reinforcement Learning with Sublinear Regret
+
+of L and that the constraints are met. This leads to
+r ⇣ ⇣ ⌘
+r
+⌘
+X
+X
+ltj ✓ˆj ltj(u)  ⌘
+5 (R)|T |
+j=1
+
+j=1
+
++ 1/⌘ (qd + 5 (R)|T | µ2 k⇣) .
+p
+Choosing 8tj ⌘tj = ⌘ = 1/ R, we acquire sublinear regret,
+finalizing the statement of Theorem 1:
+r ⇣ ⇣ ⌘
+⌘
+X
+p
+ltj ✓ˆj ltj(u)  1/ R 5 (R)|T |R
+j=1
+
+p
+
+R (qd + 5 (R)|T |
+p ⇣
+ R 5 (R)|T | + qd 5 (R)|T |
+⇣p ⌘
+O
+R .
++
+
+µ2 k⇣)
+⌘
+µ2 k⇣
+
+6. Experimental Validation
+To validate the empirical performance of our method, we
+applied our safe online PG algorithm to learn multiple consecutive control tasks on three dynamical systems (Figure 1). To generate multiple tasks, we varied the parameterization of each system, yielding a set of control tasks from
+each domain with varying dynamics. The optimal control
+policies for these systems vary widely with only minor
+changes in the system parameters, providing substantial diversity among the tasks within a single domain.
+
+Figure 1. Dynamical systems used in the experiments: a) simple
+mass system (left), b) cart-pole (middle), and c) quadrotor unmanned aerial vehicle (right).
+
+Simple Mass Spring Damper: The simple mass (SM)
+system is characterized by three parameters: the spring constant k in N/m, the damping constant d in Ns/m and the
+mass m in kg. The system’s state is given by the position x
+and ẋ of the mass, which varies according to a linear force
+F . The goal is to train a policy for controlling the mass in
+a specific state gref = hxref , ẋref i.
+Cart Pole: The cart-pole (CP) has been used extensively
+as a benchmark for evaluating RL methods (Busoniu et al.,
+2010). CP dynamics are characterized by the cart’s mass
+mc in kg, the pole’s mass mp in kg, the pole’s length in
+meters, and a damping parameter d in Ns/m. The state is
+given by the cart’s position x and velocity ẋ, as well as the
+˙ The goal is to train a
+pole’s angle ✓ and angular velocity ✓.
+policy that controls the pole in an upright position.
+6.1. Experimental Protocol
+We generated 10 tasks for each domain by varying the system parameters to ensure a variety of tasks with diverse op-
+
+timal policies, including those with highly chaotic dynamics that are difficult to control. We ran each experiment for
+a total of R rounds, varying from 150 for the simple mass
+to 10, 000 for the quadrotor to train L and S, as well as
+for updating the PG-ELLA and PG models. At each round
+j, the learner observed a task tj through 50 trajectories of
+150 steps and updated L and stj . The dimensionality k of
+the latent space was chosen independently for each domain
+via cross-validation over 3 tasks, and the learning step size
+for each task domain was determined by a line search after
+gathering 10 trajectories of length 150. We used eNAC, a
+standard PG algorithm, as the base learner.
+We compared our approach to both standard PG (i.e.,
+eNAC) and PG-ELLA (Bou Ammar et al., 2014), examining both the constrained and unconstrained variants of our
+algorithm. We also varied the number of iterations in our alternating optimization from 10 to 100 to evaluate the effect
+of these inner iterations on the performance, as shown in
+Figures 2 and 3. For the two MTL algorithms (our approach
+and PG-ELLA), the policy parameters for each task tj were
+initialized using the learned basis (i.e., ↵tj = Lstj ). We
+configured PG-ELLA as described by Bou Ammar et al.
+(2014), ensuring a fair comparison. For the standard PG
+learner, we provided additional trajectories in order to ensure a fair comparison, as described below.
+For the experiments with policy constraints, we generated
+a set of constraints (At , bt ) for each task that restricted the
+policy parameters to pre-specified “safe” regions, as shown
+in Figures 2(c) and 2(d). We also tested different values for
+the constraints on L, varying p and q between 0.1 to 10;
+our approach showed robustness against this broad range,
+yielding similar average cost performance.
+6.2. Results on Benchmark Systems
+Figure 2 reports our results on the benchmark simple mass
+and cart-pole systems. Figures 2(a) and 2(b) depicts the
+performance of the learned policy in a lifelong learning setting over consecutive unconstrained tasks, averaged over
+all 10 systems over 100 different initial conditions. These
+results demonstrate that our approach is capable of outperforming both standard PG (which was provided with 50
+additional trajectories each iteration to ensure a more fair
+comparison) and PG-ELLA, both in terms of initial performance and learning speed. These figures also show that the
+performance of our method increases as it is given more
+alternating iterations per-round for fitting L and S.
+We evaluated the ability of these methods to respect safety
+constraints, as shown in Figures 2(c) and 2(d). The thicker
+black lines in each figure depict the allowable “safe” region
+of the policy space. To enable online learning per-task, the
+same task tj was observed on each round and the shared
+basis L and coefficients stj were updated using alternating
+optimization. We then plotted the change in the policy pa-
+
+Safe Policy Search for Lifelong Reinforcement Learning with Sublinear Regret
+
+1000
+
+initial
+policy
+
+optimal
+policy
+
+initial
+policy
+“safe” region
+
+3000
+
+2
+
+“safe” region
+
+25
+
+2000
+1.5
+
+500
+0
+0
+
+Standard PG
+PG-ELLA
+Safe PG 50 Iterations
+Safe PG 100 Iterations
+
+1000
+50
+
+Rounds
+
+100
+
+(a) Simple Mass
+
+150
+
+30
+
+α2
+
+2.5
+
+4000
+2
+
+1500
+
+3
+
+α
+
+2000
+
+35
+
+Standard PG
+PG-ELLA
+Safe Online 10 Iterations
+Safe Online 50 Iterations
+Safe Online 100 Iterations
+
+5000
+
+Average Cost
+
+Average Cost
+
+6000
+
+Standard PG
+PG-ELLA
+Safe Online 10 Iterations
+Safe Online 50 Iterations
+Safe Online 100 Iterations
+
+2500
+
+0
+0
+
+1000
+
+Rounds
+
+2000
+
+3000
+
+(b) Cart Pole
+
+1
+0
+
+0.2
+
+0.4
+
+0.6
+
+0.8
+
+optimal
+policy
+
+20
+100
+
+1
+
+Standard PG
+PG-ELLA
+Safe PG 50 Iterations
+Safe PG 100 Iterations
+
+120
+
+140
+
+160
+
+180
+
+α1
+
+α1
+
+(c) Trajectory Simple Mass
+
+(d) Trajectory Cart Pole
+
+200
+
+Figure 2. Results on benchmark simple mass and cart-pole systems. Figures (a) and (b) depict performance in lifelong learning scenarios
+over consecutive unconstrained tasks, showing that our approach outperforms standard PG and PG-ELLA. Figures (c) and (d) examine
+the ability of these method to abide by safety constraints on sample constrained tasks, depicting two dimensions of the policy space (↵1
+vs ↵2 ) and demonstrating that our approach abides by the constraints (the dashed black region).
+12000
+
+8000
+6000
+4000
+2000
+
+6.3. Application to Quadrotor Control
+
+We generated 10 different quadrotor systems by varying
+the inertia around the x, y and z-axes. We used a linear
+quadratic regulator, as described by Bouabdallah (2007),
+to initialize the policies in both the learning and testing
+phases. We followed a similar experimental procedure to
+that discussed above to update the models.
+Figure 3 shows the performance of the unconstrained solution as compared to standard PG and PG-ELLA. Again, our
+approach clearly outperforms standard PG and PG-ELLA
+in both the initial performance and learning speed. We
+also evaluated constrained tasks in a similar manner, again
+showing that our approach is capable of respecting constraints. Since the policy space is higher dimensional, we
+cannot visualize it as well as the benchmark systems, and so
+instead report the number of iterations it takes our approach
+
+0
+0
+
+2000
+
+4000
+
+6000
+
+Rounds
+
+8000
+
+10000
+
+Figure 3. Performance on quadrotor control.
+600
+
+Number of Observations
+to Reach a Safe Policy
+
+We also applied our approach to the more challenging domain of quadrotor control. The dynamics of the quadrotor system (Figure 1) are influenced by inertial constants
+around e1,B , e2,B , and e3,B , thrust factors influencing how
+the rotor’s speed affects the overall variation of the system’s
+state, and the lengths of the rods supporting the rotors. Although the overall state of the system can be described by
+a 12-dimensional vector, we focus on stability and so consider only six of these state-variables. The quadrotor system has a high-dimensional action space, where the goal is
+to control the four rotational velocities {wi }4i=1 of the rotors to stabilize the system. To ensure realistic dynamics,
+we used the simulated model described by (Bouabdallah,
+2007; Voos & Bou Ammar, 2010), which has been verified
+and used in the control of physical quadrotors.
+
+Standard PG
+PG-ELLA
+Safe Online 10 Iterations
+Safe Online 50 Iterations
+Safe Online 100 Iterations
+
+10000
+
+Average Cost
+
+rameter vectors per iterations (i.e., ↵tj = Lstj ) for each
+method, demonstrating that our approach abides by the
+safety constraints, while standard PG and PG-ELLA can
+violate them (since they only solve an unconstrained optimization problem). In addition, these figures show that increasing the number of alternating iterations in our method
+causes it to take a more direct path to the optimal solution.
+
+Safe PG
+PG-ELLA
+Standard PG
+
+450
+
+545
+
+309 320
+
+300
+
+150
+
+0
+
+510
+
+95
+
+100
+
+1
+
+Simple Mass
+
+1
+
+1
+
+Cart Pole
+
+Quadrotor
+
+Figure 4. Average number of task observations before acquiring
+policy parameters that abide by the constraints, showing that our
+approach immediately projects policies to safe regions.
+
+to project the policy into the safe region. Figure 4 shows
+that our approach requires only one observation of the task
+to acquire safe policies, which is substantially lower then
+standard PG or PG-ELLA (e.g., which require 545 and 510
+observations, respectively, in the quadrotor scenario).
+
+7. Conclusion
+We described thepfirst lifelong PG learner that provides sublinear regret O( R) with R total rounds. In addition, our
+approach supports safety constraints on the learned policy,
+which are essential for robust learning in real applications.
+Our framework formalizes lifelong learning as online MTL
+with limited resources, and enables safe transfer by sharing
+policy parameters through a latent knowledge base that is
+efficiently updated over time.
+
+Safe Policy Search for Lifelong Reinforcement Learning with Sublinear Regret
+
+Acknowledgements
+This research was supported by ONR grant #N00014-11-10139 and AFRL grant #FA8750-14-1-0069. We thank the
+anonymous reviewers for their helpful feedback.
+
+References
+
+the 29th International Conference on Machine Learning
+(ICML), 2012.
+Alessandro Lazaric. Transfer in reinforcement learning: a
+framework and a survey. In M. Wiering & M. van Otterlo, editors, Reinforcement Learning: State of the Art.
+Springer, 2011.
+
+Yasin Abbasi-Yadkori, Peter Bartlett, Varun Kanade,
+Yevgeny Seldin, & Csaba Szepesvári. Online learning
+in Markov decision processes with adversarially chosen
+transition probability distributions. Advances in Neural
+Information Processing Systems 26, 2013.
+
+Jan Peters & Stefan Schaal. Reinforcement learning of motor skills with policy gradients. Neural Networks, 2008a.
+
+Haitham Bou Ammar, Karl Tuyls, Matthew E. Taylor, Kurt
+Driessen, & Gerhard Weiss. Reinforcement learning
+transfer via sparse coding. In Proceedings of the International Conference on Autonomous Agents and Multiagent Systems (AAMAS), 2012.
+
+Paul Ruvolo & Eric Eaton. ELLA: An Efficient Lifelong
+Learning Algorithm. In Proceedings of the 30th International Conference on Machine Learning (ICML), 2013.
+
+Haitham Bou Ammar, Eric Eaton, Paul Ruvolo, & Matthew
+Taylor. Online multi-task learning for policy gradient
+methods. In Proceedings of the 31st International Conference on Machine Learning (ICML), 2014.
+Samir Bouabdallah. Design and Control of Quadrotors
+with Application to Autonomous Flying. PhD Thesis,
+École polytechnique fédérale de Lausanne, 2007.
+Stephen Boyd & Lieven Vandenberghe. Convex Optimization. Cambridge University Press, New York, NY, 2004.
+Lucian Busoniu, Robert Babuska, Bart De Schutter, &
+Damien Ernst. Reinforcement Learning and Dynamic
+Programming Using Function Approximators. CRC
+Press, Boca Raton, FL, 2010.
+Eliseo Ferrante, Alessandro Lazaric, & Marcello Restelli.
+Transfer of task representation in reinforcement learning using policy-based proto-value functions. In Proceedings of the 7th International Joint Conference on
+Autonomous Agents and Multiagent Systems (AAMAS),
+2008.
+Mohammad Gheshlaghi Azar, Alessandro Lazaric, &
+Emma Brunskill. Sequential transfer in multi-armed
+bandit with finite set of models. Advances in Neural Information Processing Systems 26, 2013.
+Roger A. Horn & Roy Mathias. Cauchy-Schwarz inequalities associated with positive semidefinite matrices. Linear Algebra and its Applications 142:63–82, 1990.
+Jens Kober & Jan Peters. Policy search for motor primitives
+in robotics. Machine Learning, 84(1–2):171–203, 2011.
+Abhishek Kumar & Hal Daumé III. Learning task grouping
+and overlap in multi-task learning. In Proceedings of
+
+Jan Peters & Stefan Schaal. Natural Actor-Critic. Neurocomputing 71, 2008b.
+
+Richard S. Sutton & Andrew G. Barto. Introduction to
+Reinforcement Learning. MIT Press, Cambridge, MA,
+1998.
+Richard S. Sutton, David Mcallester, Satinder Singh, &
+Yishay Mansour. Policy gradient methods for reinforcement learning with function approximation. Advances in
+Neural Information Processing Systems 12, 2000.
+Matthew E. Taylor & Peter Stone. Transfer learning for
+reinforcement learning domains: a survey. Journal of
+Machine Learning Research, 10:1633–1685, 2009.
+Sebastian Thrun & Joseph O’Sullivan. Discovering structure in multiple learning tasks: the TC algorithm. In Proceedings of the 13th International Conference on Machine Learning (ICML), 1996a.
+Sebastian Thrun & Joseph O’Sullivan. Learning more from
+less data: experiments in lifelong learning. Seminar Digest, 1996b.
+Holger Voos & Haitham Bou Ammar. Nonlinear tracking
+and landing controller for quadrotor aerial robots. In
+Proceedings of the IEEE Multi-Conference on Systems
+and Control, 2010.
+Ronald J. Williams. Simple statistical gradient-following
+algorithms for connectionist reinforcement learning.
+Machine Learning 8(3–4):229–256, 1992.
+Aaron Wilson, Alan Fern, Soumya Ray, & Prasad Tadepalli. Multi-task reinforcement learning: a hierarchical
+Bayesian approach. In Proceedings of the 24th International Conference on Machine Learning (ICML), 2007.
+Jian Zhang, Zoubin Ghahramani, & Yiming Yang. Flexible
+latent variable models for multi-task learning. Machine
+Learning, 73(3):221–242, 2008.
+
+

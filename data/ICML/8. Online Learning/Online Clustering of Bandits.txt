@@ -1,0 +1,1435 @@
+Online Clustering of Bandits
+
+Claudio Gentile
+DiSTA, University of Insubria, Italy
+
+CLAUDIO . GENTILE @ UNINSUBRIA . IT
+
+Shuai Li
+DiSTA, University of Insubria, Italy
+
+SHUAILI . SLI @ GMAIL . COM
+
+Giovanni Zappella
+Amazon Development Center Germany, Germany
+(Work done when the author was PhD student at Univeristy of Milan)
+
+ZAPPELLA @ AMAZON . COM
+
+Abstract
+We introduce a novel algorithmic approach
+to content recommendation based on adaptive
+clustering of exploration-exploitation (“bandit”)
+strategies. We provide a sharp regret analysis of
+this algorithm in a standard stochastic noise setting, demonstrate its scalability properties, and
+prove its effectiveness on a number of artificial
+and real-world datasets. Our experiments show
+a significant increase in prediction performance
+over state-of-the-art methods for bandit problems.
+
+1. Introduction
+Presenting personalized content to users is nowdays a crucial functionality for many online recommendation services. Due to the ever-changing set of available options,
+these services have to exhibit strong adaptation capabilities when trying to match users’ preferences. Coarsely
+speaking, the underlying systems repeatedly learn a mapping between available content and users, the mapping being based on context information (that is, sets of features)
+which is typically extracted from both users and contents.
+The need to focus on content that raises the users’ interest, combined with the need of exploring new content so
+as to globally improve users’ experience, generates a wellknown exploration-exploitation dilemma, which is commonly formalized as a multi-armed bandit problem (e.g.,
+(Lai & Robbins, 1985; Auer et al., 2001; Audibert et al.,
+2009; Caron et al., 2012)). In particular, the contextual
+bandit methods (e.g., (Auer, 2002; Langford & Zhang,
+2007; Li et al., 2010; Chu et al., 2011; Bogers, 2010;
+Abbasi-Yadkori et al., 2011; Crammer & Gentile, 2011;
+Krause & Ong, 2011; Seldin et al., 2011; Yue et al., 2012;
+Proceedings of the 31 st International Conference on Machine
+Learning, Beijing, China, 2014. JMLR: W&CP volume 32. Copyright 2014 by the author(s).
+
+Djolonga et al., 2013), and references therein) have rapidly
+become a reference algorithmic technique for implementing adaptive recommender systems.
+Within the above scenarios, the widespread adoption
+of online social networks, where users are engaged in
+technology-mediated social interactions (making product
+endorsement and word-of-mouth advertising a common
+practice), raises further challenges and opportunities to
+content recommendation systems: On one hand, because
+of the mutual influence among friends, acquaintances, business partners, etc., users having strong ties are more likely
+to exhibit similar interests, and therefore similar behavior.
+On the other hand, the nature and scale of such interactions
+calls for adaptive algorithmic solutions which are also computationally affordable.
+Incorporating social components into bandit algorithms can
+lead to a dramatic increase in the quality of recommendations. For instance, we may want to serve content to a
+group of users by taking advantage of an underlying network of social relationships among them. These social relationships can either be explicitly encoded in a graph, where
+adjacent nodes/users are deemed similar to one another, or
+implicitly contained in the data, and given as the outcome
+of an inference process that recognizes similarities across
+users based on their past behavior. Examples of the first
+approach are the recent works (Buccapatnam et al., 2013;
+Delporte et al., 2013; Cesa-Bianchi et al., 2013), where a
+social network structure over the users is assumed to
+be given that reflects actual interest similarities among
+users – see also (Caron & Bhagat, 2013; Valko et al., 2014)
+for recent usage of social information to tackle the socalled “cold-start” problem. Examples of the second
+approach are the more traditional collaborative-filtering
+(e.g., (Schafer et al., 1999)), content-based filtering, and
+hybrid approaches (e.g. (Burke, 2005)).
+Both approaches have important drawbacks hindering their
+practical deployment. One obvious drawback of the “ex-
+
+Online Clustering of Bandits
+
+plicit network” approach is that the social network information may be misleading (see, e.g., the experimental evidence reported by (Delporte et al., 2013)), or simply unavailable. Moreover, even in the case when this information
+is indeed available and useful, the algorithmic strategies to
+implement the needed feedback sharing mechanisms might
+lead to severe scaling issues (Cesa-Bianchi et al., 2013), especially when the number of targeted users is large. A standard drawback of the “implicit network” approach of traditional recommender systems is that in many practically
+relevant scenarios (e.g., web-based), content universe and
+popularity often undergo dramatic changes, making these
+approaches difficult to apply.
+In such settings, most notably in the relevant case when
+the involved users are many, it is often possible to identify a few subgroups or communities within which users
+share similar interests (Rashid et al., 2006; Buscher et al.,
+2012), thereby greatly facilitating the targeting of users by
+means of group recommendations. Hence the system need
+not learn a different model for each user of the service, but
+just a single model for each group.
+In this paper, we carry out1 a theoretical and experimental investigation of adaptive clustering algorithms for linear
+(contextual) bandits under the assumption that we have to
+serve content to a set of n users organized into m << n
+groups (or clusters) such that users within each group tend
+to provide similar
+√ feedback to content recommendations.
+We give a O( T ) regret analysis holding in a standard
+stochastically linear setting for payoffs where, importantly,
+the hidden constants in the big-oh depend on m, rather than
+n, as well as on the geometry of the user models within
+the different clusters. The main idea of our algorithm is
+to use confidence balls of the users’ models to both estimate user similarity, and to share feedback across (deemed
+similar) users. The algorithm adaptively interpolates between the case when we have a single instance of a contextual bandit algorithm making the same predictions for all
+users and the case when we have n-many instances providing fully personalized recommendations. We show that our
+algorithm can be implemented efficiently (the large n scenario being of special concern here) by means of off-theshelf data-structures relying on random graphs. Finally, we
+test our algorithm on medium-size synthetic and real-world
+datasets, often reporting a significant increase in prediction
+performance over known state-of-the-art methods for bandit problems.
+
+2. Learning Model
+We assume the user behavior similarity is encoded as an
+unknown clustering of the users. Specifically, let V =
+{1, . . . , n} represent the set of n users. Then V can be par1
+
+Due to space limitations, we postpone the discussion of related work to the supplementary material.
+
+titioned into a small number m of clusters V1 , V2 , . . . , Vm ,
+with m << n, such that users lying in the same cluster
+share similar behavior and users lying in different clusters
+have different behavior. The actual partition of V (including the number of clusters m) and the common user behavior within each cluster are unknown to the learner, and have
+to be inferred on the fly.
+Learning proceeds in a sequential fashion: At each
+round t = 1, 2, . . . , the learner receives a user index
+it ∈ V together with a set of context vectors Cit =
+{xt,1 , xt,2 , . . . , xt,ct } ⊆ Rd . The learner then selects
+some x̄t = xt,kt ∈ Cit to recommend to user it , and observes some payoff at ∈ R, which is a function of both it
+and the recommended x̄t . The following assumptions are
+made on how index it , set Cit , and payoff at are generated in round t. Index it represents the user to be served
+by the system, and we assume it is selected uniformly at
+random2 from V . Once it is selected, the number of context vectors ct in Cit is generated arbitrarily as a function
+of past indices i1 , . . . , it−1 , payoffs a1 , . . . , at−1 , and sets
+Ci1 , . . . , Cit−1 , as well as the current index it . Then the
+sequence xt,1 , xt,2 , . . . , xt,ct of context vectors within Cit
+is generated i.i.d. (conditioned on it , ct and all past indices
+i1 , . . . , it−1 , payoffs a1 , . . . , at−1 , and sets Ci1 , . . . , Cit−1 )
+from a random process on the surface of the unit sphere,
+whose process matrix E[XX ⊤ ] is full rank, with minimal eigenvalue λ > 0. Further assumptions on the process matrix E[XX ⊤ ] are made later on. Finally, payoffs
+are generated by noisy versions of unknown linear functions of the context vectors. That is, we assume each cluster Vj , j = 1, . . . , m, hosts an unknown parameter vector
+uj ∈ Rd which is common to each user i ∈ Vj . Then
+the payoff value ai (x) associated with user i and context
+vector x ∈ Rd is given by the random variable
+ai (x) = u⊤
+j(i) x + ǫj(i) (x) ,
+where j(i) ∈ {1, 2, . . . , m} is the index of the cluster that node i belongs to, and ǫj(i) (x) is a conditionally zero-mean and bounded variance noise term. Specifically,
+  denoting by Et [ · ] the conditional expectation
+E ·  (i1 , Ci1 , a1 ), . . . , (it−1 , Cit−1 , at−1 ), it , we assume
+that for any fixed j ∈ {1, . . . , m} and x ∈ Rd, the variable
+
+ǫj (x) is such that Et [ǫj (x)| x ] = 0 and Vt ǫj (x)| x ≤
+σ 2 , where
+  Vt [ · ] is a shorthand for the conditional
+ variance V ·  (i1 , Ci1 , a1 ), . . . , (it−1 , Cit−1 , at−1 ), it of the
+variable at argument.
+So we clearly have Et [ai (x)| x ] =
+
+u⊤
+x
+and
+V
+a
+(x)|
+x
+≤ σ 2 . Therefore, u⊤
+t
+i
+j(i)
+j(i) x is the
+expected payoff observed at user i for context vector x.
+In the special case when the noise ǫj(i) (x) is a bounded
+random variable taking values in the range [−1, 1], this implies σ 2 ≤ 1. We will make throughout the assumption
+2
+Any other distribution that insures a positive probability of
+visiting each node of V would suffice here.
+
+Online Clustering of Bandits
+
+that ai (x) ∈ [−1, 1] for all i ∈ V and x. Notice that this
+implies −1 ≤ u⊤
+j(i) x ≤ 1 for all i ∈ V and x. Finally,
+we assume well-separatedness among the clusters, in that
+||uj − uj ′ || ≥ γ > 0 for all j 6= j ′ . We define the regret
+rt of the learner at time t as
+
+
+⊤
+⊤
+rt = max uj(it ) x − uj(i
+x̄ .
+t) t
+x∈Cit
+
+We are aimed at bounding with high probability (over the
+variables it , xt,k , k = 1, . . . , ct , and the noise variables
+PT
+ǫj(it ) ) the cumulative regret t=1 rt . The kind of regret
+bound we would like to obtain (we call it the reference
+bound) is one where the clustering structure of V (i.e.,
+the partition of V into V1 , . . . , Vm ) is known to the algorithm ahead of time, and we simply view each one of the m
+clusters as an independent bandit problem. In this case, a
+standard contextual bandit analysis (Auer, 2002; Chu et al.,
+2011; Abbasi-Yadkori et al., P
+2011) shows that, as T grows
+T
+large, the cumulative regret t=1 rt can be bounded with
+3
+high probability as
+
+
+√ √ 
+PT
+e Pm σ d + ||uj || d
+r
+=
+O
+T .
+t
+t=1
+j=1
+For simplicity, we shall assume that ||uj || = 1 for all
+j = 1, . . . , m. Now, a more careful analysis exploiting
+our assumption about the randomness of it (see the sup√
+plementary material) reveals that one can replace the T
+term contributed by
+ each bandit j by a term of the form
+q
+√
+|V
+|
+j
+1
+T m
+, so that under our assumptions the ref+
+n
+
+erence bound becomes
+T
+X
+t=1
+
+e
+rt = O
+
+
+
+m
+X
+√ √ 
+T 1+
+σd+ d
+j=1
+
+r
+
+|Vj | 
+n
+
+!
+
+. (1)
+
+Observe the dependence of this bound on the size of clusters Vj . The worst-case scenario is when we have m clusn
+ters of the same size m
+, resulting in the bound
+
+
+√ √
+PT
+e σd+ d
+.
+r
+=
+O
+m
+T
+t
+t=1
+
+At the other extreme lies the easy case when we have
+a single big cluster and many small ones. For instance,
+|V1 | = n − m + 1, and |V2 | = |V3 | = . . . |Vm | = 1, for
+m << n, gives
+
+
+√ √ 
+PT
+e σd+ d
+.
+T 1 + √mn
+t=1 rt = O
+
+A relevant geometric parameter of the set of uj is the sum
+of distances SD(uj ) of a given vector uj w.r.t. the set
+of
+vectors u1 , . . . , um , which we define as SD(uj ) =
+Pm
+ℓ=1 ||uj − uℓ ||. If it is known that SD(uj ) is small
+for all j, one can modify the abovementioned independent
+3
+
+e
+The O-notation
+hides logarithmic factors.
+
+bandit algorithm, by letting the bandits share signals, as is
+done, e.g., in (Cesa-Bianchi et al., 2013). This allows one
+to exploit the
+vicinity of the uj vectors, and roughly replace
+Pm q |Vj |
+1 + j=1
+n in (1) by a quantity also depending on the
+mutual distances ||uj − uj ′ || among cluster vectors. However, this improvement is obtained at the cost of a substantial increase of running time (Cesa-Bianchi et al., 2013). In
+our analysis (Theorem 1 in Section 3), we would like to
+leverage both the geometry of the clusters, as encoded by
+vectors uj , and the relative size |Vj | of the clusters, with no
+prior knowledge of m (or γ), and without too much extra
+computational burden.
+
+3. The Algorithm
+Our algorithm, called Cluster of Bandits (CLUB), is described in Figure 1. In order to describe the algorithm
+we find it convenient to re-parameterize the problem described in Section 2, and introduce n parameter vectors
+u1 , u2 , . . . , un , one per node, where nodes within the same
+cluster Vj share the same vector. An illustrative example is
+given in Figure 2.
+The algorithm maintains at time t an estimate wi,t for vector ui associated with user i ∈ V . Vectors wi,t are updated based on the payoff signals, similar to a standard
+linear bandit algorithm (e.g., (Chu et al., 2011)) operating
+on the context vectors contained in Cit . Every user i in
+V hosts a linear bandit algorithm like the one described
+in (Cesa-Bianchi et al., 2013). One can see that the prototype vector wi,t is the result of a standard linear leastsquares approximation to the corresponding unknown parameter vector ui . In particular, wi,t−1 is defined through
+−1
+the inverse correlation matrix Mi,t−1
+, and the additivelyupdated vector bi,t−1 . Matrices Mi,t are initialized to the
+d × d identity matrix, and vectors bi,t are initialized to
+the d-dimensional zero vector. In addition, the algorithm
+maintains at time t an undirected graph Gt = (V, Et )
+whose nodes are precisely the users in V . The algorithm starts off from the complete graph, and progressively
+erases edges based on the evolution of vectors wi,t . The
+graph is intended to encode the current partition of V by
+means of the connected components of Gt . We denote by
+V̂1,t , V̂2,t , . . . , V̂mt ,t the partition of V induced by the connected components of Gt . Initially, we have m1 = 1 and
+V̂1,1 = V . The clusters V̂1,1 , V̂2,t , . . . , V̂mt ,t (henceforth
+called the current clusters) are indeed meant to estimate the
+underlying true partition V1 , V2 , . . . , Vm , henceforth called
+the underlying or true clusters.
+At each time t = 1, 2, . . . , the algorithm receives the index
+it of the user to serve, and the associated context vectors
+xt,1 , . . . , xt,ct (the set Cit ), and must select one among
+them. In doing so, the algorithm first determines which
+cluster (among V̂1,1 , V̂2,t , . . . , V̂mt ,t ) node it belongs to,
+call this cluster V̂bjt ,t , then builds the aggregate weight vec-
+
+Online Clustering of Bandits
+Input: Exploration parameter α > 0; edge deletion parameter
+α2 > 0
+Init:
+• bi,0 = 0 ∈ Rd and Mi,0 = I ∈ Rd×d , i = 1, . . . n;
+• Clusters V̂1,1 = V , number of clusters m1 = 1;
+• Graph G1 = (V, E1 ), G1 is connected over V .
+for t = 1, 2, . . . , T do
+−1
+bi,t−1 , i = 1, . . . , n;
+Set wi,t−1 = Mi,t−1
+Receive it ∈ V , and get context Cit = {xt,1 , . . . , xt,ct };
+Determine b
+jt ∈ {1, . . . , mt } such that it ∈ V̂bjt ,t , and set
+X
+M̄bjt ,t−1 = I +
+(Mi,t−1 − I),
+i∈V̂b
+jt ,t
+
+b̄bjt ,t−1 =
+
+X
+
+bi,t−1 ,
+
+i∈V̂b
+jt ,t
+
+w̄bjt ,t−1 = M̄bj−1,t−1 b̄bjt ,t−1 ;
+t
+
+
+⊤
+Set kt = argmax w̄bjt ,t−1 xt,k + CBbjt ,t−1 (xt,k ) ,
+k=1,...,ct
+
+CBj,t−1 (x)
+
+M̄j,t−1
+
+q
+
+−1
+x log(t + 1),
+x⊤ M̄j,t−1
+X
+=I+
+(Mi,t−1 − I) , j = 1, . . . , mt .
+
+=α
+
+i∈V̂j,t
+
+Observe payoff at ∈ [−1, 1];
+Update weights:
+•
+Mit ,t = Mit ,t−1 + x̄t x̄⊤
+t ,
+•
+bit ,t = bit ,t−1 + at x̄t ,
+•
+Set Mi,t = Mi,t−1 , bi,t = bi,t−1 for all i 6= it ;
+Update clusters:
+•
+Delete from Et all (it , ℓ) such that
+||wit ,t−1 − wℓ,t−1 || > CfBit ,t−1 + CfBℓ,t−1 ,
+s
+1 + log(1 + Ti,t−1 )
+fBi,t−1 = α2
+C
+,
+1 + Ti,t−1
+Ti,t−1 = |{s ≤ t − 1 : is = i}|,
+
+•
+
+i∈V;
+
+Let Et+1 be the resulting set of edges, set
+Gt+1 = (V, Et+1 ), and compute associated clusters
+V̂1,t+1 , V̂2,t+1 , . . . , V̂mt+1 ,t+1 .
+
+end for
+
+Figure 1. Pseudocode of the CLUB algorithm. The confidence
+functions CBj,t−1 and CfBi,t−1 are simplified versions of their
+“theoretical” counterparts TCBj,t−1 and Tg
+CBi,t−1 , defined later
+on. The factors α and α2 are used here as tunable parameters that
+bridge the simplified versions to the theoretical ones.
+
+tor w̄bjt ,t−1 by taking prior x̄s , s < t, such that is ∈ V̂bjt ,t ,
+and computing the least squares approximation as if all
+nodes i ∈ V̂bjt ,t have been collapsed into one. It is weight
+vector w̄bjt ,t−1 that the algorithm uses to select kt . In particular,
+
+
+x
++
+CBb
+(x
+)
+.
+kt = argmax w̄b⊤
+t,k
+t,k
+jt ,t−1
+j ,t−1
+k=1,...,ct
+
+The quantity
+
+t
+
+CBb
+jt ,t−1 (x)
+
+is a version of the upper confi-
+
+dence bound in the approximation of w̄bjt ,t−1 to a suitable
+
+combination of vectors ui , i ∈ V̂bjt ,t – see the supplementary material for details.
+Once this selection is done and the associated payoff at
+is observed, the algorithm uses the selected vector x̄t for
+updating Mit ,t−1 to Mit ,t via a rank-one adjustment, and
+for turning vector bit ,t−1 to bit ,t via an additive update
+whose learning rate is precisely at . Notice that the update is only performed at node it , since for all other i 6= it
+we have wi,t = wi,t−1 . However, this update at it will
+also implicitly update the aggregate weight vector w̄bjt+1 ,t
+
+associated with cluster V̂bjt+1 ,t+1 that node it will happen to belong to in the next round. Finally, the cluster
+structure is possibly modified. At this point CLUB compares, for all existing edges (it , ℓ) ∈ Et , the distance
+||wit ,t−1 −wℓ,t−1 || between vectors wit ,t−1 and wℓ,t−1 to
+the quantity CfBit ,t−1 + CfBℓ,t−1 . If the above distance is significantly large (and wit ,t−1 and wℓ,t−1 are good approximations to the respective underlying vectors uit and uℓ ),
+then this is a good indication that uit 6= uℓ (i.e., that node
+it and node ℓ cannot belong to the same true cluster), so that
+edge (it , ℓ) gets deleted. The new graph Gt+1 , and the induced partitioning clusters V̂1,t+1 , V̂2,t+1 , . . . , V̂mt+1 ,t+1 ,
+are then computed, and a new round begins.
+3.1. Implementation
+
+In implementing the algorithm in Figure 1, the reader
+should bear in mind that we are expecting n (the number of users) to be quite large, d (the number of features
+of each item) to be relatively small, and m (the number
+of true clusters) to be very small compared to n. With
+this in mind, the algorithm can be implemented by storing a least-squares estimator wi,t−1 at each node i ∈ V ,
+an aggregate least squares estimator w̄bjt ,t−1 for each current cluster b
+jt ∈ {1, . . . , mt }, and an extra data-structure
+which is able to perform decremental dynamic connectivity. Fast implementations of such data-structures are those
+studied by (Thorup, 1997; Kapron et al., 2013) (see also
+the research thread referenced therein). One can show (see
+the supplementary material) that in T rounds we have an
+overall (expected) running time
+ 
+|E1 | 
+d +m (n d2 + d3 ) + |E1 |
+O T d2 +
+n
+
+p
++ min{n2 , |E1 | log n} + n |E1 | log2.5 n .
+
+(2)
+
+Notice that the above is n · poly(log n), if so is |E1 |. In
+addition, if T is large compared to n and d, the average
+running time per round becomes O(d2 + d · poly(log n)).
+As for memory requirements, this implementation takes
+O(n d2 + m d2 + |E1 |) = O(n d2 + |E1 |). Again, this
+is n · poly(log n) if so is |E1 |.
+
+Online Clustering of Bandits
+
+3.2. Regret Analysis
+Our analysis relies on the high probability analysis contained in (Abbasi-Yadkori et al., 2011) (Theorems 1 and 2
+therein). The analysis (Theorem 1 below) is carried out in
+the case when the initial graph G1 is the complete graph.
+However, if the true clusters are sufficiently large, then we
+can show (see Remark 4) that a formal statement can be
+made even if we start off from sparser random graphs, with
+substantial time and memory savings.
+The analysis actually refers to a version of the algorithm where the confidence bound functions CBj,t−1 (·)
+and CfBi,t−1 in Figure 1 are replaced by their “theoretig i,t−1 , respectively,4
+cal” counterparts TCBj,t−1 (·), and TCB
+which are defined as follows. Set for brevity
+!
+T + 3
+T + 3 r
+λT
+−8 log
+Aλ (T, δ)=
+−2 T log
+4
+δ
+δ
++
+
+where (x)+ = max{x, 0}, x ∈ R. Then, for j =
+1, . . . , mt ,
+s
+!
+q
+|M̄j,t−1 |
+−1
+⊤
+x M̄j,t−1 x σ 2 log
++1 ,
+TCBj,t−1 (x) =
+δ/2
+(3)
+being | · | the determinant of the matrix at argument, and,
+for i ∈ V ,
+p
+σ 2d log t + 2 log(2/δ) + 1
+g
+.
+(4)
+TCBi,t−1 = p
+1 + Aλ (Ti,t−1 , δ/(2nd))
+
+Recall the difference between true clusters V1 , . . . , Vm and
+current clusters V̂1,t , . . . , V̂mt ,t maintained by the algorithm at time t. Consistent with this difference, we let
+G = (V, E) be the true underlying graph, made up of the m
+disjoint cliques over the sets of nodes V1 , . . . , Vm ⊆ V , and
+Gt = (V, Et ) be the one kept by the algorithm – see again
+Figure 2 for an illustration of how the algorithm works. The
+following is the main theoretical result of this paper,5 where
+additional conditions are needed on the process X generating the context vectors.
+Theorem 1. Let the CLUB algorithm of Figure 1 be
+run on the initial complete graph G1 = (V, E1 ), whose
+nodes V = {1, . . . , n} can be partitioned into m clusters
+V1 , . . . , Vm where, for each j = 1, . . . , m, nodes within
+cluster Vj host the same vector uj , with ||uj || = 1 for
+j = 1, . . . , m, and ||uj − uj ′ || ≥ γ > 0 for any j 6= j ′ .
+Denote by vj = |Vj | the cardinality of cluster Vj . Let the
+CB j,t (·) function in Figure 1 be replaced by the TCBj,t (·)
+g i,t defunction defined in (3), and CfBi,t be replaced by TCB
+g
+fined in (4). In both TCBj,t and TCBi,t , let δ therein be
+4
+Notice that, in all our notation, index i always ranges over
+nodes, while index j always ranges over clusters. Accordingly,
+the quantities CfBi,t and Tg
+CBi,t are always associates with node
+i ∈ V , while the quantities CBj,t−1 (·) and TCBj,t−1 (·) are always
+associates with clusters j ∈ {1, . . . , mt }.
+5
+The proof is provided in the supplementary material.
+
+Figure 2. A true underlying graph G = (V, E) made up of n =
+|V | = 11 nodes, and m = 4 true clusters V1 = {1, 2, 3}, V2 =
+{4, 5}, V3 = {6, 7, 8, 9}, and V4 = {10, 11}. There are mt =
+2 current clusters V̂1,t and V̂2,t . The black edges are the ones
+contained in E, while the red edges are those contained in Et \ E.
+The two current clusters also correspond to the two connected
+components of graph Gt = (V, Et ). Since aggregate vectors w̄j,t
+are build based on current cluster membership,
+P5 if for instance,
+b
+it = 3, then
+j
+t = 1, so M̄1,t−1 = I +
+i=1 (Mi,t−1 − I),
+P
+−1
+b̄1,t−1 = 5i=1 bi,t−1 , and w̄1,t−1 = M̄1,t−1
+b̄1,t−1 .
+
+replaced by δ/10.5. Let, at each round t, context vectors Cit = {xt,1 , . . . , xt,ct } being generated i.i.d. (conditioned on it , ct and all past indices i1 , . . . , it−1 , payoffs a1 , . . . , at−1 , and sets Ci1 , . . . , Cit−1 ) from a random
+process X such that ||X|| = 1, E[XX ⊤ ] is full rank,
+with minimal eigenvalue λ > 0. Moreover, for any fixed
+unit vector z ∈ Rd , let the random variable (z ⊤ X)2
+be (conditionally) sub-Gaussian with variance parameter
+
+
+λ2
+, with ct ≤ c for all t.
+ν 2 = Vt (z ⊤ X)2 | ct ≤ 8 log(4c)
+Then with probability at least 1 − δ the cumulative regret
+satisfies
+!
+T
+m r
+
+X
+X
+√
+√ 
+√
+n
+v
+j
+e (σ d + 1) m
+rt = O
++ T 1+
+λ2
+λn
+t=1
+j=1
+!
+
+
+n σ2 d
+n
+E[SD(uit )] + m
++
++
+λ2
+λγ 2
+!
+m r
+
+X
+√
+√
+vj 
+e
+,
+(5)
+= O (σ d + 1) m T 1 +
+λn
+j=1
+e
+as T grows large. In the above, the O-notation
+hides
+log(1/δ), log m, log n, and log T factors.
+Remark 1. A close look at the cumulative regret bound
+presented in Theorem 1 reveals that this bound is made up
+of three main terms: The first term is of the form
+√
+√
+n
+(σ dm + m) 2 + m .
+λ
+This term is constant with T , and essentially accounts for
+the transient regime due to the convergence of the minimal
+eigenvalues of M̄j,t and Mi,t to the corresponding minimal
+eigenvalue λ of E[XX ⊤ ]. The second term is of the form
+n
+n σ2 d 
+E[SD(uit )] .
++
+2
+λ
+λγ 2
+
+This term is again constant with T , but it depends through
+E[SD(uit )] on the geometric properties of the set of uj as
+well as on the way such uj interact with the cluster sizes
+vj . Specifically,
+
+Online Clustering of Bandits
+
+E[SD(uit )] =
+
+Pm
+
+vj
+j=1 n
+
+Pm
+
+j ′ =1
+
+||uj − uj ′ || .
+
+Hence this term is small if, say, among the m clusters, a
+few of them together cover almost all nodes in V (this is
+a typical situation in practice) and, in addition, the corresponding uj are close to one another. This term accounts
+for the hardness of learning the true underlying clustering
+through edge pruning. We also have an inverse dependence
+on γ 2 , which is likely due to an artifact of our analysis. Recall that γ is not known to our algorithm. Finally, the third
+term is the one characterizing the asymptotic behavior of
+our algorithm as T → ∞, its form being just (5). It is instructive to compare this term to the reference bound (1)
+obtained by assuming prior knowledge of √
+the cluster struc6
+ture. Broadly speaking, (5) has an extra m factor,
+and
+q
+√
+1
+replaces a factor d in (1) by the larger factor λ .
+
+Remark 2. The reader should observe that a similar algorithm as CLUB can be designed that starts off from
+the empty graph instead, and progressively draws edges
+(thereby merging connected components and associated
+aggregate vectors) as soon as two nodes host individual vectors wi,t which are close enough to one another. This would have the advantage to lean on even
+faster data-structures for maintaining disjoint sets (e.g.,
+(Cormen et al., 1990)[Ch. 22]), but has also the significant
+drawback of requiring prior knowledge of the separation
+parameter γ. In fact, it would not be possible to connect
+two previously unconnected nodes without knowing something about this parameter. A regret analysis similar to the
+one in Theorem 1 exists, though our current understanding
+√
+is that the √
+cumulative regret would depend linearly on n
+instead of m. Intuitively, this algorithm is biased towards
+a large number of true clusters, rather than a small number.
+
+Remark 3. A data-dependent variant of the CLUB algorithm can be designed and analyzed which relies on datadependent clusterability assumptions of the set of users
+with respect to a set of context vectors. These datadependent assumptions allow us to work in a fixed design
+setting for the sequence of context vectors xt,k , and remove the sub-Gaussian and full-rank hypotheses regarding
+E[XX ⊤ ]. On the other hand, they also require that the
+power of the adversary generating context vectors be suitably restricted. See the supplementary material for details.
+Remark 4. Last but not least, we would like to stress that
+the same analysis contained in Theorem 1 extends to the
+case when we start off from a p-random Erdos-Renyi initial
+graph G1 = (V, E1 ), where p is the independent probability that two nodes are connected by an edge in G1 . Translated into our context, a classical result on random graphs
+due to (Karger, 1994) reads as follows.
+6
+
+This extra factor could be eliminated at the cost of having
+a higher second term in the bound, which does not leverage the
+geometry of the set of uj .
+
+Lemma 1. Given V = {1, . . . , n}, let V1 , . . . , Vm be a
+partition of V , where |Vj | ≥ s for all j = 1, . . . , m. Let
+G1 = (V, E1 ) be a p-random Erdos-Renyi graph with p ≥
+12 log(6n2 /δ)
+. Then with probability at least 1−δ (over the
+s−1
+random draw of edges), all m subgraphs induced by true
+clusters V1 , . . . , Vm on G1 are connected in G1 .
+n
+, j = 1, . . . , m, for some
+For instance, if |Vj | = β m
+constant
+β
+∈
+(0,
+1),
+then
+it
+suffices to have |E1 | =
+
+
+O m n log(n/δ)
+.
+Under
+these
+assumptions, if the initial
+β
+graph G1 is such a random graph, it is easy to show that
+Theorem 1 still holds. As mentioned in Section 3.1 (Eq. (2)
+therein), the striking advantage of beginning with a sparser
+connected graph than the complete graph is computational,
+since we need not handle anymore a (possibly huge) datastructure having n2 -many items. In our experiments, den
+scribed next, we set p = 3 log
+n , so as to be reasonably
+confident that G1 is (at the very least) connected.
+
+4. Experiments
+We tested our algorithm on both artificial and freely available real-world datasets against standard bandit baselines.
+4.1. Datasets
+Artificial datasets. We firstly generated synthetic datasets,
+so as to have a more controlled experimental setting. We
+tested the relative performance of the algorithms along
+different axes: number of underlying clusters, balancedness of cluster sizes, and amount of payoff noise. We
+set ct = 10 for all t = 1, . . . , T , with time horizon
+T = 5, 000 + 50, 000, d = 25, and n = 500. For each
+cluster Vj of users, we created a random unit norm vector uj ∈ Rd . All d-dimensional context vectors xt,k have
+then been generated uniformly at random on the surface of
+the Euclidean ball. The payoff value associated with cluster vector uj and context vector xt,k has been generated
+by perturbing the inner product u⊤
+j xt,k through an additive white noise term ǫ drawn uniformly at random across
+the interval [−σ, σ]. It is the value of σ that determines the
+amount of payoff noise. The two remaining parameters are
+the number of clusters m and the clusters’ relative size. We
+assigned to cluster Vj a number of users |Vj | calculated as7
+−z
+|Vj | = n Pmj ℓ−z , j = 1, . . . , m, with z ∈ {0, 1, 2, 3},
+ℓ=1
+so that z = 0 corresponds to equally-sized clusters, and
+z = 3 yields highly unbalanced cluster sizes. Finally, the
+sequence of served users it is generated uniformly at random over the n users.
+LastFM & Delicious datasets. These datasets are extracted from the music streaming service Last.fm and the
+social bookmarking web service Delicious. The LastFM
+dataset contains n = 1,892 nodes, and 17,632 items
+7
+We took the integer part in this formula, and reassigned the
+remaining fractionary parts of users to the first cluster.
+
+Online Clustering of Bandits
+
+(artists). This dataset contains information about the listened artists, and we used this information to create payoffs: if a user listened to an artist at least once the payoff
+is 1, otherwise the payoff is 0. Delicious is a dataset with
+n = 1,861 users, and 69,226 items (URLs). The payoffs
+were created using the information about the bookmarked
+URLs for each user: the payoff is 1 if the user bookmarked
+the URL, otherwise the payoff is 0.8 These two datasets are
+inherently different: on Delicious, payoffs depend on users
+more strongly than on LastFM, that is, there are more popular artists whom everybody listens to than popular websites
+which everybody bookmarks. LastFM is a “few hits” scenario, while Delicious is a “many niches” scenario, making
+a big difference in recommendation practice. Preprocessing was carried out by closely following previous experimental settings, like the one in (Cesa-Bianchi et al., 2013).
+In particular, we only retained the first 25 principal components of the context vectors resulting from a tf-idf representation of the available items, so that on both datasets
+d = 25. We generated random context sets Cit of size
+ct = 25 for all t by selecting index it at random over the n
+users, then picking 24 vectors at random from the available
+items, and one among those with nonzero payoff for user
+it .9 We repeated this process T = 5, 000 + 50, 000 times
+for the two datasets.
+Yahoo dataset. We extracted two datasets from the one
+adopted by the “ICML 2012 Exploration and Exploitation 3
+Challenge”10 for news article recommendation. Each user
+is represented by a 136-dimensional binary feature vector,
+and we took this feature vector as a proxy for the identity
+of the user. We operated on the first week of data. After removing “empty” users,11 this gave rise to a dataset of
+8, 362, 905 records, corresponding to n = 713, 862 distinct
+users. The overall number of distinct news items turned
+out to be 323, ct changing from round to round, with a
+maximum of 51, and a median of 41. The news items
+have no features, hence they have been represented as ddimensional versors, with d = 323. Payoff values at are
+either 0 or 1 depending on whether the logged web system
+which these data refer to has observed a positive (click) or
+negative (no-click) feedback from the user in round t. We
+then extracted the two datasets “5k users” and “18k users”
+by filtering out users that have occurred less than 100 times
+and less than 50 times, respectively. Since the system’s recommendation need not coincide with the recommendation
+8
+Datasets and their full descriptions are available at
+www.grouplens.org/node/462.
+9
+This is done so as to avoid a meaningless comparison: With
+high probability, a purely random selection would result in payoffs equal to zero for all the context vectors in Cit .
+10
+https://explochallenge.inria.fr/
+11
+Out of the 136 Boolean features, the first feature is always
+1 throughout all records. We call “empty” the users whose only
+nonzero feature is the first feature.
+
+issued by the algorithms we tested, we could only retain
+the records on which the two recommendations were indeed the same. Because records are discarded on the fly,
+the actual number of retained records changes across algorithms, but it is about 50, 000 for the “5k users” version and
+about 70, 000 for the “18k users” version.
+4.2. Algorithms
+We compared CLUB with two main competitors: LinUCBONE and LinUCB-IND. Both competitors are members of the LinUCB family of algorithms (Auer, 2002;
+Chu et al., 2011; Li et al., 2010; Abbasi-Yadkori et al.,
+2011; Cesa-Bianchi et al., 2013). LinUCB-ONE allocates
+a single instance of LinUCB across all users (thereby making the same prediction for all users), whereas LinUCBIND (“LinUCB INDependent”) allocates an independent
+instance of LinUCB to each user, thereby making predictions in a fully personalised fashion. Moreover, on the
+synthetic experiments, we added two idealized baselines:
+a GOBLIN-like algorithm (Cesa-Bianchi et al., 2013) fed
+with a Laplacian matrix encoding the true underlying graph
+G, and a CLAIRVOYANT algorithm that knows the true
+clusters a priori, and runs one instance of LinUCB per cluster. Notice that an experimental comparison to multitasklike algorithms, like GOBLIN, or to the idealized algorithm
+that knows all clusters beforehand, can only be done on
+the artificial datasets, not in the real-world case where no
+cluster information is available. On the Yahoo dataset, we
+tested the featureless version of the LinUCB-like algorithm
+in (Cesa-Bianchi et al., 2013), which is essentially a version of the UCB1 algorithm of (Auer et al., 2001). The corresponding ONE and IND versions are denoted by UCBONE and UCB-IND, respectively. On this dataset, we also
+tried a single instance of UCB-V (Audibert et al., 2009)
+across all users, the winner of the abovementioned ICML
+Challenge. Finally, all algorithms have also been compared
+to the trivial baseline (denoted by RAN) that picks the item
+within Cit fully at random.
+n
+As for parameter tuning, CLUB was run with p = 3 log
+n ,
+so as to be reasonably confident that the initial graph is
+at least connected. In fact, after each generation of the
+graph, we checked for its connectedness, and repeated
+the process until the graph happened to be connected.12
+All algorithms (but RAN) require parameter tuning: an
+exploration-exploitation tradeoff parameter which is common to all algorithms (in Figure 1, this is the α parameter), and the edge deletion parameter α2 in CLUB. On
+the synthetic datasets, as well as on the LastFM and Delicious datasets, we tuned these parameters by picking the
+best setting (as measured by cumulative regret) after the
+first t0 = 5, 000 rounds, and then sticked to those values
+12
+Our results are averaged over 5 random initial graphs, but
+this randomness turned out to be a minor source of variance.
+
+Online Clustering of Bandits
+LastFM Dataset
+
+Balanced Clusters −− No. of Clusters: 10 Payoff Noise: 0.3
+
+0.9
+
+0.7
+0.6
+0.5
+0.4
+0.3
+
+0.7
+0.6
+
+0.4
+0.3
+
+0.1
+1
+
+1.5
+
+2
+
+2.5
+
+3
+
+3.5
+
+4
+
+4.5
+
+Rounds
+
+0
+
+5
+
+Unbalanced Clusters −− No. of Clusters: 2 Payoff Noise: 0.3
+
+1.5
+
+2
+
+2.5
+
+3
+
+3.5
+
+4
+
+4.5
+
+0.6
+
+0.3
+
+0.7
+0.6
+0.5
+0.4
+
+0.2
+
+0.1
+
+0.1
+1.5
+
+2
+
+2.5
+Rounds
+
+3
+
+3.5
+
+4
+
+3
+
+4
+
+0.75
+0
+
+5
+
+Rounds
+
+2
+
+3
+
+4
+
+5
+
+Rounds
+
+4
+
+x 10
+
+4.5
+
+5
+4
+
+x 10
+
+0
+
+Yahoo Dataset: 18K Users
+
+Yahoo Dataset: 5K Users
+
+0.5
+
+1
+
+1.5
+
+2
+
+2.5
+Rounds
+
+3
+
+3.5
+
+4
+
+4.5
+
+5
+
+0.07
+
+0.07
+
+0.06
+
+0.06
+
+4
+
+x 10
+
+0.05
+
+for the remaining T − t0 = 50, 000 rounds. It is these
+50, 000 rounds that our plots refer to. On the Yahoo dataset,
+this optimal tuning was done within the first t0 = 100, 000
+records, corresponding to a number of retained records between 4, 350 and 4, 450 across different algorithms.
+4.3. Results
+Our results are summarized in13 Figures 3, 4, and 5. On the
+synthetic datasets (Figure 3) and the LastFM and Delicious
+datasets (Figure 4) we measured the ratio of the cumulative
+regret of the algorithm to the cumulative regret of the random predictor RAN (so that the lower the better). On the
+synthetic datasets, we did so under combinations of number of clusters, payoff noise, and cluster size balancedness.
+On the Yahoo dataset (Figure 5), because the only available
+payoffs are those associated with the items recommended
+in the logs, we instead measured the Clickthrough Rate
+(CTR), i.e., the fraction of times we get at = 1 out of the
+number of retained records so far (so the higher the better).
+This experimental setting is in line with previous ones (e.g.,
+(Li et al., 2010)) and, by the way data have been prepared,
+gives rise to a reliable estimation of actual CTR behavior
+under the tested experimental conditions (Li et al., 2011).
+Based on the experimental results, some trends can be
+spotted: On the synthetic datasets, CLUB always outperforms its uninformed competitors LinUCB-IND and
+LinUCB-ONE, the gap getting larger as we either decrease
+the number of underlying clusters or we make the clusters
+sizes more and more unbalanced. Moreover, CLUB can
+Further plots can be found in the supplementary material.
+
+CTR
+
+Figure 3. Results on synthetic datasets. Each plot displays the behavior of the ratio of the current cumulative regret of the algorithm
+(“Alg”) to the current cumulative regret of RAN, where “Alg” is
+either “CLUB” or “LinUCB-IND” or “LinUCB-ONE” or “GOBLIN”or “CLAIRVOYANT”. In the top two plots cluster sizes are
+balanced (z = 0), while in the bottom two they are unbalanced
+(z = 2).
+
+CTR
+
+0.05
+
+13
+
+1
+
+4
+
+x 10
+
+0.3
+
+0.2
+
+1
+
+2
+
+Figure 4. Results on the LastFM (left) and the Delicious (right)
+datasets. The two plots display the behavior of the ratio of the
+current cumulative regret of the algorithm (“Alg”) to the current cumulative regret of RAN, where “Alg” is either “CLUB”
+or “LinUCB-IND” or “LinUCB-ONE”.
+
+CLUB
+LINUCB−IND
+LINUCB−ONE
+GOBLIN
+CLAIRVOYANT
+
+0.8
+
+0.4
+
+0.5
+
+1
+
+5
+
+Unbalanced Clusters −− No. of Clusters: 10 Payoff Noise: 0.1
+
+0.5
+
+0
+
+CLUB
+LINUCB−IND
+LINUCB−ONE
+
+0.85
+
+0.8
+
+4
+
+1
+
+0.7
+
+0.85
+
+0.9
+
+x 10
+
+0.9
+
+CLUB
+LINUCB−IND
+LINUCB−ONE
+GOBLIN
+CLAIRVOYANT
+
+Cum. Regr. of Alg. / Cum. Regr. of RAN
+
+Cum. Regr. of Alg. / Cum. Regr. of RAN
+
+1
+
+Rounds
+
+1
+
+0.8
+
+0.9
+
+0.75
+0
+
+0.5
+
+4
+
+x 10
+
+0.9
+
+0.95
+CLUB
+LINUCB−IND
+LINUCB−ONE
+
+0.8
+
+0.2
+
+0.1
+0.5
+
+1
+
+0.95
+
+0.5
+
+0.2
+
+0
+
+CLUB
+LINUCB−IND
+LINUCB−ONE
+GOBLIN
+CLAIRVOYANT
+
+0.8
+Cum. Regr. of Alg. / Cum. Regr. of RAN
+
+Cum. Regr. of Alg. / Cum. Regr. of RAN
+
+0.9
+
+CLUB
+LINUCB−IND
+LINUCB−ONE
+GOBLIN
+CLAIRVOYANT
+
+0.8
+
+Delicious Dataset
+
+1
+
+1
+
+Cum. Regr. of Alg. / Cum. Regr. of RAN
+
+1
+
+Cum. Regr. of Alg. / Cum. Regr. of RAN
+
+Balanced Clusters −− No. of Clusters: 2 Payoff Noise: 0.1
+
+CLUB
+UCB−IND
+UCB−ONE
+UCB−V
+RAN
+
+0.04
+
+0.03
+
+0.03
+
+0.02
+
+0.02
+
+0.01
+
+CLUB
+UCB−IND
+UCB−ONE
+UCB−V
+RAN
+
+0.04
+
+1
+
+2
+
+3
+
+4
+
+Rounds
+
+5
+4
+
+x 10
+
+0.01
+
+1
+
+2
+
+3
+
+4
+Rounds
+
+5
+
+6
+
+7
+4
+
+x 10
+
+Figure 5. Plots on the Yahoo datasets reporting Clickthrough Rate
+(CTR) over time, i.e., the fraction of times the algorithm gets payoff one out of the number of retained records so far.
+
+clearly interpolate between these two competitors taking, in
+a sense, the best of both. On the other hand (and unsurprisingly), the informed competitors GOBLIN and CLEARVOYANT outperform all uninformed ones. On the “few
+hits” scenario of LastFM, CLUB is again outperforming both of its competitors. However, this is not happening in the “many niches” case delivered by the Delicious
+dataset, where CLUB is clearly outperformed by LinUCBIND. The proposed alternative of CLUB that starts from an
+empty graph (Remark 2) might be an effective alternative
+in this case. On the Yahoo datasets we extracted, CLUB
+tends to outperform its competitors, when measured by
+CTR curves, thereby showing that clustering users solely
+based on past behavior can be beneficial. In general, CLUB
+seems to benefit from situations where it is not immediately
+clear which is the winner between the two extreme solutions (Lin)UCB-ONE and (Lin)UCB-IND, and an adaptive
+interpolation between these two is needed.
+
+Acknowledgments
+We would like to thank the anonymous reviewers for their
+helpful and constructive comments. Also, the first and
+the second author acknowledge the support from Amazon AWS Award in Education Machine Learning Research
+Grant.
+
+Online Clustering of Bandits
+
+References
+Abbasi-Yadkori, Y., Pál, D., and Szepesvári, C. Improved
+algorithms for linear stochastic bandits. Proc. NIPS,
+2011.
+Audibert, J.-Y., Munos, R., and Szepesvári, C.
+Exploration-exploitation tradeoff using variance estimates in multi-armed bandits. Theoretical Computer
+Science, 410(19):1876–1902, 2009.
+Auer, P.
+Using confidence bounds for explorationexploitation trade-offs. Journal of Machine Learning Research, 3:397–422, 2002.
+Auer, P., Cesa-Bianchi, N., and Fischer, P. Finite-time analysis of the multiarmed bandit problem. Machine Learning, 2001.
+Bogers, T. Movie recommendation using random walks
+over the contextual graph. In CARS’10: Proc. 2nd Workshop on Context-Aware Recommender Systems, 2010.
+
+Delporte, J., Karatzoglou, A., Matuszczyk, T., and Canu, S.
+Socially enabled preference learning from implicit feedback data. In Proc. ECML/PKDD, pp. 145–160, 2013.
+Djolonga, J., Krause, A., and Cevher, V. High-dimensional
+gaussian process bandits. In NIPS, pp. 1025–1033, 2013.
+Kapron, Bruce M., King, Valerie, and Mountjoy, Ben. Dynamic graph connectivity in polylogarithmic worst case
+time. In Proc. SODA, pp. 1131–1142, 2013.
+Karger, D. R. Random sampling in cut, flow, and network
+design problems. In Proc. STOC, 1994.
+Krause, A. and Ong, C.S. Contextual gaussian process bandit optimization. In Proc. 25th NIPS, 2011.
+Lai, T. and Robbins, H. Asymptotically efficient adaptive
+allocation rules. Advances in Applied Mathematics, 6:
+4–22, 1985.
+Langford, J. and Zhang, T. The epoch-greedy algorithm for
+contextual multi-armed bandits. In Proc. NIPS, 2007.
+
+Buccapatnam, S., Eryilmaz, A., and Shroff, N.B. Multiarmed bandits in the presence of side observations in social networks. In Proc. 52nd IEEE Conference on Decision and Control, 2013.
+
+Li, L., Chu, W., Langford, J., and Schapire, R. E. A
+contextual-bandit approach to personalized news article
+recommendation. In Proc. WWW, pp. 661–670, 2010.
+
+Burke, R. Hybrid systems for personalized recommendations. In Proc. of the 2003 ITWP, pp. 133–152, 2005.
+
+Li, L., Chu, W., Langford, J., and Wang, X. Unbiased offline evaluation of contextual-bandit-based news article
+recommendation algorithms. In Proc. WSDM, 2011.
+
+Buscher, G., White, R. W., Dumais, S., and Huang, J.
+Large-scale analysis of individual and task differences
+in search result page examination strategies. In Proc. 5th
+ACM WSDM, pp. 373–382, 2012.
+
+Rashid, A. M., Lam, S.K., Karypis, G., and Riedl, J.
+Clustknn: a highly scalable hybrid model-& memorybased cf algorithm. In Proc. WebKDD-06, KDD Workshop on Web Mining and Web Usage Analysis, 2006.
+
+Caron, S. and Bhagat, S. Mixing bandits: A recipe for improved cold-start recommendations in a social network.
+In SNA-KDD, 7th Workshop on Social Network Mining
+and Analysis, 2013.
+
+Schafer, J.B., Konstan, J.A., and Riedl, J. Recommender
+systems in e-commerce. In Proc. EC, pp. 158–166, 1999.
+
+Caron, S., Kveton, B., Lelarge, M., and Bhagat, S. Leveraging side observations in stochastic bandits. In Proc.
+UAI, pp. 142–151, 2012.
+Cesa-Bianchi, N., Gentile, C., and Zappella, G. A gang of
+bandits. In Proc. NIPS, 2013.
+Chu, W., Li, L., Reyzin, L., and Schapire, R. E. Contextual
+bandits with linear payoff functions. In Proc. AISTATS,
+2011.
+Cormen, T.H., Leiserson, C.E., and Rivest, R.L. Introduction to Algorithms. McGraw Hill, 1990.
+Crammer, K. and Gentile, C. Multiclass classification with
+bandit feedback using adaptive regularization. In Proc.
+ICML, 2011.
+
+Seldin, Y., Auer, P., Laviolette, F., Shawe-Taylor, J., and
+Ortner, R. Pac-bayesian analysis of contextual bandits.
+In NIPS, pp. 1683–1691, 2011.
+Thorup, M. Decremental dynamic connectivity. In Proc.
+SODA, pp. 305–313, 1997.
+Valko, M., Munos, R., Kveton, B., and Kocák, T. Spectral
+Bandits for Smooth Graph Functions. In 31th International Conference on Machine Learning, 2014.
+Yue, Y., Hong, S. A., and Guestrin, C. Hierarchical exploration for accelerating contextual bandits. In ICML,
+2012.
+
+

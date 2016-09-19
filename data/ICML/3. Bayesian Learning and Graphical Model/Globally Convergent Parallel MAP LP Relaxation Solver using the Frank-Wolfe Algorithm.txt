@@ -1,0 +1,1581 @@
+Globally Convergent Parallel MAP LP Relaxation Solver using the
+Frank-Wolfe Algorithm
+Alexander G. Schwing
+University of Toronto, 10 King’s College Rd., Toronto, Canada
+Tamir Hazan
+University of Haifa, Haifa, Israel
+Marc Pollefeys
+ETH Zurich, Universitätstrasse 6, Zurich, Switzerland
+Raquel Urtasun
+University of Toronto, 10 King’s College Rd., Toronto, Canada
+
+Abstract
+Estimating the most likely configuration (MAP)
+is one of the fundamental tasks in probabilistic models. While MAP inference is typically intractable for many real-world applications, linear programming relaxations have been
+proven very effective. Dual block-coordinate
+descent methods are among the most efficient
+solvers, however, they are prone to get stuck
+in sub-optimal points. Although subgradient
+approaches achieve global convergence, they
+are typically slower in practice. To improve
+convergence speed, algorithms which compute
+the steepest -descent direction by solving a
+quadratic program have been proposed. In this
+paper we suggest to decouple the quadratic program based on the Frank-Wolfe approach. This
+allows us to obtain an efficient and easy to parallelize algorithm while retaining the global convergence properties. Our method proves superior
+when compared to existing algorithms on a set of
+spin-glass models and protein design tasks.
+
+1. Introduction
+Graphical models are typically employed to describe the
+dependencies between variables involved in a joint probability distribution. Finding the most likely configuration,
+i.e., the maximum a-posteriori (MAP) assignment, is one of
+the most fundamental inference tasks. Unfortunately computing the MAP is NP-hard for many applications.
+In recent years linear programming (LP) relaxations have
+been shown to retrieve globally optimal configurations in
+many cases. The large amount of variables and constraints
+involved in practical applications poses significant chalProceedings of the 31 st International Conference on Machine
+Learning, Beijing, China, 2014. JMLR: W&CP volume 32. Copyright 2014 by the author(s).
+
+ASCHWING @ CS . TORONTO . EDU
+TAMIR @ CS . HAIFA . AC . IL
+MARC . POLLEFEYS @ INF. ETHZ . CH
+URTASUN @ CS . TORONTO . EDU
+
+lenges to standard LP solvers. Development of particularly tailored algorithms has therefore become a vibrant
+area of research. Since the graphical model structure is encoded in the constraints, algorithms that optimize the dual
+are employed to take into account the problem setup. Existing solvers, however, have difficulties due to the nonsmoothness of the dual. For example, block coordinate descent algorithms monotonically decrease the objective and
+converge very fast, but, they are not guaranteed to reach
+the global optimum of the dual program. To overcome this
+sub-optimality problem, different solutions have been proposed, e.g., smoothing (Johnson, 2008; Jojic et al., 2010;
+Hazan & Shashua, 2010; Savchynskyy et al., 2012), proximal updates (Ravikumar et al., 2010) and augmented Lagrangian methods (Martins et al., 2011; Meshi & Globerson, 2011). Due to the modifications of the cost function,
+convergence speed is however reduced.
+Globally convergent methods using the original cost function employ subgradients (Komodakis et al., 2010). Bundle methods (Lemaréchal, 1974; Kappes et al., 2012) are
+alternatively considered. However, applying sub-gradients
+directly or indirectly is known to converge slowly since arbitrary gradient directions are employed.
+Recently Schwing et al. (2012) proposed a steepest descent approach that monotonically decreases the dual objective and reaches the global optimum of the dual program. Contrasting arbitrary subgradient directions, their
+work advertises usage of the steepest -descent direction,
+which is found by solving a computationally expensive
+quadratic program. In this paper we propose to solve
+the quadratic program efficiently using a Frank-Wolfe approach, also known as conditional gradient. The benefits
+are twofold: we no longer require a general purpose solver
+to find the steepest -descent directions, which results in
+better efficiency and allows usage of sub-optimal directions
+that do not point exactly into the steepest descent direction.
+Furthermore, the task decouples and is easily parallelized.
+We demonstrate the effectiveness of our approach on pro-
+
+Globally Convergent Parallel MAP LP Relaxation Solver using the Frank-Wolfe Algorithm
+
+Repeat until convergence, for every region r:
+∀sr , p ∈ P (r)
+µp→r (sr )
+
+
+
+X
+λr→p (sr ) −
+= max θr (sr ) +
+sp \sr 
+p∈P (r)
+
+X
+
+λr0 →p (sr0 )
+
+
+
+
+
+r 0 ∈C(p)\r
+
+∀sr , p ∈ P (r)
+
+
+
+λr→p (sr )
+
+=
+
+1
+θr (sr ) +
+1 + |P (r)|
+
+X
+
+λc→r (sc ) +
+
+c∈C(r)
+
+X
+
+µp→r (sr ) − µp→r (sr )
+
+p∈P (r)
+
+Figure 1. Standard convex max-product message passing algorithm.
+
+tein design tasks as well as on spin glass models, and show
+that it outperforms existing state-of-the-art algorithms. In
+the remainder of the paper, we first provide some background regarding MAP estimation. We then detail our
+Frank-Wolfe approach and present experimental results before discussing related work and conclusions.
+
+2. Background
+
+Many researchers (e.g., Schlesinger (1976)) have proposed
+a relaxation of the ILP by replacing the integrality constraints with non-negativity constraints, while enforcing
+marginalization to hold between region r and some supersets referred to as its parents p ∈ P (r). Using this definition, the LP relaxation reads as follows:
+X
+max
+br (sr )θr (sr )
+(2)
+br
+
+Graphical models encode joint distributions over product
+spaces S = S1 × · · · × Sn , where we assume the domains
+Si , i ∈ {1, . . . , n} to be discrete. The joint probability
+is commonly defined by summing terms θr (sr ) often also
+referred to as negative energy functions. Each term depends on a restriction of the variablesQto subsets or regions
+r ⊆ {1, . . . , n}, i.e., sr = (si )i∈r ∈ i∈r Si . We use R to
+denote the set of all regions. The joint distribution is then
+given by
+!
+X
+p(s) ∝ exp
+θr (sr ) .
+r∈R
+
+We focus on estimating the maximum a-posteriori (MAP)
+configuration, i.e., we aim at finding the assignment that
+maximizes the probability p(s). Estimating the MAP configuration is equivalently written as a program of the following form (Koller & Friedman, 2009):
+X
+arg max
+θr (sr ).
+(1)
+s1 ,...,sn
+
+r∈R
+
+r,sr
+
+s.t.
+
+
+bP
+ ∀r, sr
+r (sr ) ≥ 0
+∀r
+br (sr ) = 1
+ ∀r, s , p ∈ P (r) Psr b (s ) = b (s ).
+r
+r r
+sp \sr p p
+
+This program has the interesting property that whenever its
+maximizing argument happens to be integral, i.e., the optimal beliefs satisfy br (sr ) ∈ {0, 1}, the program value
+equals the MAP value. Moreover, the maximum arguments
+of the optimal beliefs point toward the MAP assignment
+(Weiss et al., 2007).
+Similar to the parent set we introduce the set of children
+c ∈ C(r) = {c : r ∈ P (c)} of region r. Following Sontag
+& Jaakkola (2009); Werner (2010) we consider the minimization of the following re-parameterization dual
+X
+q(λ) =
+max θ̂r (sr ),
+(3)
+r
+
+with θ̂r (sr ) = θr (sr ) +
+
+P
+
+sr
+
+λr→p (sr ) −
+
+p∈P (r)
+
+Due to its combinatorial nature, this problem is NP-hard
+for general graphical models. It is tractable only in some
+special cases such as tree structured graphs, where specialized dynamic programming algorithms (e.g., max-product
+belief propagation) are guaranteed to recover the optimum.
+Another notable example are graphs which contain only
+sub-modular second order functions, where graph-cut approaches yield the global optima. In this paper we are,
+however, interested in the general case, employing arbitrary
+graphs and energy functions.
+The MAP program in Eq. (1) has a linear form, thus it is
+naturally represented as an integer linear program (ILP).
+
+P
+
+λc→r (sc ).
+
+c∈C(r)
+
+The Lagrange multipliers λr→p (sr ) are
+P introduced for
+the marginalization constraints, i.e., for sp \sr bp (sp ) =
+br (sr ) which is required to hold ∀r, sr , p ∈ P (r).
+The dual program value upper bounds the primal program
+described in Eq. (2). Therefore, to compute the primal optimal value one can minimize the dual upper bound. Using block coordinate descent on the dual objective amounts
+to optimizing blocks of dual variables while holding the
+remaining ones fixed. This results in the convex maxproduct message-passing update rules presented by Hazan
+& Shashua (2010); Meltzer et al. (2009) and summarized
+in Fig. 1.
+
+Globally Convergent Parallel MAP LP Relaxation Solver using the Frank-Wolfe Algorithm
+
+The convex max-product algorithm is guaranteed to converge in value since it minimizes the dual function, which
+is lower bounded by the primal program. Interestingly, it
+shares the same complexity as max-product belief propagation, which is attained by replacing the coefficient 1/(1 +
+|P (r)|) by 1. It has, however, two fundamental problems.
+First, it can get stuck in non-optimal stationary points. This
+happens since the dual objective is non-smooth, thus the
+algorithm can reach a corner, for which the dual objective
+stays fixed when changing only a few variables. For example, consider the case of a minimization problem where we
+try to descend from a pyramid while taking only horizontal
+and vertical paths. We eventually stay at the same height.
+The second drawback of convex max-product is that it does
+not always produce a primal optimal solution br (sr ), even
+when it reaches a dual optimal solution. This happens if the
+primal solution cannot be consistently reconstructed from
+the dual variables.
+To bypass both of the aforementioned restrictions, Schwing
+et al. (2012) recently proposed to employ steepest -descent
+directions that can be computed by solving the following
+quadratic program:
+
+2
+X
+X
+
+min
+bp (sp ) − br (sr )
+(4)
+br
+
+r,sr ,p∈P (r)
+
+sp \sr
+
+
+
+∀r, srPbr (sr ) ≥ 0
+s.t. C = ∀r Psr br (sr ) = 1
+
+∀r
+sr br (sr )θ̂r (sr ) ≥ max θ̂r (sr ) − .
+sr
+
+This program is obtained when considering the set of subdifferentials for q(λ) and searching for the direction of
+steepest descent. Summing the last constraint over all regions |R| we observe that the cost function value of 0 ensures |R| optimality while being primal feasible for the
+original LP relaxation given in Eq. (2), i.e., fulfilling the
+marginalization constraint.
+We note that the constraint set utilized to compute the steepest direction nicely decouples. However, solving this
+quadratic program is computationally challenging due to
+the cost function which couples the individual beliefs br .
+
+3. Steepest Descent Direction with
+Frank-Wolfe
+In what follows, we propose to employ the Frank-Wolfe
+schema, also known as conditional gradients, to decouple the program given in Eq. (4) and solve it more efficiently. Our intuition is based on the fact that programs with nonlinear cost functions and independent linear constraints can typically be solved via an efficient sequence of much simpler linear programs (Bertsekas et al.,
+2003). To this end we adopt a Frank-Wolfe schema (Frank
+
+& Wolfe, 1956) to compute the steepest -descent direction, i.e., to solve the quadratic program given in Eq. (4)
+which is summarized in Fig. 2. Similar to the standard
+Frank-Wolfe schema it proceeds by iterating three steps.
+Firstly, a descent direction of the cost function f (b) =
+P
+2
+P
+b
+(s
+)
+−
+b
+(s
+)
+, linearized at the
+p
+p
+r
+r
+r,sr ,p∈P (r)
+sp \sr
+current iterate br is found by solving the following program:
+X
+u∗ = arg min
+ur (sr )∇br (sr ) f s.t. u ∈ C. (5)
+u
+
+r,sr
+
+Secondly, we compute the optimal step length γ ∗ before
+updating the beliefs while making sure not to leave the constraint set, i.e., 0 ≤ γ ∗ ≤ 1. The latter two operations, i.e.,
+finding the minimum of a quadratic function in one variable
+γ and the update step, can be efficiently computed analytically in closed form and involve only simple arithmetic
+operations.
+The conditional gradient method employs the gradient of
+the cost function. Assuming beliefs b to lie within the constraint set C, the gradient of the cost function f (b) w.r.t.
+br (sr ) is given by
+
+
+X
+X
+∇br (sr ) f = 2 
+dc→r (sc ) −
+dr→p (sr ) ,
+c∈C(r)
+
+p∈P (r)
+
+P
+
+with dr→p (sr ) =
+sp \sr bp (sp ) − br (sr ) denoting the
+marginalization disagreements.
+The LP given in Eq. (5) decomposes due to the structure
+within the constraint set C. Hence the optimum is found
+by considering each region r independently. We therefore
+solve for all regions r in parallel and refer to the corresponding local constraint set via Cr . The program given in
+Eq. (5) is hence replaced by small programs, one for every
+region, which have the following form ∀r:
+X
+u∗r = arg min
+ur (sr )∇br (sr ) f
+(6)
+ur
+
+sr
+
+
+∀srPur (sr ) ≥ 0
+ur (sr ) = 1
+s.t. ur ∈ Cr =
+ Psr
+u
+sr r (sr )θ̂r (sr ) ≥ maxsr θ̂r (sr )−.
+While solving many small decoupled linear programs is arguably faster than a single large program, we are interested
+in faster algorithms that do not use general LP solvers. To
+this end, we show existence and availability of a construction for the primal optimal solution of the program given
+in Eq. (6). The method first identifies the non-zero domain
+for a feasible solution which is not larger than 2. A primal
+optimal solution is then analytically computed on this domain by setting a single state to equal one in case the nonzero domain points to a single state. Otherwise we solve a
+
+Globally Convergent Parallel MAP LP Relaxation Solver using the Frank-Wolfe Algorithm
+
+Algorithm: Conditional Gradient to find the steepest -descent direction
+Iterate until convergence:
+1. Solve the LP
+u∗ = arg min
+u
+
+X
+
+ur (sr )∇br (sr ) f
+
+s.t.
+
+u ∈ C.
+
+r,sr
+
+2. Compute the optimal step size γ ∗ in closed form by solving
+2
+
+bp (sp ) + γ u∗p (sp ) − bp (sp ) − (br (sr ) + γ (u∗r (sr ) − br (sr ))) .
+
+
+X
+
+γ ∗ = arg min
+
+0≤γ≤1
+
+X
+
+
+r,sr ,p∈P (r)
+
+sp \sr
+
+3. Update the beliefs via
+br (sr ) ← br (sr ) + γ ∗ (u∗r (sr ) − br (sr ))
+
+∀r, sr .
+
+Figure 2. Frank-Wolfe algorithm for finding the solution of the program given in Eq. (4).
+
+system of linear equations of size 2 × 2 to obtain the two
+non-zero values.
+Theorem 1 There exists a non-zero domain Sr∗ with 1 ≤
+|Sr∗ | ≤ 2, and a distribution ur (sr ) which is primal feasible
+and primal optimal for the program given in Eq. (6), such
+that ur (sr ) > 0 only if sr ∈ Sr∗ .
+Proof: To prove the theorem we consider the KarushKuhn-Tucker (KKT) conditions of the program given in
+Eq. (6). We introduce Lagrange multipliers µ for the constraint encoding that the weighted sum exceeds the constant
+maxsr θ̂r (sr ) − , multipliers σr (sr ) for the positivity constraint and multiplier γ for the summation over states being
+equal to one. The stationarity, primal feasibility, dual feasibility and complementary slackness requirements are then:
+∇br (sr ) f − µθ̂r (sr ) − σr (sr ) + γ = 0 ∀sr
+
+(7)
+
+ur (sr ) ≥ 0 ∀sr
+
+(8)
+
+ur (sr ) = 1
+
+(9)
+
+ur (sr )θ̂r (sr ) ≤ 0
+
+(10)
+
+µ≥0
+
+(11)
+
+X
+sr
+
+max θ̂r (sr ) −  −
+
+X
+
+sr
+
+sr
+
+σr (sr ) ≥ 0 ∀sr (12)
+!
+µ max θ̂r (sr ) −  −
+sr
+
+X
+
+ur (sr )θ̂r (sr )
+
+=0
+
+(13)
+
+sr
+
+σr (sr )ur (sr ) = 0 ∀sr (14)
+Plugging the stationarity requirement given in Eq. (7)
+into the complementary
+in
+ slackness constraint provided
+
+Eq. (14) yields ur (sr ) ∇br (sr ) f − µθ̂r (sr ) + γ = 0 ∀sr
+with σr (sr ) = ∇br (sr ) f − µθ̂r (sr ) + γ ≥ 0 ∀sr following
+from Eq. (12).
+Assuming µ = 0 requires σr (sr ) = ∇br (sr ) f + γ ≥
+
+0. To ensure non-negativity and a minimum cost function value for the program given in Eq. (6), we set γ
+to be the negative value of the smallest gradient, i.e.,
+γ = − minsr ∇br (sr ) f , and choose one state Sr∗ ∈
+arg max{sr :∇br (sr ) f =−γ} θ̂r (sr ) to obtain |Sr∗ | = 1. Setting ur (sr ) = 1 if sr ∈ Sr∗ and to zero otherwise fulfills dual feasibility and complementary slackness constraints. All primal P
+feasibility constraints are fulfilled if
+maxsr θ̂r (sr ) −  − sr ur (sr )θ̂r (sr ) ≤ 0 for sr ∈ Sr∗ .
+Thus, we take a single state Sr∗ that has the largest θ̂r (sr )
+among the minimizing elements of the cost function in
+Eq. (6). If the distribution ur (sr ) placing all its mass on
+that state fulfills the primal feasibility constraint given in
+Eq. (10) we have found the optimal feasible solution with
+|Sr∗ | = 1.
+Let us for now assume existence of a solution for the
+distribution ur (sr ) that has at most two non-zero entries. Using the condition obtained earlier by combination ofstationarity with complementary
+slackness, i.e.,
+
+ur (sr ) ∇br (sr ) f − µθ̂r (sr ) + γ = 0, for the two nonzero states enables computation of µ and γ by solving a
+linear system analytically. Assuming for now that dual
+feasibility holds, we construct a primal feasible solution
+by solving the 2 × 2 linear system arising from Eq. (9)
+and by enforcing Eq. (10) to hold with equality. We observe primal feasibility, and in particular also Eq. (8) to
+hold, if the set Sr∗ = {s1 , s2 } contains one state s1 with
+θ̂r (s1 ) > maxŝr θ̂r (ŝr ) −  and another one with θ̂r (s2 ) ≤
+maxŝr θ̂r (ŝr ) − .
+It remains to be shown that we can find two such states
+s1 , s2 which also fulfill dual feasibility. For dual feasibility to hold we require µ ≥ 0 and σr (sr ) = ∇br (sr ) f −
+µθ̂r (sr ) + γ ≥ 0 ∀sr . To interpret this program we refer the reader to Fig. 3. Every state sr defines the linear
+function ∇br (sr ) f − µθ̂r (sr ) which depends on the La-
+
+Globally Convergent Parallel MAP LP Relaxation Solver using the Frank-Wolfe Algorithm
+
+∇br (sr ) f − µθ̂r (sr )
+
+Algorithm: Efficient Globally Convergent Parallel
+MAP LP Relaxation Solver
+P
+P
+Let θ̂r (sr ) = θr (sr )+
+λr→p (sr )−
+λc→r (sc )
+p∈P (r)
+
+c∈C(r)
+
+Iterate until convergence:
+1. For a fixed or variable number of iterations:
+
+µ
+Figure 3. Linear functions for every state sr with the pointwise
+minimum given a set of lines being illustrated in black color.
+
+grange multiplier µ. We emphasize that there exists at
+least one linear function with slope strictly smaller than
+− maxŝr θ̂r (ŝr ) +  due to  > 0. Otherwise the problem would be unbounded. Note the change of sign, i.e.,
+the slope is −θ̂r (sr ). Intersecting every line s1 with slope
+strictly smaller than − maxŝr θ̂r (ŝr ) +  with every line
+s2 having a slope larger or equal to this constant gives
+the point (µ0 , −γ 0 ). Importantly dual feasibility only holds
+if σr (sr ) = ∇br (sr ) f − µ0 θ̂r (sr ) + γ 0 ≥ 0 ∀sr , i.e., if
+∇br (sr ) f − µ0 θ̂r (sr ) ≥ −γ 0 ∀sr while µ0 ≥ 0. Thus every line has to pass above the point of intersection being
+(µ0 , −γ 0 ). Existence of at least one combination Sr∗ =
+{s1 , s2 } is guaranteed if we found the case µ = 0 not to
+yield a valid solution.
+This concludes the proof of the theorem where we showed
+that we can construct a primal feasible solution ur (sr ) with
+the non-zero domain being at most two.
+Summarizing the constructive proof, we first investigate
+whether a feasible primal optimal solution can be found
+for µ = 0, which can be done in linear time. If no such solution is found, we proceed by successively walking along
+the lower envelope highlighted with black color in Fig. 3.
+In the following lemma we provide a statement regarding
+the computational complexity of constructing a primal optimal and primal feasible solution when following the procedure designed when proving Theorem 1.
+Lemma 1 Finding the feasible primal optimal solution
+ur (sr ) for the program in Eq. (6) has complexity at most
+O(|Sr |2 ).
+Proof: To prove the lemma we note that intersecting the
+line defined by ∇br (sr ) f − µθ̂r (sr ) for every sr with every
+other state sr as described in Theorem 1 is of quadratic
+complexity. This proves the claim.
+Although the worst complexity of our approach is quadratic
+in the number of states of a region, the practical performance is often much better as shown by our experimental
+evaluation. This is also illustrated in Fig. 3, since only 3 out
+of 10 lines need to be intersected. Note that a better bound
+of O(|Sr | log |Sr |) on the worst complexity can be obtained
+
+(a) ∀r in parallel: construct a primal feasible solution ur (sr )
+(b) compute the optimal step size γ ∗ and update
+the region beliefs br (sr ) as detailed in Fig. 2
+2. Compute the disagreement:
+X
+dr→p (sr ) =
+bp (sp ) − br (sr )
+sp \sr
+
+3. Update messages with stepsize η obtained through
+line search to improve q(λ):
+λr→p (sr ) ← λr→p (sr ) + ηdr→p (sr )
+4. Update potentials
+X
+X
+θ̂r (sr ) ← θr (sr )+
+λc→r (sc )−
+λr→p (sr )
+c∈C(r)
+
+p∈P (r)
+
+Figure 4. Our efficient, parallel and provably convergent MAP LP
+relaxation solver.
+
+using search techniques described by Yu et al. (2010).
+It is important to note that it is generally beneficial to interleave the optimization for finding the steepest -descent
+direction with the update of the dual variables, i.e., we
+blend the conditional gradient procedure outlined in Fig. 2
+with an update of the dual variables λ. However, there is a
+trade-off between fewer conditional gradient iterations and
+more verifications of the resulting -descent directions. After some conditional gradient iterations we need to verify
+whether a sufficiently large (≥ ) improvement of the dual
+q(λ) is possible. Hence, a single Frank-Wolfe step might
+require frequent verifications of the dual improvement.
+The obtained globally optimal maximum a-posteriori
+(MAP) LP relaxation solver is outlined in Fig. 4. We compute the -steepest descent direction by iterating step 1(a)
+and step 1(b) for a fixed number of times, verifying a possible  improvement with step 2 and step 3 and continue to
+iterate after the reparameterization in step 4 if a sufficiently
+large descent direction was found.
+
+4. Experimental Evaluation
+We compare our approach to a wide variety of state-ofthe-art baselines using spin-glass models of size 10 × 10
+with variable state-space size and energy functions aris-
+
+Globally Convergent Parallel MAP LP Relaxation Solver using the Frank-Wolfe Algorithm
+−3
+
+0
+
+2
+1
+
+175
+5
+
+10
+Time [s]
+
+15
+
+20
+
+0
+
+5
+
+10
+Time [s]
+
+15
+
+S 5, A 5
+S 5, A 10
+S 10, A 5
+S 10, A 10
+S 25, A 5
+S 25, A 10
+
+0
+
+20
+
+Figure 5. Dual over time comparison of our method with monotonically (left) and non-monotonically (right) converging approaches on a 3-state spin-glass model. Baselines and “ours” are
+single core, “ours P” is parallelized.
+
+350
+
+3
+
+175.1
+
+175
+
+400
+
+Intersections
+
+175.1
+
+175.2
+
+x 10
+
+100
+
+200
+Iterations
+
+Convex max-product and -steepest descent optimize the
+same cost function. Following Schwing et al. (2012),
+we start with efficient block-coordinate descent steps before switching to computing the -steepest descent directions via the conditional gradient procedure. We start from
+ = 0.01 and successively decrease its value if the model
+is sufficiently close to |R| optimality, i.e., if  is larger
+than f (b)/1000. We denote the single-core approach as
+“ours” and refer to the parallel implementation employing
+16 cores as “ours P.”
+4.1. Spin Glasses
+We first consider spin glass models that consist of local
+factors, each having 3 states with values randomly chosen according to a zero mean, unit variance normal distribution N (0, 1). The pairwise factors of the regular grid
+are weighted potentials with +1 on the diagonal, and offdiagonal entries being −1. The weights are independently
+drawn from N (0, 1). As shown by Schwing et al. (2012),
+convex max-product does not achieve optimality for about
+20% of the models in this setting, illustrating the need for
+globally convergent algorithms.
+Dual over time: Fig. 5 shows the convergence behavior
+for a spin glass model and illustrates the dual value obtained after a certain amount of time measured in seconds.
+As shown in the figure, CMP is monotonically decreasing
+but gets stuck in a corner. Convex sum product (CSD) is
+guaranteed to monotonically converge to the optimum of
+a problem modified by entropy terms which could be far
+from the MAP solution even if the corresponding temper-
+
+250
+
+300
+
+150
+
+400
+
+S 5, A 5
+S 5, A 10
+S 10, A 5
+S 10, A 10
+S 25, A 5
+S 25, A 10
+
+100
+
+200
+Iterations
+
+300
+
+400
+
+Figure 6. Performance scaling: Impact of state-space size (S)
+and interaction strength (A) on the fraction (left) and absolute
+number of line intersections (right).
+ours P 400
+ours P 800
+ours P 1200
+ours 400
+ours 800
+ours 1200
+
+160.96
+160.95
+Dual
+
+ing from a protein design task. As baselines, we employ
+the alternating direction method for dual MAP LP relaxations (ADLP) (Meshi & Globerson, 2011), the quadratic
+programming (QP) formulation given by Schwing et al.
+(2012), convex max-product (CMP) and convex sumproduct (CSP) (Hazan & Shashua, 2010) as well as the
+dual-decomposition work of Komodakis et al. (2010) provided in a generic (DDG), a re-weighted (DDR) and a
+smoothed (DDS) version in the STAIR library by Gould
+et al. (2011). Note that ADLP is also implemented in this
+library. All algorithms are restricted to at most 5, 000 iterations and all baselines utilize a single core.
+
+300
+
+200
+
+160.94
+160.93
+160.92
+0
+
+ours P 400
+ours P 800
+ours P 1200
+ours 400
+ours 800
+ours 1200
+
+175
+Dual
+
+175.2
+
+175.3
+
+4
+
+Fraction
+
+Dual
+
+175.3
+
+DDG
+DDR
+DDS
+ADLP
+ours
+ours P
+
+175.4
+
+Dual
+
+CMP
+CSP
+QP
+ours
+ours P
+
+175.4
+
+174.99
+174.98
+174.97
+
+5
+
+10
+Time [s]
+
+15
+
+20
+
+174.96
+0
+
+5
+
+10
+Time [s]
+
+15
+
+20
+
+Figure 7. Frank-Wolfe iterations: 400 conditional gradient iterations result in fast convergence for the spin glass given on the
+left, 800 are about as suitable for the case visualized on the right.
+
+ature is as low as 0.001. It is important to note that our
+-descent approach is monotonically decreasing just like
+the QP formulation, which contrasts the other baselines
+(ADLP, DDG, DDR, DDS). Our single core approach using 400 Frank-Wolfe iterations is slightly faster than the QP
+method but significantly easier to parallelize efficiently.
+Performance scaling: We next investigate how our approach scales with the state-space size |Sr |. We therefore
+measure the fraction of line intersections (Fig. 6 left) and
+the actual number of intersections (Fig. 6 right) as a function of the number of iterations for “hard” spin-glass models of size 10 × 10 with state space sizes 5, 10 and 25.
+We defined “hard” spin glass models as those where the
+difference between convex max-product and the -descent
+method is larger than 0.2. As shown in Fig. 6, where results
+are averaged over 30 models, the fraction of actually intersected lines compared to the maximally possible number
+(worst case complexity in Lemma 1) is very small. Further,
+there is no negative influence when increasing the strengths
+of the pairwise interaction. Thus the increase of wall-clock
+time for larger sized models is not due to the suggested lineintersection method but rather due to additional operations
+required for computation of the dual, gradient, etc.
+Frank-Wolfe iterations: We evaluate how many conditional gradient iterations are required before checking
+whether we can find an -descent direction. To this end,
+we compare our approach using 400, 800 and 1200 FrankWolfe iterations. The results for two spin glass models having a state-space size of 3 are given in Fig. 7. In the first
+case 400 conditional gradient iterations are sufficient. Note
+that choosing the number of iterations too low might result in slow convergence due to frequent -descent checks
+that are not successful, as illustrated on the right hand side
+of the figure. In the following we set the number of it-
+
+Globally Convergent Parallel MAP LP Relaxation Solver using the Frank-Wolfe Algorithm
+
+40
+20
+0 −2
+10
+
+100
+
+100
+
+100
+
+80
+
+80
+
+80
+
+60
+40
+20
+
+0
+
+2
+
+10
+
+0 −2
+10
+
+4
+
+10
+
+10
+
+Time [s]
+
+60
+40
+20
+
+0
+
+2
+
+10
+
+0 −2
+10
+
+4
+
+10
+
+10
+
+Time [s]
+
+(a) within 10−7
+
+Frequency
+
+60
+
+DDG
+DDR
+DDS
+ADLP
+CMP
+CSP
+QP
+ours
+ours P
+
+Frequency
+
+Frequency
+
+80
+
+Frequency
+
+100
+
+60
+40
+20
+
+0
+
+2
+
+10
+
+0 −2
+10
+
+4
+
+10
+
+10
+
+Time [s]
+
+(b) within 10−5
+
+0
+
+2
+
+10
+
+4
+
+10
+
+10
+
+Time [s]
+
+(c) within 10−2
+
+(d) within 100
+
+Figure 8. Time for accuracy: Time it requires to get a fraction of the samples to within the indicated optimality.
+
+40
+20
+0 −10
+10
+
+100
+
+100
+
+100
+
+80
+
+80
+
+80
+
+60
+40
+20
+
+−5
+
+10
+
+Error
+
+(a) after 1s
+
+0
+
+10
+
+0 −10
+10
+
+Frequency
+
+60
+
+DDG
+DDR
+DDS
+ADLP
+CMP
+CSP
+QP
+ours
+ours P
+
+Frequency
+
+Frequency
+
+80
+
+Frequency
+
+100
+
+60
+40
+20
+
+−5
+
+10
+
+0
+
+10
+
+Error
+
+(b) after 10s
+
+0 −10
+10
+
+60
+40
+20
+
+−5
+
+10
+
+0
+
+10
+
+Error
+
+(c) after 20s
+
+0 −10
+10
+
+−5
+
+10
+
+0
+
+10
+
+Error
+
+(d) after 200s
+
+Figure 9. Error after time: Percentage of samples that achieved a smaller error after the indicated time.
+
+erations to 400 and note that an adaptive approach which
+successively increases the number of iterations might be
+preferred, as the -descent directions are more easily found
+during the first few rounds.
+Time for a given accuracy: The percentage of tasks that
+reaches a given accuracy after a given time, averaged over
+30 “hard” spin glass models, is shown in Fig. 8. We observe
+that significantly more samples achieve a lower deviation
+from the optimum in a smaller amount of time when using
+the proposed approach.
+Error for a given time: We evaluate the fraction of problems that achieved a deviation from the optimum smaller
+than a certain error given a specific amount of time. As
+shown in Fig. 9 our approach outperforms the baselines
+most of the time.
+4.2. Protein Design
+Next we consider a protein design task and compare our
+proposed conditional gradient method to the performance
+of the most competitive algorithms, i.e., ADLP, QP and
+CMP. To this end, we make use of the eight problems from
+the probabilistic inference challenge1 . For all algorithms
+we use the same setting as before, except that we increase
+the number of the maximally possible iterations to 50, 000
+and the Frank-Wolfe iterations to 2, 000 to increase the
+chances of finding a descent direction and hence decrease
+the number of evaluations of the dual.
+Dual over time: Fig. 10 illustrates the dual energy over
+time. We observe fast convergence when the convex maxproduct (CMP) algorithm is optimal (Fig. 10 left). Similar
+to spin glass models, CMP gets stuck in corners as shown
+in all but the leftmost plot of Fig. 10. Our approach successfully finds the global optimum while monotonically de1
+
+http://www.cs.huji.ac.il/project/PASCAL/index.php
+
+creasing the dual energy.
+Cumulative frequency w.r.t. time/error: We evaluate
+the time required to achieve a specific accuracy as well as
+the cumulative error distribution after a given amount of
+time in Fig. 11 and Fig. 12 respectively. We observe that
+our approach achieves very good performance.
+
+5. Related Work
+Efficient dual solvers were extensively studied in the context of LP relaxations for the MAP problem (Koster et al.,
+1998; Schlesinger, 1976; Wainwright et al., 2005). Dual
+block coordinate descent methods, typically referred to
+as convex max-product algorithms, are monotonically decreasing, and were shown to be very efficient (Globerson
+& Jaakkola, 2007; Hazan & Shashua, 2010; Kolmogorov,
+2006; Meltzer et al., 2009; Sontag & Jaakkola, 2009; Tarlow et al., 2011; Werner, 2010). Since the dual program
+is non-smooth, these algorithms can however get stuck in
+non-optimal stationary points and cannot in general recover
+a primal optimal solution (Weiss et al., 2007).
+To fix the convergence issue, two main directions have been
+pursued, i.e., smoothing or directly optimizing the nonsmooth dual. To smooth the dual objective, some methods
+use the soft-max with low or decreasing temperature in order to avoid corners as well as to recover primal optimal
+solutions (Hazan & Shashua, 2010; Johnson, 2008; Jojic
+et al., 2010; Savchynskyy et al., 2012). However, these
+methods are generally slower, as computation of the exponential and logarithm functions is more expensive than
+finding the maximum. Ravikumar et al. (2010) applied
+the proximal method, leveraging a primal strictly concave
+modification, which results in a smooth dual approximation. This approach converges to the dual optimum and
+recovers the primal optimal solution. However, it uses a
+
+Globally Convergent Parallel MAP LP Relaxation Solver using the Frank-Wolfe Algorithm
+
+1.3561
+
+1.3585
+
+1.3561
+
+CMP
+ADLP
+QP
+ours
+ours P
+
+1.3632
+Dual
+
+1.3585
+
+x 10
+
+x 10
+CMP
+ADLP
+QP
+ours
+ours P
+
+1.3561
+
+Dual
+
+Dual
+
+1.3585
+
+4
+
+4
+
+4
+
+x 10
+CMP
+ADLP
+QP
+ours
+ours P
+
+1.3632
+
+CMP
+ADLP
+QP
+ours
+ours P
+
+1.3509
+1.3509
+Dual
+
+4
+
+x 10
+
+1.3632
+
+1.3561
+
+1.3509
+1.3509
+
+1.3585
+
+1.3632
+1.3561
+
+1.3585
+0
+
+5000
+Time [s]
+
+10000
+
+1.3509
+
+0
+
+5000
+Time [s]
+
+10000
+
+1.3632
+0
+
+5000
+Time [s]
+
+10000
+
+0
+
+5000
+Time [s]
+
+10000
+
+100
+
+80
+
+80
+
+60
+40
+
+CMP
+ADLP
+QP
+ours
+ours P
+
+60
+40
+
+60
+40
+
+20
+
+20
+
+20
+
+0
+
+0
+
+0
+
+0
+
+5
+
+10
+
+10
+
+0
+
+5
+
+10
+
+Time [s]
+
+10
+
+60
+40
+20
+
+0
+
+0
+
+5
+
+10
+
+Time [s]
+
+(a) within 10−7
+
+Frequency
+
+100
+
+80
+Frequency
+
+100
+
+80
+Frequency
+
+Frequency
+
+Figure 10. Dual over time for four different protein design tasks.
+100
+
+10
+
+(b) within 10−5
+
+0
+
+5
+
+10
+
+Time [s]
+
+10
+Time [s]
+
+(c) within 10−3
+
+(d) within 10−2
+
+100
+
+100
+
+80
+
+80
+
+80
+
+60
+40
+
+CMP
+ADLP
+QP
+ours
+ours P
+
+20
+0 −10
+10
+
+60
+40
+20
+
+−5
+
+10
+
+Error
+
+0
+
+10
+
+0 −10
+10
+
+Frequency
+
+100
+
+80
+
+Frequency
+
+100
+
+Frequency
+
+Frequency
+
+Figure 11. Cumulative frequency w.r.t. time: Time it requires to get a fraction of the samples to within the indicated optimality.
+
+60
+40
+20
+
+−5
+
+10
+
+0
+
+10
+
+Error
+
+0 −10
+10
+
+60
+40
+20
+
+−5
+
+10
+
+Error
+
+0
+
+10
+
+0 −10
+10
+
+−5
+
+10
+
+0
+
+10
+
+Error
+
+(a) after 500s
+(b) after 1000s
+(c) after 2000s
+(d) after 10000s
+Figure 12. Cumulative frequency w.r.t. error: Percentage of samples that achieved a specific error after the indicated time.
+
+double loop scheme where every update involves executing a convex sum-product algorithm. Other methods apply
+augmented Lagrangian techniques to the primal (Martins
+et al., 2011) and the dual programs (Meshi & Globerson,
+2011). This guarantees to reach the global optimum and
+recovers the dual and primal solutions. It is however not
+monotonically decreasing and thus it cannot be efficiently
+integrated with convex max-product updates that perform
+block coordinate descent on the dual of the LP relaxation.
+When directly optimizing the original non-smooth dual,
+subgradient descent algorithms are guaranteed to reach
+the dual optimum, as well as recover the primal optimum
+(Komodakis et al., 2010). A bundle approach presented
+by Lemaréchal (1974); Kappes et al. (2012) also employs
+subgradients. Despite their theoretical guarantees, methods
+employing subgradients are slow because arbitrary gradient directions are chosen. This contrasts the approach presented by Schwing et al. (2012) where the steepest, i.e.,
+fastest, descent direction from the set of -subdifferentials
+is employed.
+Following Schwing et al. (2012), our approach is based
+on the -descent algorithm for convex functions (Bertsekas
+et al., 2003). Similarly, we use the -margin of the FenchelYoung duality theorem to obtain the -subdifferential of
+the dual objective of the LP relaxation, thus augmenting
+
+the convex max-product algorithm with the ability to get
+out of corners and to recover a primal optimal solution.
+Finding the steepest descent direction within the set of subdifferentials requires solving a quadratic program. Contrasting the work of Schwing et al. (2012) we replace this
+task by a series of linear programs following the FrankWolfe scheme inspired from (Lacoste-Julien et al., 2013;
+Bach, 2013). Due to the constraint structure, we show that
+the problem decouples and is hence trivially parallelizable.
+Further we show how to construct a simple iterative procedure to efficiently solve the small sub-problems.
+
+6. Conclusion
+We presented an algorithm to compute the globally optimal solution of the LP relaxation of the MAP problem. To
+this end, we proposed to employ the conditional gradient
+(Frank-Wolfe) algorithm to replace the standard quadratic
+programming solver. This results in an algorithm which is
+easily parallelized and where each subproblem is efficiently
+solvable via a search procedure. We showed that our approach outperforms existing solvers on synthetic spin-glass
+models and on protein design tasks. In the future, we plan
+to investigate theoretical convergence rates of steepest descent algorithms.
+Acknowledgements: We gratefully acknowledge support from ONR Grant N00014-14-1-0232.
+
+Globally Convergent Parallel MAP LP Relaxation Solver using the Frank-Wolfe Algorithm
+
+References
+Bach, F. Duality between subgradient and conditional gradient methods. Technical report, INRIA - Sierra project
+team, 2013.
+Bertsekas, D. P., Nedić, A., and Ozdaglar, A. E. Convex
+Analysis and Optimization. Athena Scientific, 2003.
+Frank, M. and Wolfe, P. An algorithm for quadratic programming. Naval Research Logistics Quarterly, 1956.
+Globerson, A. and Jaakkola, T. Fixing max-product:
+Convergent message passing algorithms for MAP LPrelaxations. In Proc. NIPS, 2007.
+Gould, S., Russakovsky, O., Goodfellow, I., Baumstarck,
+P., Ng, A. Y., and Koller, D. The STAIR Vision Library
+(v2.4), 2011. http://ai.stanford.edu/ sgould/svl.
+Hazan, T. and Shashua, A. Norm-Product Belief Propagation: Primal-Dual Message-Passing for LP-Relaxation
+and Approximate-Inference. Trans. Information Theory,
+2010.
+Johnson, J. K. Convex relaxation methods for graphical
+models: Lagrangian and maximum entropy approaches.
+PhD thesis, MIT, 2008.
+Jojic, V., Gould, S., and Koller, D. Accelerated dual decomposition for MAP inference. In Proc. ICML, 2010.
+Kappes, J. H., Savchynskyy, B., and Schnörr, C. A Bundle
+Approach To Efficient MAP-Inference by Lagrangian
+Relaxation. In Proc. CVPR, 2012.
+Koller, D. and Friedman, N. Probabilistic Graphical Models: Principles and Techniques. MIT Press, 2009.
+
+Meltzer, T., Globerson, A., and Weiss, Y. Convergent Message Passing Algorithms: a unifying view. In Proc. UAI,
+2009.
+Meshi, O. and Globerson, A. An Alternating Direction
+Method for Dual MAP LP Relaxation. In Proc. ECML
+PKDD, 2011.
+Ravikumar, P., Agarwal, A., and Wainwright, M. J.
+Message-passing for graph-structured linear programs:
+Proximal methods and rounding schemes. JMLR, 2010.
+Savchynskyy, B., Schmidt, S., Kappes, J. H., and Schnörr,
+C. Efficient MRF Energy Minimization via Adaptive Diminishing Smoothing. In Proc. UAI, 2012.
+Schlesinger, M. I. Sintaksicheskiy analiz dvumernykh
+zritelnikh signalov v usloviyakh pomekh (Syntactic
+analysis of two-dimensional visual signals in noisy conditions). Kibernetika, 1976.
+Schwing, A. G., Hazan, T., Pollefeys, M., and Urtasun, R.
+Globally Convergent Dual MAP LP Relaxation Solvers
+using Fenchel-Young Margins. In Proc. NIPS, 2012.
+Sontag, D. and Jaakkola, T. Tree Block Corrdinate Descent
+for MAP in Graphical Models. In Proc. AISTATS, 2009.
+Tarlow, D., Batra, D., Kohli, P., and Kolmogorov, V. Dynamic Tree Block Coordinate Ascent. In Proc. ICML,
+2011.
+Wainwright, M. J., Jaakkola, T., and Willsky, A. S. MAP
+estimation via agreement on trees: message-passing and
+linear programming. Trans. Information Theory, 2005.
+
+Kolmogorov, V. Convergent tree-reweighted message passing for energy minimization. PAMI, 2006.
+
+Weiss, Y., Yanover, C., and Meltzer, T. MAP Estimation,
+Linear Programming and Belief Propagation with Convex Free Energies. In Proc. UAI, 2007.
+
+Komodakis, N., Paragios, N., and Tziritas, G. MRF Energy Minimization & Beyond via Dual Decomposition.
+PAMI, 2010.
+
+Werner, T. Revisiting the linear programming relaxation
+approach to Gibbs energy minimization and weighted
+constraint satisfaction. PAMI, 2010.
+
+Koster, A., van Hoesel, C. P. M., and Kolen, A. W. J. The
+partial constraint satisfaction problem: Facets and lifting
+theorems. Operations Research Letters, 1998.
+
+Yu, J., Vishwanathan, S. V. N., Günter, S., and Schraudolph, N. N. A Quasi-Newton Approach to Nonsmooth
+Convex Optimization Problems in Machine Learning.
+JMLR, 2010.
+
+Lacoste-Julien, S., Jaggi, M., Schmidt, M., and Pletscher, P.
+Block-Coordinate Frank-Wolfe Optimization for Structural SVMs. In Proc. ICML, 2013.
+Lemaréchal, C. An algorithm for minimizing convex functions. Information processing, 1974.
+Martins, A. F. T., Figueiredo, M. A. T., Aguiar, P. M. Q.,
+Smith, N. A., and Xing, E. P. An Augmented Lagrangian Approach to Constrained MAP Inference. In
+Proc. ICML, 2011.
+
+

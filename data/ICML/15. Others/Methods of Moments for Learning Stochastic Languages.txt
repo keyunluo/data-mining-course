@@ -1,0 +1,1168 @@
+Methods of Moments for Learning Stochastic Languages: Unified Presentation
+and Empirical Comparison
+
+Borja Balle1
+BBALLE @ CS . MCGILL . CA
+William L Hamilton1
+WHAMIL 3@ CS . MCGILL . CA
+Joelle Pineau
+JPINEAU @ CS . MCGILL . CA
+Reasoning and Learning Laboratory, School of Computer Science, McGill University, Montreal, QC, Canada
+
+Abstract
+Probabilistic latent-variable models are a powerful tool for modelling structured data. However,
+traditional expectation-maximization methods of
+learning such models are both computationally
+expensive and prone to local-minima. In contrast
+to these traditional methods, recently developed
+learning algorithms based upon the method of
+moments are both computationally efficient and
+provide strong statistical guarantees. In this work
+we provide a unified presentation and empirical comparison of three general moment-based
+methods in the context of modelling stochastic
+languages. By rephrasing these methods upon
+a common theoretical ground, introducing novel
+theoretical results where necessary, we provide
+a clear comparison, making explicit the statistical assumptions upon which each method relies.
+With this theoretical grounding, we then provide
+an in-depth empirical analysis of the methods on
+both real and synthetic data with the goal of elucidating performance trends and highlighting important implementation details.
+
+1. Introduction
+Probabilistic models with latent variables are a powerful
+and flexible tool for modelling complex probability distributions over structured data. Unfortunately, this power
+comes at a price: learning and predicting with latent variable models is typically a computationally expensive task,
+to the point where obtaining exact solutions can become
+intractable. Designing efficient, scalable, and accurate approximation algorithms for these tasks is an important challenge that needs to be solved if we want to use these models
+Proceedings of the 31 st International Conference on Machine
+Learning, Beijing, China, 2014. JMLR: W&CP volume 32. Copyright 2014 by the author(s).
+
+for solving large-scale real world problems.
+A classic solution to the problem of learning latent variable models under the maximum likelihood criterion is
+the expectation–maximization (EM) algorithm (Dempster
+et al., 1977). However, this algorithm suffers from two fundamental limitations: there is a high computational cost on
+large state spaces, and no statistical guarantees about the
+accuracy of the solutions obtained are available. A way
+to overcome the limitations of EM is by considering relaxed versions of the maximum likelihood principle (Varin,
+2008).
+A recent alternative line of work consists of designing
+learning algorithms for latent variable models exploiting an
+entirely different statistical principle: the so-called method
+of moments (Pearson, 1894). The key idea underlying this
+principle is that, since the low order moments of a distribution are typically easy to estimate, by writing a set of
+equations that relate the moments with the parameters of
+the distribution and solving these equations using estimated
+moments, one can obtain approximations to the parameters of the target distribution. In some cases solving these
+equations only involves spectral decompositions of matrices or tensors and basic linear algebra operations (Anandkumar et al., 2012d;b). Since moment estimation can be
+performed in time linear in the number of examples, and
+the required algebraic operations involve dimensions independent of the number of training examples, this approach
+can provide extremely fast learning algorithms. In addition,
+statistical analyses show that these algorithms are robust to
+noise and can learn models satisfying some basic assumptions from samples of size polynomial in the relevant parameters (see Hsu et al., 2009; Anandkumar et al., 2012d;
+Balle & Mohri, 2012; Hsu & Kakade, 2013, and references
+therein).
+A witness of the generality of the method of moments is the
+wide and ever-growing class of models that can be learned
+1
+
+These authors contributed equally to this work.
+
+Methods of Moments for Stochastic Languages
+
+with this approach. These include multiple probabilistic
+models over sequences, such as HMM (Hsu et al., 2009;
+Anandkumar et al., 2012d;b), weighted automata (Bailly
+et al., 2009; Balle et al., 2012), predictive states representations (Boots et al., 2011; Hamilton et al., 2013), and
+variants thereof (Siddiqi et al., 2010; Balle et al., 2011;
+Stratos et al., 2013; Bailly et al., 2013b). Building on
+top of these sequential models, algorithms for learning
+context-free formalisms used in natural language processing have been proposed (Bailly et al., 2010; 2013a; Cohen
+et al., 2012; 2013; Luque et al., 2012; Dhillon et al., 2012).
+Other classes of latent variable models known to be learnable using this approach include: multiple classes of treestructured graphical models (Parikh et al., 2011; Song et al.,
+2013); mixture, admixture, and topic models (Anandkumar
+et al., 2012c;a;b;d; Chaganty & Liang, 2013); and community detection models (Anandkumar et al., 2013). Furthermore, the method can be extended using features functions
+(Boots et al., 2011; Recasens & Quattoni, 2013) and kernelized to deal with continuous observation spaces (Song
+et al., 2010; Boots et al., 2013).
+Despite the expectations and promises raised by this new
+class of methods, their use is far from widespread in applied
+domains. In particular, few works in this area report empirical results, and in most cases these address only fairly restricted tasks. Therefore, it is unclear at this point whether
+methods of moments can provide truly competitive learning algorithms for wide ranges of problems and match the
+expectations set forward by their theoretical appeal. One
+explanation for this is that most of the papers describing
+the fundamentals of these methods provide very little or no
+implementation details – a notable exception being (Cohen
+et al., 2013). In addition, although competitive results have
+been obtained using methods of moments in NLP (Cohen
+et al., 2013; Balle et al., 2013) and robotics (Boots et al.,
+2011), naive implementations tend to perform much worse
+than expected, and significant amounts of tuning and optimization are needed to obtain fast and accurate algorithms.
+The goal of this paper is to present a unified review of
+three different methods of moments in the context of learning hidden Markov models (HMM) and other probabilistic
+models over sequences. We consider the SVD-based algorithm from (Hsu et al., 2009), the convex optimization
+approach described in (Balle et al., 2012), and the symmetric tensor decomposition framework of (Anandkumar et al.,
+2012b). We choose these three methods because they are
+the easiest to present in our context, and in addition, almost
+every other algorithm based on the method of moments
+uses (variations of) these as a subroutine. Our comparison touches upon several aspects of these algorithms that
+we believe have been neglected in previous works. First, by
+giving a unified presentation we are able to stress the sometimes subtle differences between the three methods and dis-
+
+cuss in which settings is each of them statistically consistent. And using this unified theoretical framework we provide a novel algebraic proof of consistency for one of the
+three methods (symmetric tensor decomposition). Then we
+present empirical experiments with synthetic and real data
+comparing between these algorithms and EM. By presenting results using two different accuracy metrics (word error rate and perplexity), our experiments unveil some interesting subtleties about the different methods. Finally, we
+provide a thorough description of implementation details
+required to make each method scalable and accurate.2
+
+2. Stochastic Languages and Automata
+2.1. Notation
+We use bold letters to denote vectors v ∈ Rd , matrices
+M ∈ Rd1 ×d2 , and third order tensors T ∈ Rd1 ×d2 ×d3 .
+Given a matrix M we write kMkF for its Frobenius norm
+and kMk∗ for its trace/nuclear norm. We use M+ to denote the Moore–Penrose pseudo-inverse of M. Sometimes
+we shall give names to the columns and rows of a matrix
+using ordered index sets I and J . In this case we will write
+M ∈ RI×J to denote a matrix of size |I| × |J | with rows
+indexed by I and columns indexed by J .
+A matrix M ∈ Rd×d is symmetric if M = M> . Similarly, a tensor T ∈ Rd×d×d is symmetric if for any permutation ρ of the set {1, 2, 3} we have T = Tρ , where
+Tρ (i1 , i2 , i3 ) = T(iρ(1) , iρ(2) , iρ(3) ) for every i1 , i2 , i3 ∈
+[d]. Given vectors vi ∈ Rdi for 1 ≤ i ≤ 3, we can take tensor products to obtain matrices v1 ⊗ v2 = v1 v2> ∈ Rd1 ×d2
+and tensors v1 ⊗ v2 ⊗ v3 ∈ Rd1 ×d2 ×d3 . For convenience
+we also write v ⊗ v ⊗ v = v⊗3 , which is a third order
+symmetric tensor.
+0
+
+Given a tensor T ∈ Rd1 ×d2 ×d3 and matrices Mi ∈ Rdi ×di
+we consider the contraction operation that produces a ten0
+0
+0
+sor T0 = T(M1 , M2 , M3 ) ∈ Rd1 ×d2 ×d3 with entries
+0
+given by Tj1 j2 j3 = M1i1 j1 M2i2 j2 M3i3 j3 Ti1 i2 i3 , where
+we used Einstein’s summation convention.
+Let Σ be a finite alphabet. We use Σ? to denote the set
+of all finite strings over Σ, and we write λ for the empty
+string. Given two strings u, v ∈ Σ? we write w = uv
+for their concatenation, in which case we say that u is a
+prefix of w, and v is a suffix of w. Given two sets of strings
+P, S ⊆ Σ? we write PS for the set obtained by taking
+every string of the form uv with u ∈ P and v ∈ S. When
+singletons are involved, we write uS instead ofP
+{u}S. If f :
+Σ? → R is a function, we use f (P) to denote u∈P f (u).
+Given strings u, v ∈ Σ? , we denote by |v|u the number of
+occurrences of u as a substring of v.
+2
+
+Code available here:
+https://github.com/ICML14MoMCompare/
+
+Methods of Moments for Stochastic Languages
+
+2.2. Latent Variable Models
+A stochastic language is a probability distribution over Σ? .
+More formally, it is a function fP: Σ? → R such that
+f (x) ≥ 0 for every x ∈ Σ? and x∈Σ? f (x) = 1. The
+main learning problem we consider in this paper is to infer
+a stochastic language fˆ from a sample S = (x1 , . . . , xm )
+of i.i.d. strings generated from some f . In order to give
+a succinct representation for fˆ we use hypothesis classes
+based on finite automata. In the following we present several types of automata that are used throughout the paper.
+A weighted automaton (WA) over Σ is a tuple A =
+hα0 , α∞ , {Aσ }σ∈Σ i, with α0 , α∞ ∈ Rn and Aσ ∈
+Rn×n . The vectors α0 and α∞ are called the initial and
+final weights, respectively. Matrices Aσ are transition
+operators. The size n of these objects is the number of
+states of A. A weighted automaton A computes a function
+fA : Σ? → R as follows:
+>
+fA (x1 · · · xt ) = α>
+0 Ax1 · · · Axt α∞ = α0 Ax α∞ . (1)
+
+A function f : Σ? → R is realized by A if fA = f . If fA
+is a stochastic language, then A is a stochastic automaton.
+A learning task one might consider in this setting is the
+following: assuming the target stochastic language can be
+realized by some WA, try to find a stochastic WA realizing
+approximately the same distribution (w.r.t. some metric).
+The methods given in (Hsu et al., 2009; Bailly et al., 2009)
+– which we review in Section 3 – can be used to solve this
+problem, provided one is content with a WA A such that
+fˆ = fA approximates f but is not necessarily stochastic. It
+turns out that this is an essential limitation of using WA as
+a hypothesis class: in general, checking whether a WA A
+is stochastic is an undecidable problem (Denis & Esposito,
+2008). Thus, if one imperatively needs the hypothesis to be
+a probability distribution, it is necessary to consider methods that produce a WA which is stochastic by construction (e.g., a probabilistic automaton). Alternatively one can
+employ heuristics to approximate a probability distribution
+with a WA which is not stochastic (see Section 4.2).
+A probabilistic automaton (PA) is a WA A =
+hα0 , α∞ , {Aσ }i where the weights satisfy (1) α0 ≥ 0,
+with α>
+0 1 = 1 and (2) α∞ ≥ 0, Aσ ≥ 0, with
+P
+A
+1 + α∞ = 1. These conditions say that α0 can
+σ
+σ
+be interpreted as probabilities of starting in each state and
+that Aσ and α∞ define a collection of emission/transition
+and stopping probabilities. It is easy to check that PA are
+stochastic by construction; that is, when A is a PA the function fA is a stochastic language. A deterministic PA (DPA)
+is a PA where α0 (i) = 1 for some i ∈ [n], and for every
+σ ∈ Σ and every i ∈ [n] there exists a unique j ∈ [n] such
+that Aσ (i, j) > 0.
+A factorized weighted automaton (FWA) is a tuple A =
+
+hα0 , α∞ , T, {Oσ }σ∈Σ i with initial and final weights
+α0 , α∞ ∈ Rn , transition weights T ∈ Rn×n , and emission weights Oσ ∈ Rn×n , where the matrices Oσ are diagonal. One can readily transform a FWA into a WA by
+taking B = hβ 0 , β ∞ , {Bσ }i with β 0 = α0 , β ∞ = α∞ ,
+and Bσ = Oσ T. A hidden Markov model (HMM) is a
+FWA where the weights satisfy (1) α0 ≥ 0 with α>
+0 1 = 1,
+(2) TP≥ 0 with T1 = 1, and (3) α∞ ≥ 0, Oσ ≥ 0,
+with
+σ Oσ 1 + α∞ = 1. It can be easily checked
+that these conditions imply that the WA obtained from a
+HMM is a PA. For convenience, given a HMM we also
+define the observation matrix O ∈ RΣ×n with entries
+O(σ, i) = Oσ (i, i).
+Note that unlike with WA, both PA and HMM readily define probability distributions. But this comes at a price:
+there are stochastic WA realizing probability distributions
+that cannot be realized by any PA or HMM with a finite number of states (Denis & Esposito, 2008). In terms
+of representational power, both PA and HMM are equivalent when the number of states is unrestricted. However, in general PA provide more compact representations:
+given a PA with n states one can always obtain an HMM
+with min{n2 , n|Σ|} states realizing the same distribution.
+Moreover, there are PA with n states such that every HMM
+realizing the same distribution needs more than n states
+(Dupont et al., 2005). These facts imply that different hypothesis classes for learning stochastic languages impose
+different limitations upon the learned representation.
+Given a stochastic language f that assigns probabilities to
+strings, there are two functions computing aggregate statistics that one can consider: f p for probabilities of prefixes,
+and f s for expected number of occurrencesP
+of substrings.
+In particular, we have f p (x) = fP
+(xΣ? ) = y∈Σ? f (xy),
+and f s (x) = Ey∼f [|y|x ] =
+Note
+y,z∈Σ? f (yxz).
+that given a sample S of size m generated from f , it
+is equally easy to
+estimate the empirical probabilities
+Pm
+fˆS (x) = (1/m) i=1 I[xi = x], as well as empirical
+Pm
+prefix probabilities fˆSp (x) = (1/m) i=1 I[xi ∈ xΣ? ]
+and empirical
+occurrence expectations fˆSs (x) =
+Pm substring
+i
+(1/m) i=1 |x |x . It is shown in (Balle et al., 2013) that
+when f is realized by a WA, PA, or HMM, then so are f p
+and f s . This result provides an explicit conversion that preserves the number of states and that can be easily reversed.
+Therefore, in terms of learning algorithms, one can work
+with any of these three representations indistinctively.
+2.3. Learning Latent Variable Models with EM
+EM is an iterative algorithm for locally maximizing
+the non-convex log-likelihood function (Dempster et al.,
+1977). It alternates between two types of steps: an expectation (E) step, where the expected distribution of the hidden variables are computed, and a maximization (M) step,
+
+Methods of Moments for Stochastic Languages
+
+where the parameters of the model are updated by maximizing the joint likelihood of the observed data and the
+expected hidden variables’ distributions. To avoid getting
+stuck in local maxima, restarts and other heuristics are usually necessary (Hulden, 2012). In practice, given enough
+time to explore the space of parameters these heuristics
+yield very competitive models (e.g., Verwer et al., 2012).
+
+3. Learning Algorithms Based on the Method
+of Moments
+The key idea behind method of moments algorithms is to
+derive equations relating the parameters of some stochastic
+automaton realizing the target distribution to statistics of
+the distribution. Then, using estimations of these statistics
+computed from observed data, one can solve these equations for the parameters of a hypothesis model. In the case
+of rational stochastic languages, these equations involve
+mostly linear algebra operations that can be solved using
+several methods. In this section we describe three algorithms for solving these equations. Our selection is representative of the possible approaches to the method of moments, all of which involve either singular value decompositions, convex optimization, or symmetric tensor decompositions. For ease of presentation, we assume that we have
+access to the target stochastic language f , which can be
+used to compute the probability f (x) of any string x ∈ Σ? .
+Very few modifications are needed when the algorithms are
+applied to empirical estimates fˆS computed from a sample S. We give detailed descriptions of these modifications
+wherever they are needed.
+3.1. Singular Value Decomposition Method
+A key step underlying the method of moments algorithms
+for learning stochastic languages is the arrangement of a
+finite set of values of f into a matrices or tensors in a
+way such that spectral factorizations of these linear objects reveal information about the operators of a WA, PA,
+or HMM realizing f . As a simple example, consider
+f = fA for some WA A = hα0 , α∞ , {Aσ }i with n
+states. Given two sets of strings P, S ⊂ Σ? which we
+call prefixes and suffixes, consider the matrix H ∈ RP×S
+with entries given by H(u, v) = f (uv). This is the Hankel matrix3 of f on prefixes P and suffixes S. Writing
+f (u, v) = (α>
+0 Au )(Av α∞ ) we see that this Hankel matrix can be written as H = PS, where P ∈ RP×n with
+n×S
+the uth row equal to α>
+with vth col0 Au , and S ∈ R
+umn equal to Av α∞ . Then it is easy to see that the Hankel
+matrix Hσ ∈ RP×S with entries Hσ (u, v) = f (uσv) for
+3
+In real analysis a matrix M is Hankel if M(i, j) = M(k, l)
+whenever i+j = k+l, which implies that M is symmetric. In our
+case we have H(u, v) = H(w, z) whenever uv = wz, but H is
+not symmetric because string concatenation is not commutative.
+
+some σ ∈ Σ can be written as Hσ = PAσ S. Thus, a way
+to recover the operators Aσ of A is to obtain a factorization H = PS and use it to solve for Aσ in the expression
+of Hσ . In practice H is factorized via a singular value decomposition, hence the name spectral method.
+We now proceed to give the details of the algorithm, which
+is based on (Hsu et al., 2009; Bailly et al., 2009). The algorithm computes a minimal WA that approximates f but
+which, in general, is not stochastic. As input, the method
+requires sets of prefixes and suffixes P, S ⊂ Σ? , and the
+number of states n of the target automaton.
+The algorithm starts by computing the Hankel matrices
+H, Hσ ∈ RP×S for each σ ∈ Σ. It also computes vectors hλ,S ∈ RS with hλ,S (v) = f (v) and hP,λ ∈ RP with
+hP,λ (u) = f (u). Next, it computes the reduced SVD4 decomposition H = UDV> with U ∈ RP×n , V ∈ RS×n
+and diagonal D ∈ Rn×n . The algorithm then returns
+>
+a WA A = hα0 , α∞ , {Aσ }i given by α>
+0 = hλ,S V,
+−1 >
+−1 >
+α∞ = D U hP,λ , and Aσ = D U Hσ V.
+3.2. Convex Optimization Method
+This method recovers the operators of a WA by solving
+an optimization problem involving the sum of a Frobenius
+norm loss and a trace norm regularizer. As with the SVD
+method, the learned WA is not stochastic by construction.
+To motivate the algorithm, recall from the previous section that if f is computed by a WA with n states, then
+a Hankel matrix of f admits a factorization of the form
+H = PS, P ∈ RP×n , S ∈ Rn×S . Now suppose that
+P has rank n. Then, taking Bσ = PAσ P+ ∈ RP×P
+we have Bσ H = Hσ and rank(Bσ ) ≤ n. Since the WA
+> +
+given by B = hβ 0 , β ∞ , {Bσ }i with β >
+0 = α0 P and
+β ∞ = Pα∞ satisfies fA = fB , this motivates an algorithm that looks for a low-rank solution of MH = Hσ .
+An algorithm based on this principle is described in (Balle
+et al., 2012). As input, the method requires sets of prefixes
+P and suffixes S with λ ∈ P ∩ S, and a regularization
+parameter τ > 0. The number of states of the WA produced
+by this algorithm is equal to the number of prefixes |P|.
+The algorithm starts by computing two Hankel matrices
+H ∈ RP×S and HΣ ∈ RPΣ×S , where H is defined like
+before, and HΣ (uσ, v) = f (uσv). Note that because we
+have λ ∈ P ∩ S, now the vectors hP,λ and hλ,S are contained inside of H. The operators of the hypothesis are
+obtained by solving the optimization problem
+AΣ ∈ argmin
+M∈RPΣ×P
+
+kMH − HΣ k2F + τ kMk∗ ,
+
+(2)
+
+and then taking the submatrices Aσ ∈ RP×P given by
+4
+When using an approximation Ĥ, the algorithm computes
+the n-truncated SVD instead.
+
+Methods of Moments for Stochastic Languages
+
+Aσ (u, u0 ) = AΣ (uσ, u0 ). The output automaton is obtained by taking A = hα0 , α∞ , {Aσ }i, with the operators
+recovered from AΣ , α0 = eλ the indicator vector corresponding to the empty prefix, and α∞ = hP,λ .
+3.3. Symmetric Tensor Decomposition Method
+The tensor decomposition method can be applied when the
+target distribution is generated by a HMM. The idea behind
+this approach is to observe that when f can be realized by
+a FWA, then the factorization of the Hankel matrix associated with a symbol σ ∈ Σ becomes Hσ = POσ TS. Since
+P, S, and T appear in the decomposition for all σ, and Oσ
+is diagonal, this implies that under some assumptions on
+the ranks of these matrices, all the Hσ admit a joint diagonalization. Stacking these matrices together yields a Hankel tensor HP,Σ,S ∈ RP×Σ×S with a particular structure
+that can be exploited to recover first O, and then the transition matrix T and the weight vectors α0 and α∞ . The
+algorithm we describe in this section implements this idea
+by following the symmetrization and whitening approach
+of (Anandkumar et al., 2012b). Our presentation is a variant of their method, which extends the method to work with
+arbitrary sets of prefixes P and suffixes S, and also is able
+to recover the set of stopping probabilities. We present a
+consistency analysis of this variant in the Supplementary
+Material.
+Again, the method needs as input sets of prefixes P and
+suffixes S with λ ∈ P ∩ S, and the number of states
+n of the target HMM, which must satisfy n ≤ |Σ|.
+The algorithm proceeds in four stages. In its first stage,
+the algorithm computes a set of Hankel matrices and
+tensors. In particular, a third order tensor HP,Σ,S ∈
+RP×Σ×S with entries HP,Σ,S (u, σ, v) = f (uσv), a Hankel matrix HP,S ∈ RP×S with entries HP,S (u, v) =
+f (uv), and a Hankel matrix HpP,Σ ∈ RP×Σ with entries HpP,Σ (u, σ) = f (uσΣ? ). Integrating over the different dimensions of the tensor HP,Σ,S , the algorithm obtains three morePmatrices: H̄Σ,S ∈ RΣ×S with entries
+H̄Σ,S (σ, v) = P u f (uσv), H̄P,S ∈ RP×S with entries
+H̄P,S (u, v) = σ fP
+(uσv), and H̄P,Σ ∈ RP×Σ with entries H̄P,Σ (u, σ) = v f (uσv).
+The goal of the second stage is to obtain an orthogonal
+decomposition of a tensor derived from HP,Σ,S as follows. Assuming H̄P,S has rank at least n, the algorithm
+first finds matrices QP ∈ Rn×P and QS ∈ Rn×S such
+that H̃P,S = QP H̄P,S Q>
+S is invertible, and then com> −1
+putes N = QS H̃P,S QP ∈ RS×P . Combining these, a
+matrix XΣ ∈ RΣ×Σ and a tensor YΣ ∈ RΣ×Σ×Σ are
+obtained as follows: XΣ = H̄Σ,S NH̄P,Σ , and YΣ =
+HP,Σ,S (N> H̄>
+Σ,S , I, NH̄P,Σ ). One can show that both
+
+XΣ and YΣ are symmetric.5 Then, assuming XΣ is positive definite of rank at least n, we can find W ∈ RΣ×n
+such that W> XΣ W = I. This is used to whiten the tensor YΣ by taking ZΣ = YΣ (W, W, W) ∈ Rn×n×n .
+Next we compute
+the robust orthogonal eigendecomposiP
+⊗3
+tion ZΣ =
+using a power method for teni∈[n] γi zi
+sors similar to that used to compute eigendecompositions
+of matrices (Anandkumar et al., 2012b). Using these robust
+eigenpairs (γi , zi ) we build a matrix Õ ∈ RΣ×n whose ith
+column is γi (W> )+ zi . After a normalization operation,
+this will be the observation matrix of the output model.
+The third stage recovers the rest of parameters (up to normalization) via a series of matrix manipulations. Let ÕP =
++
+n×S
+H̄P,Σ (Õ> )+ ∈ RP×n and Õ>
+. We
+S = Õ H̄Σ,S ∈ R
+>
+>
+>
+start by taking α̃0 = eλ ÕP and α̃∞ = ÕS eλ : respectively, the rows of ÕP and ÕS corresponding to λ. Simi+
+larly, the algorithm computes T̃ = Õ+
+P H̄P,S HP,S ÕP ∈
+n×n
+R
+.
+In the last stage the model parameters are normalized
+as follows. Let D̃γ = diag(γ12 , . . . , γn2 ) ∈ Rn×n and
++
+D̃S = Õ> HpP,Σ ÕP ∈ Rn×n . To obtain α∞ we
+first compute β = D̃S T̃+ D̃γ α̃∞ ∈ Rn and then let
+α∞ (i) = β(i)/(1 + β(i)). The initial weights are ob> + +
+tained as α>
+0 = α̃0 D̃Σ D̃S , where D̃Σ = I − diag(α∞ ).
++
+Finally, we let O = ÕD̃Σ and T = D̃S T̃D̃+
+S D̃Σ . When
+working with empirical approximations these matrices are
+not guaranteed to satisfy the requirements in the definition
+of a HMM. In this case, a last step is necessary to enforce
+the constraints by projecting the parameters into the simplex (Duchi et al., 2008).
+One important benefit of the symmetric tensor decomposition approach is that, since it returns proper HMM parameters, it can be used to initialize other optimization algorithms (e.g., maximum likelihood methods such as EM).
+3.4. Statistical Guarantees
+Under some natural assumptions, these three methods are
+known to be consistent. Assuming the Hankel matrices and
+tensors are computed from a WA with n states, the SVD
+and convex optimization methods are consistent whenever
+H has rank n (Hsu et al., 2009; Balle et al., 2012). To guarantee the consistency of the tensor decomposition method
+we require that f can be realized by some HMM with
+n ≤ |Σ| states and H̄P,S has rank n (see (Anandkumar
+et al., 2012b) and the proof in the Supplementary Material). We note that in most cases, whether these conditions
+are satisfied or not may depend on our choice of P and S.
+5
+When working with approximate Hankel matrices and tensors this is not necessarily true. Thus one P
+needs to consider the
+ρ
+symmetrized versions (XΣ + X>
+Σ )/2 and
+ρ YΣ /6, where the
+sum is taken over all the permutations ρ of {1, 2, 3}.
+
+Methods of Moments for Stochastic Languages
+
+4. Empirical Comparison
+We compare the empirical performance of the methods described above using two contrasting performance metrics
+on synthetic data and a real-world natural language processing (NLP) task. The goal of this analysis is to elucidate
+the performance and implementation tradeoffs between the
+different moment-based methods, while comparing them to
+a state-of-the-art EM baseline.
+4.1. Methods Compared
+The following methods are compared: Spec-Str, the spectral method (3.1) applied to empirical estimates fˆS ; SpecSub, the spectral method (3.1) applied to empirical estimates fˆSs ; CO, the convex optimization method (3.2) applied to empirical estimates fˆSs and using the alternating
+direction method of multipliers (ADMM) (Boyd et al.,
+2011) optimization algorithm; Tensor, the symmetric tensor decomposition method using the tensor-power method
+(Anandkumar et al., 2012b) (3.3) applied to empirical estimates fˆS ; EM, an optimized implementation6 of the BaumWelch algorithm (Dempster et al., 1977); EM-Tensor, the
+EM method initialized with the solution from the tensor
+method.
+Versions of the spectral method using both string (fˆS ) and
+substring (fˆSs ) estimates are included in order to demonstrate a basic tradeoff: using fˆSs maximizes the amount of
+information extracted from training data but leads to dense
+Hankel matrices while using fˆS leads to sparse Hankel matrix estimates. The CO method uses fˆSs as its complexity scales with the size of the Hankel matrix and the optimization routines do not preserve sparsity. The tensor
+method uses fˆS , as our implementation relies on exploiting the sparsity of the Hankel estimates.
+Table 1 summarizes important characteristic and implementation details for the different moment-based methods.7
+6
+
+The Treba EM library (Hulden, 2012) was used.
+The (subjective) implementation difficulty simply highlights
+significant disparities. Code lengths do not include libraries.
+7
+
+8
+7
+
+Runtime [log(sec)]
+
+Finite sample bounds can also be obtained for some of
+these methods, which show that the error of method of moments typically decreases at a parametric rate Op (m−1/2 ).
+Moreover, explicit dependencies on several task-related parameters can be obtained with these types of analyses. In
+the case of stochastic languages, one obtains bounds that
+depend polynomially on the number of states n, the alphabet size |Σ|, the dimensions of the Hankel matrices
+p
+|P||S|, and the nth singular value of H (see Hsu et al.,
+2009; Anandkumar et al., 2012b; Hsu & Kakade, 2013;
+Balle, 2013, for explicit bounds and further pointers) .
+
+Initialization
+Model Building
+
+6
+5
+4
+3
+2
+1
+0
+Spec-Str
+
+Spec-Sub
+
+CO
+
+Tensor
+
+EM
+
+Figure 1. Runtimes (log scale) for initializing and building models of size 10, 20, and 30 on a synthetic 12-symbol domain.
+
+4.2. Performance Metrics
+We examine two contrasting performance metrics: one
+based upon perplexity and the other on word-error-rate
+(WER). We define thePperplexity of a model M on a test set
+T as: Per(M) = 2− x∈T p∗ (x) log(pM (x)) , where p∗ (x) is
+the true probability of the string (estimated as its empirical frequency in the test set if necessary) and pM (x) is the
+probability assigned to the string by the model. For the
+spectral methods and the CO method, the models are not
+guaranteed to return true probabilities, so thresholding to
+(0,1] is employed (see Cohen et al., 2013, for a discussion
+of other possible heuristics). In contrast, the WER metric measures the fraction of incorrectly predicted symbols
+when, for each prefix of strings in the test set, the most
+likely next symbol is predicted.
+4.3. Hyper-parameter optimization
+To ensure a fair comparison, the only hyper-optimization
+performed for each domain was a search for the best modelsize, or in the case of CO, a search for τ . The searchschedule was fixed across all domains but was not uniform across all methods. In particular, (1) EM is ordersof-magnitude slower than the other methods (see Figure
+1), necessitating a more coarse-grained search, and (2) for
+tensor decomposition the space of model-sizes is upperbounded by |Σ|, restricting the search. Further details can
+be found in the Supplementary Material.
+4.4. Synthetic Experiments
+We tested the algorithms on 12 synthetic problems taken
+from the set of problems used in the PAutomaC competition (Verwer et al., 2012). These domains were selected to
+represent a diverse sampling of possible target stochastic
+languages. The different classes of models used to generate the datasets are HMM, PA, and DPA. We selected four
+models from each of these classes, such that within each
+class exactly half of the problems have the property that
+n < |Σ|. Table A.1 in (Verwer et al., 2012) provides de-
+
+Methods of Moments for Stochastic Languages
+Table 1. Characterizing the different moment-based methods according to their time complexities (for n-state models) and implementation difficulty. Advanced techniques used to make the algorithms scalable and improve performance are highlighted.
+Method
+
+Implementation Difficulty
+
+Advanced Techniques
+
+Spectral
+
+EASY
+(≈ 100-200 Python lines)
+
+CO
+
+HARD
+(≈ 1000-1250 Python + C++ lines)
+
+Tensor
+
+MEDIUM
+(≈ 750-1000 Python + C++ lines)
+
+• Feature-variance normalizing (Cohen et al., 2013).
+• Randomized SVD (Halko et al., 2011).
+• ADMM (with over-relaxation and inexact proximal
+operators) (Boyd et al., 2011).
+• Randomized SVD.
+• Sparse LSQR (Paige & Saunders, 1982).
+• Simplex projection (Duchi et al., 2008).
+
+Time Complexity
+
+Returns
+PA
+
+O(n|Σ||P||S|)
+
+No
+
+O(|Σ||P|3 ) per iteration
+
+No
+
+O((|Σ| + n)|P||S| + Rn2 ), where R
+is # of tensor-power iterations
+
+Yes
+
+Table 2. Performance of difference methods on synthetic data in terms of WER. Model sizes (or the τ order) are listed in parentheses.
+The WER of the true model use to generate the data is included for comparison. Note that the WER of a learned model can be lower
+than that of the true model on the test data, as WER relies on scores not probability assignments.
+Type
+
+ID
+
+|Σ| ≥ n
+
+Spec-Str
+
+Spec-Sub
+
+CO
+
+Tensor
+
+EM
+
+EM-Tensor
+
+True
+
+HMM
+
+1
+14
+33
+45
+
+7
+7
+3
+3
+
+80.3 (72)
+70.0 (6)
+78.7 (3)
+80.2 (2)
+
+71.3 (31)
+70.2 (10)
+76.7 (3)
+80.1 (10)
+
+89.8 (10−5 )
+85.2 (10−5 )
+95.3 (10−3 )
+90.1 (10−5 )
+
+86.4 (3)
+89.4 (3)
+83.6 (3)
+87.9 (3)
+
+75.7 (10)
+68.6 (20)
+74.3 (20)
+78.1 (10)
+
+78.2 (3)
+75.5 (3)
+76.7 (3)
+70.1 (3)
+
+68.8 (63)
+68.4 (15)
+74.1 (13)
+78.1 (14)
+
+PA
+
+29
+39
+43
+46
+
+7
+3
+7
+3
+
+65.7 (70)
+66.2 (32)
+83.4 (10)
+90.7 (20)
+
+47.3 (41)
+62.0 (30)
+78.0 (12)
+79.3 (20)
+
+67.1 (10−3 )
+83.4 (10−5 )
+89.2 (10−5 )
+95.7 (10−5 )
+
+88.7 (3)
+93.2 (4)
+89.3 (3)
+95.5 (4)
+
+49.2 (40)
+63.3 (30)
+77.4 (40)
+77.5 (40)
+
+74.1 (3)
+71.3 (4)
+78.1 (3)
+80.4 (4)
+
+47.2 (36)
+59.3 (6)
+77.1 (67)
+77.3 (19)
+
+DPA
+
+6
+7
+27
+42
+
+7
+3
+7
+3
+
+62.0 (20)
+95.7 (10)
+83.1 (50)
+67.8 (40)
+
+50.2 (68)
+50.6 (20)
+75.5 (22)
+61.4 (16)
+
+78.1 (10−5 )
+66.0 (10−3 )
+91.3 (10−4 )
+73.9 (10−4 )
+
+59.7 (5)
+81.4 (4)
+92.1 (7)
+92.5 (5)
+
+47.4 (40)
+48.1 (40)
+83.0 (10)
+58.1 (40)
+
+59.7 (5)
+87.2 (4)
+83.8 (7)
+75.7 (5)
+
+46.9 (19)
+48.3 (12)
+73.0 (19)
+56.6 (6)
+
+tailed descriptions of these different problems.
+Table 2 summarizes the performance of the different methods in terms of WER and Table 3 the performance in terms
+of perplexity.
+Several conclusions can be drawn from these results. First,
+we note that Spec-Sub and EM are the top performers in
+terms of WER. And though EM outperforms Spec-Sub on
+a majority of domains, their performance is quite close
+(compared to the gap between those two and the other algorithms), while Spec-Sub is 40x faster. In terms of perplexity EM and CO are the top-performers; EM performs
+best on a majority of domains but with a large penalty in
+terms of runtime. We also observe that the tensor decomposition initialized EM method usually outperformed the
+tensor method alone in terms of WER; in terms of perplexity its behavior was more erratic.
+Figure 1 summarizes a representative example of the runtime costs of the algorithms, distinguishing between initialization and model-building phases. For the momentmethods, the Hankel matrices (and their spectral decompositions) only need to be computed once prior to hyperparameter optimization. This represents a major advantage
+of the moment-based methods compared to EM, where no
+computation results are reused.
+4.5. Natural Language Processing Problem
+In addition to synthetic experiments, we compared the
+methods performance on a NLP task. In this task the
+
+methods were used to learn a model of the parts-of-speech
+(POS) tags from the Penn-Treebank Corpus (Marcus et al.,
+1993). There are 11 distinct POS tags in the task, so
+|Σ| = 11.
+Table 4 summarizes the performance of the algorithms on
+the NLP data. Here, we again see that EM is the top performer in terms of WER with the Spec-Sub method performing only slightly worse. In terms of perplexity the CO
+method outperforms all the other methods by a large margin. Overall, the results on the NLP data reinforce the conclusions reached via the synthetic experiments.
+
+5. Discussion
+In this work we provided a unified presentation of three
+methods of moments for learning probabilistic models over
+stochastic languages. Beyond providing a solid and unified
+foundation for cross-method comparisons, this presentation
+also extended the symmetric tensor decomposition method
+to work with arbitrary prefix and suffix bases.
+With this foundation in place, we discussed several concrete instantiations of these approaches, highlighting implementation techniques that are necessary for scalability and performance, and we empirically compared these
+methods, along with an EM baseline, on both synthetic
+and real-world data. The synthetic experiments elucidated
+several important performance trends, which we hope will
+serve as aids for future research in this area and as impetus
+for the adoption of moment-based methods in applied set-
+
+Methods of Moments for Stochastic Languages
+Table 3. Performance of difference methods on synthetic data in terms of perplexity. Model sizes (or the τ order) are listed in parentheses.
+The perplexity of the true model use to generate the data is included for comparison.
+Type
+
+ID
+
+|Σ| ≥ n
+
+Spec-Str
+
+Spec-Sub
+
+CO
+
+Tensor
+
+EM
+
+EM-Tensor
+
+True
+
+HMM
+
+1
+14
+33
+45
+
+7
+7
+3
+3
+
+≈ 109 (40)
+306.30 (1)
+51.14 (3)
+≈ 106 (70)
+
+441.07 (8)
+133.71 (30)
+49.22 (4)
+31.87 (19)
+
+44.77 (10−5 )
+128.53 (10−3 )
+57.05 (10−5 )
+36.6 (10−5 )
+
+66.8 (3)
+253.44 (3)
+60.04 (3)
+40.47 (7)
+
+500.1 (30)
+116.84 (20)
+32.14 (10)
+107.75 (40)
+
+126.14 (3)
+133.09 (3)
+32.21 (3)
+62.24 (7)
+
+29.90 (63)
+116.80 (15)
+31.87 (13)
+24.04 (14)
+
+PA
+
+29
+39
+43
+46
+
+7
+3
+7
+3
+
+≈ 105 (41)
+8170.69 (8)
+≈ 106 (2)
+44.12 (2)
+
+39.32 (49)
+42.8 (30)
+115.62 (4)
+34.51 (26)
+
+34.57 (10−4 )
+11.24 (10−2 )
+36.61 (10−2 )
+25.28 (10−5 )
+
+≈ 1014 (3)
+22.42 (5)
+36.90 (3)
+32.1 (4)
+
+25.09 (40)
+10.43 (5)
+461.23 (40)
+12.02 (40)
+
+80.55 (3)
+11.34 (5)
+56.94 (3)
+14.26 (4)
+
+24.03 (36)
+10.00 (6)
+32.64 (67)
+11.98 (19)
+
+DPA
+
+6
+7
+27
+42
+
+7
+3
+7
+3
+
+≈ 109 (56)
+999.83 (4)
+≈ 106 (21)
+≈ 105 (12)
+
+95.12 (40)
+70.24 (48)
+238.48 (19)
+59.43 (31)
+
+104.68 (10−5 )
+62.74 (10−5 )
+102.85 (10−5 )
+23.91 (10−2 )
+
+691.28 (3)
+664.53 (5)
+212.22 (4)
+39.00 (5)
+
+67.32 (40)
+51.27 (40)
+94.90 (40)
+168.52 (40)
+
+247.07 (3)
+≈ 1016 (5)
+71.63 (4)
+292.90 (5)
+
+66.96 (19)
+51.22 (12)
+42.43 (19)
+16.00 (6)
+
+Table 4. Performance of difference methods on 11-symbol NLP dataset in terms of both WER and perplexity. Model sizes (or the τ
+order) are listed in parentheses.
+Metric
+
+Spec-Str
+
+Spec-Sub
+
+CO
+
+Tensor
+
+EM
+
+EM-Tensor
+
+WER
+Perplexity
+
+66.6 (38)
+4.03 · 1015 (70)
+
+60.43 (46)
+1.00 · 1014 (9)
+
+84.7 (10−5 )
+4.15 · 109 (10−3 )
+
+85.3 (3)
+4.99 · 1014 (7)
+
+59.8 (20)
+1.33 · 1013 (2)
+
+62.6 (3)
+2.43 · 1013 (7)
+
+tings. The NLP experiment demonstrates that these trends
+appear to carry over to noisy real-world settings.
+With respect to the WER metric, the experiments demonstrated that the Spec-Sub method produces WER results
+competitive with EM with a speed-up factor of 40x. This
+makes Spec-Sub an attractive candidate for applications requiring low WERs, given its combination of speed, simplicity, and accuracy.
+With respect to model perplexity, the experiments demonstrated that the convex relaxation of the spectral method can
+produce highly accurate models. The good performance
+of CO in this setting is intriguing given its relatively poor
+WER performance and the fact that the algorithm is not
+guaranteed to return a PA (in contrast to the tensor and EM
+methods).
+It is should be noted, however, that EM was the topperformer on a majority of domains; though it is considerably more expensive in terms of runtime. This is an important finding as it demonstrates that an optimized implementation of EM with random restarts is not significantly disadvantaged by the issue of local-minima and that the primary
+drawback of EM compared to the moment-methods is its
+computational inefficiency, specially on large state spaces.
+Our experiments also elucidate other interesting properties
+of the methods. First, the results demonstrate that the advantage of using fˆSs estimates, which lead to dense Hankel
+estimates and extract more information from the training
+sample (compared to fˆ estimates), is quite pronounced in
+the case of the spectral method. In addition, these experiments highlight the unpredictable nature of initializing EM
+with a moment-based solution.
+
+Of course, for the sake of clarity of presentation and analysis, this empirical comparison did exclude certain settings
+and methods. We did not examine the effect of large or
+continuous alphabets, as in those cases the performance
+of moment-methods are contingent upon the feature representation or kernel embedding employed (Song et al.,
+2010; Boots et al., 2013). And we did not examine different methods of choosing prefix and suffix bases. However,
+both these issues are largely orthogonal to the core learning
+problem, as we expect all three moment-methods to benefit
+equally from feature-representations and basis selections.
+That said, our analysis offers a clear picture of the current empirical state-of-the-art in moment-based methods
+for modelling stochastic languages. This work also rises a
+number of important directions and open questions for future work. Of particular interest are problems such as: (1)
+establishing theoretical justification for CO’s strong performance on the perplexity metric; (2) relax the theoretical
+constraints of tensor-based methods; and (3) developing algorithms in which moment-initialized maximum likelihood
+optimization is guaranteed to improve solutions.
+
+Acknowledgments
+The authors are grateful to Animashree Anandkumar,
+Furong Huang, Percy Liang, and Andreu Mayo for sharing
+their implementations of some of the algorithms described
+in this paper. Financial support for this research was provided by the NSERC Discovery and CGS-M programs, and
+the James McGill Research Fund.
+
+Methods of Moments for Stochastic Languages
+
+References
+Anandkumar, A., Foster, D. P., Hsu, D., Kakade, S. M., and Liu,
+Y. A spectral algorithm for latent Dirichlet allocation. In NIPS,
+2012a.
+Anandkumar, A., Ge, R., Hsu, D., Kakade, S. M., and Telgarsky,
+M. Tensor decompositions for learning latent variable models.
+CoRR, abs/1210.7559, 2012b.
+Anandkumar, A., Hsu, D., Huang, F., and Kakade, S. M. Learning
+mixtures of tree graphical models. In NIPS, 2012c.
+Anandkumar, A., Hsu, D., and Kakade, S. M. A method of
+moments for mixture models and hidden Markov models. In
+COLT, 2012d.
+Anandkumar, A., Ge, R., Hsu, D., and Kakade, S. A tensor spectral approach to learning mixed membership community models. In COLT, 2013.
+Bailly, R., Denis, F., and Ralaivola, L. Grammatical inference as
+a principal component analysis problem. In ICML, 2009.
+Bailly, R., Habrard, A., and Denis, F. A spectral approach for
+probabilistic grammatical inference on trees. In ALT, 2010.
+Bailly, R., Carreras, X., Luque, F., and Quattoni, A. Unsupervised
+spectral learning of WCFG as low-rank matrix completion. In
+EMNLP, 2013a.
+Bailly, R., Carreras, X., and Quattoni, A. Unsupervised spectral
+learning of finite state transducers. In NIPS, 2013b.
+Balle, B. Learning Finite-State Machines: Algorithmic and
+Statistical Aspects. PhD thesis, Universitat Politècnica de
+Catalunya, 2013.
+Balle, B. and Mohri, M. Spectral learning of general weighted
+automata via constrained matrix completion. In NIPS, 2012.
+
+Denis, F. and Esposito, Y. On rational stochastic languages. Fundamenta Informaticae, 2008.
+Dhillon, P. S., Rodu, J., Collins, M., Foster, D. P., and Ungar,
+L. H. Spectral dependency parsing with latent variables. In
+EMNLP-CoNLL, 2012.
+Duchi, John, Shalev-Shwartz, Shai, Singer, Yoram, and Chandra,
+Tushar. Efficient projections onto the L1 -ball for learning in
+high dimensions. In ICML, 2008.
+Dupont, P., Denis, F., and Esposito, Y. Links between probabilistic automata and hidden Markov models: probability distributions, learning models and induction algorithms. Pattern
+Recognition, 2005.
+Halko, N., Martinsson, P., and Tropp, J. Finding structure with
+randomness: Probabilistic algorithms for constructing approximate matrix decompositions. SIAM Review, 53(2):217–288,
+2011.
+Hamilton, W.L., Fard, M.M., and Pineau, J. Modelling sparse
+dynamical systems with compressed predictive state representations. In ICML, 2013.
+Hsu, D., Kakade, S. M., and Zhang, T. A spectral algorithm for
+learning hidden Markov models. In COLT, 2009.
+Hsu, Daniel and Kakade, Sham M. Learning mixtures of spherical
+Gaussians: moment methods and spectral decompositions. In
+ITCS, 2013.
+Hulden, M. Treba: Efficient numerically stable EM for PFA. In
+ICGI, 2012.
+Luque, F.M., Quattoni, A., Balle, B., and Carreras, X. Spectral learning in non-deterministic dependency parsing. EACL,
+2012.
+
+Balle, B., Quattoni, A., and Carreras, X. A spectral learning algorithm for finite state transducers. In ECML-PKDD, 2011.
+
+Marcus, M., Marcinkiewicz, M., and Santorini, B. Building a
+large annotated corpus of english: The Penn Treebank. Computational linguistics, 19(2):313–330, 1993.
+
+Balle, B., Quattoni, A., and Carreras, X. Local loss optimization
+in operator models: A new insight into spectral learning. In
+ICML, 2012.
+
+Paige, C. and Saunders, M. LSQR: An algorithm for sparse linear equations and sparse least squares. ACM Transactions on
+Mathematical Software, 8(1):43–71, 1982.
+
+Balle, B., Carreras, X., Luque, F.M., and Quattoni, A. Spectral
+learning of weighted automata: A forward-backward perspective. Machine Learning, 2013.
+
+Parikh, A. P., Song, L., and Xing, E.P. A spectral algorithm for
+latent tree graphical models. In ICML, 2011.
+
+Boots, B., Siddiqi, S., and Gordon, G. Closing the learning planning loop with predictive state representations. International
+Journal of Robotics Research, 2011.
+Boots, B., Gretton, A., and Gordon, G. Hilbert space embeddings
+of predictive state representations. In UAI, 2013.
+Boyd, S., Parikh, N., Chu, E., Peleato, B., and Eckstein, J. Distributed optimization and statistical learning via the alternating
+direction method of multipliers. Foundations and Trends in
+Machine Learning, 2011.
+Chaganty, A. T. and Liang, P. Spectral experts for estimating
+mixtures of linear regressions. In ICML, 2013.
+Cohen, S. B., Stratos, K., Collins, M., Foster, D. P., and Ungar, L.
+Spectral learning of latent-variable PCFGs. ACL, 2012.
+Cohen, S. B., Stratos, K., Collins, M., Foster, D. P., and Ungar, L.
+Experiments with spectral learning of latent-variable PCFGs.
+In NAACL-HLT, 2013.
+Dempster, A. P., Laird, N. M., and Rubin, D. B. Maximum likelihood from incomplete data via the EM algorithm. Journal of
+the Royal Statistical Society, 1977.
+
+Pearson, K. Contributions to the mathematical theory of evolution. Philosophical Transactions of the Royal Society of London, 1894.
+Recasens, A. and Quattoni, A. Spectral learning of sequence taggers over continuous sequences. In ECML-PKDD, 2013.
+Siddiqi, S. M., Boots, B., and Gordon, G. Reduced-rank hidden
+Markov models. In AISTATS, 2010.
+Song, L., Boots, B., Siddiqi, S., Gordon, G., and Smola, A.
+Hilbert space embeddings of hidden Markov models. In ICML,
+2010.
+Song, L., Ishteva, M., Parikh, A., Xing, E., and Park, H. Hierarchical tensor decomposition of latent tree graphical models. In
+ICML, 2013.
+Stratos, K., Rush, A. M., Cohen, S., and Collins, M. Spectral
+learning of refinement hmms. In CoNLL, 2013.
+Varin, C. On composite marginal likelihoods. Advances in Statistical Analysis, 2008.
+Verwer, S., Eyraud, R., and Higuera, C. Results of the PAutomaC
+probabilistic automaton learning competition. In ICGI, 2012.
+
+

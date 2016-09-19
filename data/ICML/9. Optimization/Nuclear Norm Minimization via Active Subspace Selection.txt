@@ -1,0 +1,952 @@
+Nuclear Norm Minimization via Active Subspace Selection
+
+Cho-Jui Hsieh
+Department of Computer Science, The University of Texas, Austin, TX 78721, USA
+Peder A. Olsen
+IBM T.J. Watson Research Center, Yorktown Heights, NY 10598, USA
+
+Abstract
+
+There has been much work on developing efficient nuclear norm minimization solvers (Ji & Ye, 2009; Mazumder
+et al., 2010; Jaggi & Sulovsky, 2010; Avron et al., 2012),
+but most of them still fail to solve large-scale problems.
+(Avron et al., 2012) reports that on the Netflix dataset,
+one of the state-of-the-art Stochastic Sub-Gradient Descent
+(SSGD) algorithms cannot achieve 0.95 test Root Mean
+Square Error (RMSE) in one day, while other non-convex
+methods (ALS) methods can achieve 0.93 test RMSE in a
+couple of hours. Similar scalability problems also arise in
+multi-task learning (Dudik et al., 2012) and multivariate regression (Giraud, 2011). This scalability deficiency makes
+nuclear norm regularization less applicable for large-scale
+real world problems, despite its strong theoretical guarantees.
+
+1. Introduction
+We solve the nuclear norm optimization problem:
+X∈Rm×n
+
+PEDERAO @ US . IBM . COM
+
+et al., 2011). The nuclear norm regularization is an `1 regularization of the singular values of X, and it therefore promotes a low rank solution. It is proved that the underlying low rank solution can be recovered by solving (1) under certain conditions (Candés & Tao, 2009; Recht et al.,
+2010).
+
+We describe a novel approach to optimizing matrix problems involving nuclear norm regularization and apply it to the matrix completion problem. We combine methods from non-smooth
+and smooth optimization. At each step we use
+the proximal gradient to select an active subspace. We then find a smooth, convex relaxation of the smaller subspace problems and
+solve these using second order methods. We
+apply our methods to matrix completion problems including Netflix dataset, and show that
+they are more than 6 times faster than stateof-the-art nuclear norm solvers. Also, this is
+the first paper to scale nuclear norm solvers to
+the Yahoo-Music dataset, and the first time
+in the literature that the efficiency of nuclear
+norm solvers can be compared and even compete
+with non-convex solvers like Alternating Least
+Squares (ALS).
+
+X = argmin F (X) = argmin f (X) + λkXk∗ ,
+
+CJHSIEH @ CS . UTEXAS . EDU
+
+(1)
+
+X∈Rm×n
+
+where f (X) is a twice differentiable convex function,
+λ > 0 is the regularization
+parameter, and kXk∗ =
+√
+Pm
+> X) is the nuclear norm (also
+σ
+(X)
+=
+trace(
+X
+i
+i=1
+known as the trace norm). The nuclear norm regularization
+promotes a low rank solution, which is a key idea that can
+be applied to many applications such as recommender systems (Candès & Recht, 2009), dimension reduction in multivariate regression (Yuan et al., 2007), multi-task learning
+(Argyriou et al., 2008), and multi-label learning (Cabral
+Proceedings of the 31 st International Conference on Machine
+Learning, Beijing, China, 2014. JMLR: W&CP volume 32. Copyright 2014 by the author(s).
+
+In contrast, recently `1 -regularized solvers have been welldeveloped and scaled to ultra-large-scale problems with
+a trillion parameters (Hsieh et al., 2013). The key technique used in the fastest `1 -minimization solvers is to detect a small subset of active variables and focus on optimizing these (Olsen et al., 2012; Hsieh et al., 2011; Yuan
+et al., 2012). Since the nuclear norm is equivalent to the
+`1 norm on singular values, it is natural to ask the following question: can we identify a small active subspace and
+efficiently minimize the reduced-sized nuclear norm minimization problem?
+In this paper, we propose two new methods to solve
+large-scale nuclear norm regularized problems using active subspace selection. Our methods alternate between
+two phases: firstly we identify the active row and column
+subspaces; secondly, within the subspace, the problem can
+be reduced to a smaller k × k nuclear norm minimization
+problem. We then describe two efficient solvers to solve
+
+Nuclear Norm Minimization via Active Subspace Selection
+
+the reduced problem, alternating minimization method and
+cone projection Newton descent method, to minimize the
+sub-problem. We show that the active subspace will never
+change in a neighborhood of the global minimum, and in
+practice the subspace converges in very few iterations (10
+in our experiments), thus our methods are extremely fast
+compared to other state-of-the-art methods.
+Applications. The nuclear norm minimization can be applied to many applications where a low rank solution is preferred, and each application uses a different loss function
+f (X) in (1). For example:
+• Matrix Completion: Given a partially observed low
+rank m × n matrix A with observed entries in Ω, we
+can recover A by solving (1) with
+1
+f (X) = kΠΩ (X) − ΠΩ (A)k2F ,
+2
+
+(2)
+
+where (ΠΩ (X))ij = Xij for all (i, j) ∈ Ω and 0 otherwise.
+• Multivariate Regression: Given a data matrix A ∈
+Rl×m where each row of A is a data point, and a label
+matrix B ∈ Rl×n where each row is n labels to a input
+data, we compute the model X by solving (1) with
+1
+f (X) = kAX − Bk2F .
+2
+
+(3)
+
+A low rank solution of X is preferred based on the
+discussion of (Yuan et al., 2007) for multivariate regression and (Amit et al., 2007) for multi-class learning. Although there exists a closed-form solution for
+minimizing f (X) with a given rank constraint (Friedland & Torokhti, 2006), it cannot be generalized to
+the nuclear norm regularized problem. Moreover, the
+closed-form solution involves a pseudo-inverse which
+cannot be computed efficiently for large data.
+
+It is worthwhile noting that the regression problem (3) with
+a nuclear norm regularizer can be solved analytically when
+AA> and BB > commute.
+Theorem 1 (Exact Solvability). Let A ∈ Rm×m , B, X ∈
+Rm×n then if AA> and BB > commutes the minimum of
+F (X) is achieved for X ∗ = (A† )2 Sλ (A> B).
+The theorem can be proved by verifying that F (X) is convex and that 0 is a subgradient at X ∗ . A similar result is
+shown in Theorem 4 of (Yu & Schuurmans, 2011). A particularly important case of Theorem 1 is A = I when the
+solution simplifies to X ∗ = Sλ (B), and this special case
+has been proved and used in many previous papers (Cai
+et al., 2010; Mazumder et al., 2010).
+We now describe two first order methods that converge to
+the global minimum of the matrix completion and regression problems respectively.
+Theorem 2. The iteration Xk+1 = Sλ (ΠΩ (A) +
+⊥
+Π⊥
+Ω (Xk )), where ΠΩ (Xk ) = Xk − ΠΩ (Xk ) converge to
+the global minimum of (2).
+See the Appendix 6.1 in the supplement for a sketch of the
+proof.
+Theorem 3. The iteration Xk+1 = Sλ/c (Xk − 1c ∇f (Xk ))
+converge to the global minimum of (3) if cI  A> A =
+f 00 (X).
+See the Appendix 6.2 in the supplement for a sketch of the
+proof. It should be noted that the iteration in Theorem 2
+is a special case of Theorem 3 with c = 1. The vector
+Sλ/c (X − 1c f 0 (X)) is the proximal gradient (Toh & Yun,
+2010; Ji & Ye, 2009) and we shall make use of it later when
+we explore more efficient methods.
+
+3. Our Proposed Method
+
+2. Background Material
+
+Our proposed method iterates between two phases. At
+each iteration, we identify the active row and column subspaces UA , VA using the power method. Within the active subspace, the original problem can be reduced to a
+k × k nuclear norm minimization problem with k 
+min(m, n). We then propose efficient ways to minimize
+the sub-problem. Our framework can be summarized in
+Algorithm 1.
+
+In this section we give some interesting background information related to nuclear norm minimization.
+
+3.1. Active subspace selection
+
+In the experiments we will show the effectiveness of our
+algorithm on the two problems described above, and our
+method can also be extended to solve other nuclear norm
+regularized problems, including multi-task learning and
+clustering with missing labels.
+
+If X has the singular value decomposition X = U ΣV > ,
+then we define the shrinkage operator by
+Sλ (X) = U (Σ − λI)+ V > ,
+
+(4)
+
+where the operation a+ = max{0, a} is applied elementwise to the matrix. Also, we denote the pseudo-inverse of
+X by X † .
+
+In this section we introduce our active subspace selection
+strategy. Note that any matrix X ∈ Rm×n can be represented as a sum of rank one matrices:
+X
+X=
+σij ui vj> ,
+(5)
+ij
+m
+
+when span{ui }i = R and span{vj }j = Rn . Since the
+solution is low rank, σ will be sparse. Therefore, the goal
+
+Nuclear Norm Minimization via Active Subspace Selection
+
+Algorithm 1: Our proposed framework
+
+1
+2
+3
+4
+5
+6
+7
+8
+
+Input : regularization parameter λ, initial X = U ΣV >
+Output: The optimal solution X ∗ ∈ Rm×n
+for iter = 1, 2, . . . do
+[Ū , Σ̄, V̄ ] ← ApproxSVD(X − ∇f (X)) ;
+UG ← {ūi | Σ̄ii > λ}, VG ← {v̄ i | Σ̄ii > λ} ;
+UA ← QR([UG , U ]), VA ← QR([VG , V ]);
+S ← argminS f (UA SVA> ) + λkSk∗ ;
+[US , Σ, VS ] ← ThinSVD(S);
+U ← UA US , V ← VA VS , X ← U ΣV > ;
+end
+
+of the active set selection phase is to eliminate rank-one
+subspaces which are likely to have zero weights in the final
+solution, and then focus on the remaining rank one subspaces, which we call the active subspace.
+If the SVD of X is U ΣV T , it is shown in (Watson, 1992)
+that the sub-differential of kXk∗ is
+∂kXk∗ = {U V > +W : U > W = 0, W V = 0, kW k2 ≤ 1},
+Assume U ⊥ , V ⊥ are orthogonal subspace complements to
+U, V , then the sub-differential with respect to σij can be
+written
+
+Theorem 4. Assume X = U ΣV > is the reduced SVD of X
+(U ∈ Rm×k , V ∈ Rn×k and Σ has positive diagonal values), and Sλ (X − ∇f (X)) = UG ΣG VG> (also a reduced
+SVD). Let UA be an orthonormal basis of span(U, UG ), VA
+be an orthonormal basis of span(V, VG ), and UA⊥ , VA⊥ are
+orthonormal complements to UA , VA , then
+{uv> | u ∈ UA ⊥ or v ∈ VA ⊥ } ⊂ F.
+The proof is in Appendix 6.3. Given UA , VA , we can
+form the column basis Û = [UA , UA⊥ ] and row basis V̂ =
+[VA , VA⊥ ], and then re-parameterize X by X = Û Y V̂ >
+where Y ∈ Rm×n . Now solving the original problem is
+equivalent to solving minY F (Û Y V̂ > ). Assume both UA
+and VA have k columns, then by Theorem 4 only the top
+k × k submatrix of Y belong to the active set and all other
+elements of Y belong to the fixed set. So after eliminating
+the fixed set, the problem can be reduced to the following
+sub-problem:
+argmin F (UA SVA> ) = f (UA SVA> ) + λkUA SVA> k∗ , (7)
+S∈Rk×k
+
+where S = Y1:k,1:k ∈ Rk×k . Moreover, since UA , VA are
+orthogonal matrices kUA SVA> k∗ = kSk∗ , (7) is equivalent
+to
+argmin fˆ(S) + λkSk∗ ≡ F̂ (S),
+(8)
+S∈Rk×k
+
+∂σij F (X) ∈
+
+[u>
+i ∇f (X)vj
+
+−
+
+λ, u>
+i ∇f (X)vj
+
++ λ] (6)
+
+if ui ∈ U ⊥ or vj ∈ V ⊥ (equivalently, u>
+i Xvj = 0). We
+can easily see that |u>
+∇f
+(X)v
+|
+≤
+λ
+if
+and
+only if 0 is in
+j
+i
+the sub-differential. If we want to update X by a rank one
+factor σuv> , the optimal step size is
+σ ∗ = argmin f (X + σuv> ) + λkX + σuv> k∗ ,
+σ
+
+and it will have the solution σ ∗ = 0 whenever 0 is in the
+sub-differential set. We therefore define the fixed rank one
+subspace as
+F = {uvT | u> Xv = 0 and |u> ∇f (X)v| ≤ λ}.
+Therefore, all the rank one subspaces in F have zero weight
+in the current solution X, and is not likely to change from
+zero to nonzero. However, fixed subspace elements can still
+be activated in the next iteration of our algorithm, when we
+compute a new proximal gradient. We define the active
+rank one subspace as
+A ≡ {uv> | u> Xv 6= 0 or |u> ∇f (X)v| > λ},
+which is the complementary set of F. We focus on updating X on active rank one subspaces and fix the weights
+for all the fixed subspaces to be zero. In the following we
+propose a simple way to eliminate the fixed subspaces:
+
+where fˆ(S) = f (UA SVA> ), k  min(n, m). Since the
+variable in (8) is a small k × k matrix, solving (8) is often
+much cheaper than solving the original problem. We will
+discuss how to solve (8) in Section 3.3. In addition, we
+will show in Theorem 7 that UA , VA are exactly equal to
+the column and row subspace of the optimal solution in a
+neighborhood of X ∗ , and in this case solving (8) once will
+achieve the global optimum.
+Empirically we also observe that the active subsapce
+UA , VA converges to the final space quickly. In Figure 1a
+we compute the similarity between (UA )t (UA at the t-th
+iteration) and U ∗ , which is measured by the smallest singular value of (U ∗ )> (UA )t . If U ∗ ⊂ span((UA )t ), this
+value will be 1. We can see the value converges to 1 in
+ten steps. Moreover, the rank of our solutions X1 , X2 , . . .
+does not blow up when the final solution has a small rank,
+as shown in Figure 1b.
+Relationship to other greedy methods.
+The family
+of “greedy algorithms”, including GECO (Shalev-Shwartz
+et al., 2011), Lifted-CD (Dudik et al., 2012), and GCG
+(Zhang et al., 2012), have been proposed and achieved
+state-of-the-art performance on solving nuclear norm regularized problems. The greedy algorithms also consider the
+coordinate decomposition (5), but they construct the active
+subspace in a greedy manner: at each iteration, they add the
+top singular vector pair (u, v) to the active subspace, and
+
+Nuclear Norm Minimization via Active Subspace Selection
+
+curately as discussed in Section 3.3. Therefore, we do
+not need to compute Sλ (X −∇f (X)) very accurately.
+We will show in Theorem 9 that our algorithm converges linearly even with only one step of the power
+method, and this is not true for other gradient descent
+algorithms.
+(a) Subspace similarity be- (b) Maximum rank during the
+tween active subspace and the process
+final solution
+Figure 1: Experiments on the ml100k dataset demonstrates the
+power of active subspace selection. Figure 1a shows that the active subspace converges very quickly, and Figure 1b demonstrates
+that the rank of Xt never greatly exceeds the final rank for a wide
+range of λ.
+
+then solve the problem within this subspace. The drawback of these greedy algorithms is the difficulty in removing unimportant basis elements. In contrast, our algorithm
+selects the rank-k subspace anew at each iteration, and thus
+rapidly removes irrelevant basis elements and converges
+faster as in the experiments.
+3.2. Step 1: Computing active subspace
+In this section, we discuss an efficient way to compute the
+active subspace UA , VA . Note again that UA is the orthonormal basis of span(U, UG ). U is the column basis
+of the current solution X, and this is always maintained
+during the process since we always maintain the low rank
+factor form U SV > of X.
+
+1
+2
+3
+4
+5
+6
+and VG , we have to compute Sλ (X −
+7
+
+Also, it is easy to increase the target rank k in the power
+method. Assume we already compute the top k1 eigenvectors of Sλ (X − ∇f (X)) and we find the k1 -th singular
+value is larger than λ, then we have to increase k1 . Suppose we increase k1 to k2 ; we can keep the top k1 singular vectors, and then run the power method to compute
+the k1 + 1, . . . , k2 -th singular vectors. During the process,
+we just need to make sure those k1 + 1, . . . , k2 -th vectors
+are orthogonal to the top k1 singular vectors. Therefore,
+the time complexity of each step of the power method is
+O(|Ω|k2 ) to computing Au for each new vector u ∈ Rk2
+that is added, and O((m+n)k22 ) for orthogonalization. The
+algorithm is summarized in Algorithm 2.
+Algorithm 2: Power method (ApproxSVD in Algorithm 1)
+Input : Input matrix A, rank k, initial R ∈ Rn×k
+Output: Approximate SVD A ≈ U ΣV >
+Y ← AR ;
+Q ← QR(Y ) ;
+for t = 1, . . . , T max do
+Y ← A(A> Q) ;
+Q ← QR(Y ) ;
+end
+B ← Q> A ;
+[Û , Σ, V ] = SVD(B) ;
+U = QÛ ;
+
+To compute UG
+∇f (X)), which requires the top k singular vectors of X −
+∇f (X) (assuming we know the rank k). This is the bottle- 8
+neck in other proximal gradient based methods (Mazumder 9
+et al., 2010; Ji & Ye, 2009; Toh & Yun, 2010). As discussed in (Mazumder et al., 2010), since X is a low rank
+matrix and ∇f (X) usually have a special form, the ma3.3. Step 2: Solving the k × k Sub-Problem
+trix vector product (X − ∇f (X))v can often be computed
+After selecting the subspace UA , VA , we need to solve (8).
+efficiently. For example, ∇f (X) = ΠΩ (X − A) in maSince the variable S in (8) is a small k × k matrix, comtrix completion problems with square loss, and ∇f (X) =
+puting the SVD of S is cheap. Moreover, the gradient and
+A> AX−A> B in multivariate regression problems. ThereHessian vector product of fˆ(S) can also be computed effifore, (Mazumder et al., 2010) apply a Lanczos algorithm to
+ciently.
+compute the top k eigenvectors in Soft-Impute.
+For general matrix-scalar functions, using the chain rule we
+In our solver, we compute Sλ (X − ∇f (X)) faster than
+have
+Soft-Impute by use of the following innovations:
+1. We observe that Sλ (X − ∇f (X)) will not change a
+lot in two consecutive iterations. Therefore, we apply the power method (Halko et al., 2011) and use the
+eigenvectors in the previous iteration to initialize the
+power method. Using this warm start technique, the
+power method usually converges in 3 iterations.
+2. In our solver, this step is only used to identify the subspace, and we will solve the sub-problem more ac-
+
+∇fˆ(S) =
+
+∂f (U SV > )
+= U > (∇f (Y ) |Y =U SV > ) V,
+∂S
+
+and if we define ∇2 f (X) to be a Rmn×mn matrix with
+∂2f
+elements ∂Xij
+∂Xpq (X), then
+
+∇2 fˆ(S) = U > ⊗ V > ∇2 f (Y ) |Y =U SV > U ⊗ V. (9)
+Usually by utilizing the structure of ∇f (Y ) and ∇2 f (Y ),
+
+Nuclear Norm Minimization via Active Subspace Selection
+
+combined with (U ⊗ V ) vec(D) = vec(V DU > ), both gradient and Hessian can be computed efficiently. The following are some examples:
+• Matrix Completion problems:
+
+The Lemma follows directly from the expressions of the
+gradient and Hessian of s.
+
+∇fˆ(S) = U > ΠΩ (X − A)V and
+∇2 fˆ(S) vec(D) = U > ΠΩ (U DV > )V,
+
+Based on Lemma 1, we can rewrite the sub-problem
+
+so both the gradient and Hessian vector product can
+be computed in O(k|Ω| + nk 2 ) flops.
+• Multivariate regression:
+∇fˆ(S) = U A AU SV V − U A BV and
+∇2 fˆ(S) = U > A> AU DV > V
+>
+
+>
+
+>
+
+>
+
+>
+
+so both the gradient and Hessian vector product can
+be computed in O(kl(m + n)) time (assume k < l 
+m, n).
+In the reduced k × k problem, we can utilize the second
+order information, to achieve faster convergence. In the
+following we propose two novel algorithms for minimizing
+the sub-problem (8). For both algorithms, the most time
+consuming step is to compute the gradient or Hessian vector product, so the time complexity is proportional to that.
+
+1
+2
+3
+4
+5
+6
+7
+
+and the infimum is attained when S is invertible for Z =
+(S > S)1/2 . When S is not invertible we can get arbitrarily
+close to the infimum by approaching (S > S)1/2 from inside
+the cone of positive definite matrices.
+
+Algorithm 3: Our proposed algorithm Active ALT
+Input : Active subspace UA , VA , initial S
+Output: Solution S of (8)
+Z ← (SS > )1/2
+for tinner = 0, 1, . . . do
+G ← UA> (UA SVA> )Ω V + 12 λ(Z −1 + Z −> )S
+Solve ∇2S g(S, Z) vec(D) = vec(G) by CG
+S ←S−D
+Z ← (SS > )1/2
+end
+
+min inf f (U SV > ) +
+S
+
+Z0
+
+λ
+trace(Z + (SS > )Z −1 )
+2
+
+≡ min inf g(S, Z).
+S
+
+(11)
+
+Z0
+
+By Lemma 1 it follows that this function is jointly convex
+in S, Z as stated in the following theorem
+Theorem 5. g(S, Z) is jointly convex on S, Z on the domain S ∈ Rk×k , Z  0.
+Therefore, we can alternatingly minimize S and Z to solve
+(11). The update rules are described below.
+Update S. When Z is fixed, g(S, Z) in (11) is a convex
+quadratic function in S, so we can update S by Newtons
+method. When f (X) is quadratic (as in matrix completion
+or multivariate regression), Newtons method converges in
+one iteration. Each Newton step can be computed by the
+Conjugate Gradient method (CG), which only requires us
+to compute Hessian vector products. The gradient is
+λ
+∇S g(S, Z) = ∇fˆ(S) + (Z −> S + Z −1 S),
+2
+and since ∇2S tr(SSZ) = 12 (Z −> + Z −1 ) ⊗ I, we have
+∇2S g(S, Z) vec(D)
+
+=
+
+∇2 fˆ(S) vec(D)
+λ
++ vec(DZ −> + DZ −1 ).
+2
+
+We can further assume that Z is symmetric which gives
+∇2S g(S, Z) vec(D) = ∇2 fˆ(S) vec(D) + λ vec(DZ −1 ).
+When the iteration cannot be computed efficiently, we can
+use limited memory BFGS (Nocedal & Wright, 1999) with
+line search instead.
+
+3.3.1. A LTERNATING M INIMIZATION OF AN
+AUXILIARY FUNCTION
+To compute the nuclear norm it is necessary to compute
+the square root (S > S)1/2 . If Z0 commutes with S > S (e.g.
+Z0 = S > S) then the iteration Zk+1 = 12 Zk + Zk−1 S > S
+coincides with Newton’s algorithm and converges to the
+square root, (Higham, 1986). This motivated the following reformulation
+
+Closed form solution for multivariate regression problem. Interestingly, when f (X) = kAX − Bk2F , we can
+derive a closed form solution of minS g(S, Z). By setting
+∇S g(S, Z) = 0 we get
+
+Lemma 1 (A Convex Function). Let s(Z)
+=
+1
+−1 >
+trace(Z
++
+Z
+S
+S)
+then
+s
+is
+a
+convex
+function
+2
+(strictly convex when S is invertible) with
+
+Assuming AU is full rank, then this equation is equivalent
+to
+SP + QS = K,
+(12)
+
+inf Z0 s(Z) = kSk∗
+
+(10)
+
+U > A> AU SV > V + λZ −1 S = U > A> BV.
+
+where P = V > V , Q = λ(U > A> AU )−1 Z −1 and K =
+(AU )† BV . Eq (12) is a Sylvester equation and can be
+
+Nuclear Norm Minimization via Active Subspace Selection
+
+solved in O(k 3 ) time by forming the SVD of P, Q and K
+or by using the even more efficient Bartels-Stewart algorithm, (Bartels & Stewart, 1972). Since all of them are k
+by k matrices and k  m, n, we can compute the exact
+solution efficiently.
+√
+Update Z. Lemma 1 shows that Z = S > S is a minimizer of g(S, Z).
+
+4. Convergence Analysis
+
+Since (11) is a convex problem and our method is a block
+coordinate descent method with two blocks, our method
+is guaranteed to converge (see Proposition 7.2.1 in (Bertsekas, 1999)). Moreover, Lemma 1 implies that F̂ (St ) =
+minZ g(St , Z) = g(St , Zt ), so F̂ (S1 ), F̂ (S2 ), . . . is a decreasing sequence and converges to the optimum of the
+sub-problem.
+
+As the sequence Xt converges to the global optimum X ∗ ,
+we show that the active column and row subspace (UA , VA )
+will converge to the column and row space of X ∗ in finite
+number of iterations.
+
+The details of this approach for solving the matrix completion problem is in Algorithm 3.
+
+then span(UA ) = span(U ∗ ), span(VA ) = span(V ∗ ) after
+a finite number of iterations, where U ∗ , V ∗ are column and
+row space of the global optimum X ∗ .
+
+3.4. Cone Projection Newton Descent Method
+Here we consider an alternative method to solve the k × k
+sub-problem that takes advantage of the fact that any norm
+is linear on at least a one dimensional cone since ktxk =
+tkxk for t > 0. In both of the proposed focus problems
+the smooth part of the objective is a quadratic and therefore the entire problem becomes a smooth quadratic on the
+linearization cone. If the cone is only one dimensional this
+is not of great benefit, but for the `1 norm for example the
+cone is one of the mn dimensional orthants of Rm×n . The
+cone is also non-trivial for many other norms such as `∞
+and the nuclear norm.
+Theorem 6. Let U ∈ Rm×k and V ∈ Rn×k be orthogonal
+matrices then the sub-differential of kXk is constant on the
+cone {X = U SV > : S = S > and S  0}.
+The
+ proof is in Appendix 6.4. The positive definite cone is
+k
+2 dimensional, which is nontrivial whenever k > 1. If
+we change the asymmetric portion of S then the derivative
+changes, much in the way it would for an `2 norm. The
+nuclear norm resembles both the `1 norm and the `2 norm.
+The `1 norm aspect we already saw, while the `2 norm is
+apparent when m = 1 since then kXk∗ = kXkF .
+We propose to solve the quadratic problem by use of a quasi
+Newton method such as the conjugate gradient algorithm
+or limited memory BFGS (L-BFGS), (Nocedal & Wright,
+1999). If the optimum over the symmetric matrices is not
+positive definite we do a back-tracking line search. We additionally project the entire search line segment onto the
+cone to ensure convergence. This also encourages further
+reduction in rank. For a particular point on the line segment the projection consists simply of setting any negative
+eigenvalues to zero. This is analogous to what was done for
+the graphical LASSO problem in (Olsen et al., 2012).
+
+In our framework (Algorithm 1) there are two key tasks; 1)
+step 2: to compute UA by ApproxSVD and 2) step 5: to
+solve the k × k-size sub-problem. Both tasks incorporate
+an iterative solver. When both tasks are solved exactly, our
+algorithm converges to the global optimum (we omit the
+proof because this is a special case of Theorem 9).
+
+Theorem 7. Assume step 2 and 5 are exact, and
+λ is not a singular value of X ∗ − ∇f (X ∗ )
+
+(13)
+
+The proof is in Appendix 6.5. Note that Theorem 7 holds
+for any convergent sequence with limt→∞ Xt = X ∗ , and
+the assumption (13) can be shown to happen with very low
+probability, and was satisfied in our experiments. As long
+as UA , VA span the column/row space of X ∗ , Algorithm 1
+can terminate in one step, so we have the following theorem:
+Theorem 8. If step 2 and 5 are exact and (13) holds, then
+Algorithm 1 terminates in a finite number of iterations.
+Since there is no closed-form solution to a general singular
+value decomposition, we consider the case where singular
+vectors are identified by the power method, as discussed in
+Algorithm 2. Assume in each iteration we use the previous
+UG , VG (denoted by (UG )t , (VG )t ) as the initial subspace
+for the power method and run the power method for more
+than one iteration. In general power method cannot converge to the top k eigenvalues of A unless V > R is nonsingular for the initial guess R ∈ Rn×k , where V ∈ Rn×k
+is the top k singular vectors of A. This conditions is usually satisfied in practice. Under this condition, we prove
+the following theorem:
+Theorem 9. When step 2 is computed by power method
+with more than one iteration and step 5 is solved exactly,
+then Algorithm 1 converges to the optimum with an asymptotic linear convergence rate.
+The proof is in Appendix 6.6. This remarkable result shows
+that our algorithm converges fast even if the SVD in step 2
+is computed inaccurately (i.e., with only one power iteration), if we initialize it by the previous UG , VG .
+
+5. Experimental Results
+In this section, we compare our proposed nuclear norm
+solver with other state-of-the-art solvers. All the exper-
+
+Nuclear Norm Minimization via Active Subspace Selection
+
+(a) test RMSE on ml100k
+
+(b) test RMSE on ml10m
+
+(c) test RMSE on netflix
+
+(d) objective function on ml100k
+
+(e) objective function on ml10m
+
+(f) objective function on netflix
+
+Figure 2: Comparison to other nuclear norm minimization solvers for the matrix completion problem. Methods with test
+RMSE or relative error above the top of y-axis are not shown in the figures. Our methods Active ALT and Active Newton
+are much faster than other methods.
+Table 1: Dataset statistics and parameters.
+dataset
+ml100k
+ml10m
+netflix
+yahoo
+
+m
+943
+69,878
+2,649,429
+1,000,990
+
+n
+1,682
+10,677
+17,770
+624,961
+
+|Ω|
+90,567
+9,301,260
+99,072,112
+252,800,275
+
+λ
+15
+100
+300
+10000
+
+k
+65
+44
+53
+54
+
+iments are conducted on an Intel Xeon X5355 2.66GHz
+CPU with 32G RAM.
+5.1. Matrix Completion: Comparison with nuclear
+norm solvers
+We compare the following methods:
+• Soft-Impute: the gradient descent method proposed
+by (Mazumder et al., 2010).
+• JSH: based on the work by (Jaggi & Sulovsky, 2010;
+Hazan, 2008), an extension of Frank-Wolfe method
+for optimizing a bounded SDP problem.
+• SSGD: a Stochastic Sub-Gradient Descent method
+proposed by (Avron et al., 2012).
+• Lifted CD: a greedy coordinate descent method proposed by (Dudik et al., 2012).
+• MMBS: the method iteratively increases the rank and
+solves each fixed rank sub-problem by a trust-region
+Newton method (Mishra et al., 2013).
+• GCG: A Generalized Conditional Gradient method
+proposed by (Zhang et al., 2012).
+• Active ALT: our method with sub-problems solved by
+
+ALTernating minimization of S and Z.
+• Active Newton: our method with sub-problems solved
+by the cone projection Newton method.
+The implementation detail for the competing algorithms
+are described in Appendix 6.7. We use the real-world
+recommendation system datasets, MovieLens (ml100k,
+ml10m), Netflix, and Yahoo Music (Dror et al., 2012) as
+shown in Table 1. The balancing parameter λ was chosen
+by 3-fold cross validation on subsamples and the resulting
+rank k are also shown in Table 1. We compare the methods
+in terms of objective function value and test data RMSE.
+The results are shown in Figure 2. Notice the relative error on the y-axis is defined as |(F (X) − F (X ∗ ))/F (X ∗ )|,
+where X ∗ is the optimal solution. JSH, SoftImpute, and
+Lifted CD are too slow on the Netflix dataset so we omit the
+results in Figure 2f and 2c. Since JSH solves a constrained
+version of (1), we omit the objective function value of JSH
+in the plots. The results show that our methods are more
+than 6 times faster than other solvers on large datasets.
+Nuclear norm regularization is often considered too slow to
+solve large problems, and another approach is used to solve
+the non-convex problem:
+
+λ
+kU k2F + kV k2F . (14)
+min
+f (U V > ) +
+2
+U ∈Rm×k ,V ∈Rn×k
+For some sufficiently large k, minU,V :X=U V > 12 (kU k2F +
+kV k2F ) = kXk∗ , so solving (14) is equivalent to solving
+(1). However, (14) is not jointly convex in U, V , so solvers
+
+Nuclear Norm Minimization via Active Subspace Selection
+
+(a) test RMSE on ml10m
+
+(b) test RMSE on yahoo
+
+(a) test RMSE on stock regression problem
+
+(b) test error on ILSVRC multiclass problem
+
+Figure 4: Comparison on regression and multi-class problems. Our proposed method is much faster than other nuclear norm solvers.
+It was shown (Yuan et al., 2007) that a low rank assumption of X corresponds to the idea of feature sharing. We set
+λ = 5, which gives us a solution with rank 186. The model
+is tested on next 200 days data and evaluated using the root
+(c) objective function on
+(d) objective function on yamean square error. The experimental results in Figure 4a
+ml10m
+hoo
+show that our method is much faster than other methods.
+Figure 3: Comparison to non-convex methods (ALS and
+LMaFit). The speed of our method is competitive to nonWe also test our method on a multi-class classification
+convex methods, and they may not converge to the global
+problem. We use the dataset from the ILSVRC-2010 comoptimum.
+petition. This dataset is a subset of ImageNet (Deng et al.,
+2009) with roughly 1000 images in each of the 1000 cateare not guaranteed to converge to the global optimum. We
+gories. There are 1.2 million training images and 150,000
+compare our method to non-convex solvers – Alternating
+testing images, the 1000 bag-of-visual-word features proLeast Squares (ALS) and LMaFit (Wen et al., 2012) (a sucvided in the original dataset is used for classification. We
+cessive over-relaxation version of ALS) in Figure 3. Since
+model this as a multivariate regression problem, where
+Active ALS has very similar performance to Active Neweach row of A is a training data, and each row of B is a
+ton on large dataset, we only compare Active Newton with
+unit vector eyi where yi is the label of i-th training data.
+ALS in the figures. Non-convex solvers (especially ALS)
+The nuclear norm regularization is useful and has theoretwere widely used in the Netflix price because of its scalical benefit as shown in (Amit et al., 2007). We solve the
+ability (Koren et al., 2009). We observe that our method
+nuclear norm regularized multivariate regression problem
+is faster than ALS and LMaFit on ml10m, while on yawith λ = 600 to get a solution X ∗ with rank 189. The perhoo non-convex solvers are faster in the beginning, but
+formance of our proposed algorithm and other methods are
+converges to an inferior solution (because it may get stuck
+shown in Figure 4b. Our method achieves 18.57% test acin saddle points). Therefore, our method is competitive in
+curacy in 6 minutes, while no other nuclear norm solver can
+terms of time, is more stable, and has theoretical guaranachieve this accuracy in 4 hours. Our method achieve the
+tees. This is the first paper to scale nuclear norm solvers to
+final accuracy 21.36% after 0.5 hours. Notice that this acthe yahoo dataset, and the first time in the literature that the
+curacy is already good since random guess for 1000 classes
+efficiency of nuclear norm solvers can be compared with
+would just achieve a 0.1% accuracy.
+non-convex solvers.
+Acknowledgements
+5.2. Other Applications
+We would like to thank Haim Avron and Vikas Sindhwani
+Next, we apply our method to other problems with nuclear norm regularization. Since Active Newton and Active ALT has similar performance, we only show results
+for Active ALT in this section. We consider m = 3724
+stocks, each with daily closing price recorded in 2012
+(l = 200 days) downloaded from Yahoo Finance. Assume
+pt ∈ Rm is the stock return of all the m stocks at day
+t, and we model the change of return by the auto regression model pt = Xpt−1 . To estimate the transition matrix
+X ∈ Rm×m , we solve the multivariate regression problem
+(3) where A = [p1 p2 . . . pl−1 ]> and B = [p2 p3 . . . pl ]> .
+
+for providing the SSGD and JSH implementation as well
+as for valuable discussions. We also thank the anonymous
+reviewers for their suggestions. C.-J. Hsieh acknowledges
+support from an IBM PhD fellowship.
+
+References
+Amit, Y., Fink, M., Srebro, N., and Ullman, S. Uncovering shared
+structures in multiclass classification. In ICML, pp. 17–24,
+2007.
+Arbenz, Peter. Lecture Notes on Solving Large Scale Eigenvalue
+
+Nuclear Norm Minimization via Active Subspace Selection
+Problems. 2010.
+Argyriou, A., Evgeniou, T., and Pontil, M. Convex multi-task
+feature learning. Machine Learning, 73:243–272, 2008.
+Avron, H., Kale, S., Kasiviswanathan, S., and Sindhwani, V. Efficient and practical stochastic subgradient descent for nuclear
+norm regularization. In ICML, 2012.
+Bartels, RH and Stewart, GW. Algorithm 432: Solution of the
+matrix equation AX+ XB= C [F4]. Communications of the
+ACM, 15(9):820–826, 1972. ISSN 0001-0782.
+Bertsekas, Dimitri P. Nonlinear Programming. Athena Scientific,
+Belmont, MA 02178-9998, second edition, 1999.
+Cabral, R. S., Torre, F., Costeira, J. P., and Bernardino, A. Matrix
+completion for multi-label image classification. In NIPS, pp.
+190–198, 2011.
+
+Hsieh, C.-J., Sustik, M. A., Dhillon, I. S., and Ravikumar, P.
+Sparse inverse covariance matrix estimation using quadratic
+approximation. In NIPS, 2011.
+Hsieh, C.-J., Sustik, M. A., Dhillon, I. S., Ravikumar, P., and Poldrack, R. A. Big & Quic: Sparse inverse covariance estimation
+for a million variables. In NIPS, 2013.
+Jaggi, M. and Sulovsky, M. A simple algorithm for nuclear norm
+regularized problems. In ICML, pp. 471–478, 2010.
+Ji, S. and Ye, J. An accelerated gradient method for trace norm
+minimization. In ICML, pp. 329–336, 2009.
+Koren, Y., Bell, R. M., and Volinsky, C. Matrix factorization
+techniques for recommender systems. IEEE Computer, 42:30–
+37, 2009.
+Li, R.-C. Relative Perturbation Theory: II. Eigenspace and Singular subspace Variations. SIAM Journal on Matrix Analysis
+and Applications, 20(2):471–492, 1998.
+
+Cai, J. F., Candes, E. J., and Shen, Z. A singular value thresholding algorithm for matrix completion. SIAM J. Optimization, 20
+(4):1956–1982, 2010.
+
+Mazumder, R., Hastie, T., and Tibshirani, R. Spectral regularization algorithms for learning large incomplete matrices. JMLR,
+11:2287–2322, 2010.
+
+Candès, E. J. and Recht, B. Exact matrix completion via convex
+optimization. Foundations of Computational mathematics, 9
+(6):717–772, 2009.
+
+Mishra, B., Meyer, G., Bach, F., and Sepulchre, R. Low-rank
+optimization with trace norm penalty. arxiv:1112.2318, 2013.
+
+Candés, E. J. and Tao, T. The power of convex relaxation: Nearoptimal matrix completion. IEEE Trans. Inform. Theory, 56
+(5):2053–2080, 2009.
+Daubechies, I., Defrise, M., and Mol, C. De. An iterative thresholding algorithm for linear inverse problems with a sparsity
+constraint. Communications on pure and applied mathematics, 57(11):1413–1457, 2004.
+
+Nocedal, J. and Wright, S. J. Numerical optimization, volume 2.
+Springer New York, 1999.
+Olsen, P., Oztoprak, F., Nocedal, J., and Rennie, S. Newton-like
+methods for sparse inverse covariance estimation. In NIPS,
+2012.
+Recht, B., Fazel, M., and Parrilo, P. A. Guaranteed minimum
+rank solutions to linear matrix equations via nuclear norm minimization. SIAM Review, 52(3):471–501, 2010.
+
+Deng, J., Dong, W., Socher, R., Li, L.-J., Li, K., and Fei-Fei,
+L. ImageNet: A large-scale hierarchical image database. In
+CVPR, pp. 248–255, 2009.
+
+Shalev-Shwartz, S., Gonen, A., and Shamir, O. Large-scale convex minimization with a low-rank constraint. In ICML, pp.
+329–336, 2011.
+
+Dror, G., Koenigstein, N., Koren, Y., and Weimer, M. The Yahoo! music dataset and KDD-Cup’11. In JMLR Workshop
+and Conference Proceedings: Proceedings of KDD Cup 2011
+Competition, volume 18, pp. 3–18, 2012.
+
+Toh, K.-C. and Yun, S. An accelerated proximal gradient algorithm for nuclear norm regularized least squares problems. J.
+Optimization, 6:615–640, 2010.
+
+Dudik, M., Harchaoui, Z., and Malick, J. Lifted coordinate descent for learning with trace-norm regularization. In AISTATS,
+2012.
+Friedland, S. and Torokhti, A. Generalized rank-constrained matrix approximation. SIAM Journal on Matrix Analysis and Applications, 29(2):656–659, 2006.
+Giraud, C. Low rank multivariate regression. Electronic Journal
+of Statistics, 5:775–799, 2011.
+Halko, N., Martinsson, P. G., and Tropp, J. A. Finding structure
+with randomness: Probabilistic algorithms for constructing approximate matrix decompositions. SIAM Rev, 53(2):217–288,
+2011.
+Hazan, E. Sparse approximate solutions to semidefinite programs.
+LATIN, pp. 306–316, 2008.
+Higham, N. J. Newtons method for the matrix square root. Mathematics of Computation, 46(174):537–549, 1986.
+
+Watson, G. A. Characterization of the subdifferential of some
+matrix norms. Linear Algebra and its Applications, 170:33–
+45, 1992.
+Wen, Z., Yin, W., and Zhang, Y. Solving a low-rank factorization
+model for matrix completion by a nonlinear successive overrelaxation algorithm. Mathemetical Programming Computation, 4(4):333–361, 2012.
+Yu, Y. and Schuurmans, D. Rank/norm regularization with
+closed-form solutions: application to subspace clustering. In
+UAI, pp. 778–785, 2011.
+Yuan, G.-X., Ho, C.-H., and Lin, C.-J. An improved GLMNET
+for L1-regularized logistic regression. JMLR, 13:1999–2030,
+2012.
+Yuan, M., Ekici, A., Lu, Z., and Monteiro, R. Dimension reduction and coefficient estimation in multivariate linear regression.
+J. R. Statist. Soc, pp. 329–346, 2007.
+Zhang, X., Yu, Y., and Schuurmans, D. Accelerated training for
+matrix-norm regularization: A boosting approach. In NIPS,
+2012.
+
+

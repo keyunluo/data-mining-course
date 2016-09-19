@@ -1,0 +1,988 @@
+Inference in a Partially Observed Queuing Model with Applications in Ecology
+
+Kevin Winner1
+KWINNER @ CS . UMASS . EDU
+Garrett Bernstein1
+GBERNSTEIN @ CS . UMASS . EDU
+Daniel Sheldon1,2
+SHELDON @ CS . UMASS . EDU
+1
+College of Information and Computer Sciences, University of Massachusetts, Amherst, MA 01002, USA
+2
+Department of Computer Science, Mount Holyoke College, South Hadley, MA 01075, USA
+
+Abstract
+We consider the problem of inference in a probabilistic model for transient populations where
+we wish to learn about arrivals, departures, and
+population size over all time, but the only available data are periodic counts of the population
+size at specific observation times. The underlying model arises in queueing theory (as an
+Mt /G/∞ queue) and also in ecological models for short-lived animals such as insects. Our
+work applies to both systems. Previous work
+in the ecology literature focused on maximum
+likelihood estimation and made a simplifying independence assumption that prevents inference
+over unobserved random variables such as arrivals and departures. The contribution of this
+paper is to formulate a latent variable model and
+develop a novel Gibbs sampler based on Markov
+bases to perform inference using the correct, but
+intractable, likelihood function. We empirically
+validate the convergence behavior of our sampler
+and demonstrate the ability of our model to make
+much finer-grained inferences than the previous
+approach.
+
+1. Introduction
+We consider the problem of inference in a probabilistic
+model for transient populations where we wish to learn as
+much as possible about the complete state of the population over time, including arrivals, departures, and population size, but the only available data are periodic counts of
+the population size at specific observation times.
+Our work applies to a simple probabilistic model that arises
+Proceedings of the 32 nd International Conference on Machine
+Learning, Lille, France, 2015. JMLR: W&CP volume 37. Copyright 2015 by the author(s).
+
+in two distinct places. It is most precisely described in
+queuing theory, where it is known as the Mt /G/∞ queue
+(Eick et al., 1993) and describes a situation where: (1) customers arrive at a queue over time according to a Poisson
+process with arbitrary intensity function, (2) they are assigned to a server immediately upon arriving at the queue,
+and (3) their service time is drawn independently from an
+arbitrary, shared, service-time distribution. In this terminology, our paper addresses the problem of making inferences about arrivals and departures from the queue when
+only the total number of customers in service is observable
+and only at discrete observation times.
+We are primarily motivated by a specific application in
+ecology. Zonneveld (1991) proposed what is in essence
+an Mt /G/∞ queue for analyzing transient or short-lived
+animal populations, specifically, insects. Adults enter the
+population (arrive at the queue) either by advancing from
+a previous life stage or immigrating from outside the survey area and then remain in the survey area for a specified
+amount of time (service time) before dying or leaving the
+area (departing the queue). Counts of abundance (number
+of customers in service) are made over time at the survey
+location. From this information, ecologists would like to
+make inferences about life history events such as migration,
+birth, and death that correspond to arrivals and departures
+from the queue.
+Information about arrivals and departures in insect populations is important for several reasons. First, the timing of
+arrivals (e.g., the emergence of adult butterflies from cocoons) is linked to climate. Shifts in timing are important
+to detect because they may result from climate change and
+have the potential to disrupt the synchrony of ecosystems.
+Second, understanding lifespans (departure rates) is key to
+monitoring population size and trends over time, because
+lifespans are confounded with abundance when interpreting survey counts. For example, it can be hard to distinguish between a population where many individuals arrive
+but die quickly from one where few arrive but individuals
+
+Inference in a Partially Observed Queueing Model
+
+are long-lived.
+The main contributions of this work are the formulation of
+a latent variable model for this problem and the development of a novel Gibbs sampler for the challenging problem
+of inference in the model. Our work improves upon the statistical treatment in the ecology literature. Zonneveld and
+almost all subsequent authors have made a simplification
+to the likelihood that (wrongly) assumes independence between observations at different times. While this is convenient for estimating parameters, it relies on a false assumption, and, more importantly, because the relevant random
+variables are replaced by their expected values, it impoverishes the model in a way that prevents inference over hidden aspects of the process.
+Our model works by dividing time into intervals based on
+the observation times and then binning all individuals according to their birth and death intervals. The number of
+individuals in each bin is unknown and treated as a latent
+variable. We then seek to infer the values of the latent variables from (potentially noisy) observations of abundance.
+The problem is particularly challenging when the observations are exact, because this imposes hard constraints on the
+latent variables. For the task of inference over the hidden
+variables, we contribute a novel Gibbs sampler that uses
+a set of update “moves” to resample the latent variables.
+We prove that these moves form a Markov basis—i.e., they
+lead to an ergodic sampler—even in the presence of hard
+constraints. We also prove that the univariate distributions
+encountered by our sampler are log-concave, which allows
+for highly efficient sampling even in large populations.
+We empirically validate our theoretical result to show that,
+when there are hard constraints, our novel moves are required for ergdocity, and that they accelerate convergence
+even when there are no hard constraints. We also demonstrate the scalability benefits of log-concavity and present
+a case study to demonstrate the value of our latent variable
+model for making inferences about the hidden aspects of
+partially observed transient populations.
+
+2. Related Work
+We briefly mention some related work. Eick et al. (1993)
+give a detailed mathematical analysis of the Mt /G/∞
+queue. Their reasoning about the covariance of queue size
+at two different times (Theorem 2) uses a scheme similar
+to our latent variable model to partition individuals by their
+birth and death intervals. Several queueing papers touch on
+the idea of parameter estimation from partial observations.
+Ross et al. (2007) estimate the parameters of an M/M/c
+queue from length data. That model differs from ours in
+that it has a finite number of servers, and arrival and departure rates are constant over time so there are only two pa-
+
+rameters to estimate. Blanghaps et al. (2013) estimate the
+service-time (lifespan) distribution of an M/G/∞ model
+from partial data about arrivals and departures. This differs
+from our work because arrival rates are assumed constant,
+and the data and inferential goals are different.
+In the ecology literature, Gross et al. (2007) share our motivation of addressing the simplifying assumptions made by
+Zonneveld (1991). Their emphasis is parameter estimation,
+but to better estimate confidence intervals, they develop an
+MCMC method to sample from the correct probabilistic
+model. Their approach differs from ours in several ways.
+First, they do not fully represent the latent process: in particular, they aggregate all individuals alive on a day regardless of when they entered the population. This is valid only
+for exponential lifespan distributions (constant death rates),
+while our method applies more generally. By aggregating, their model also loses the ability to answer inference
+queries about lifespans. Second, they do not consider the
+problem of perfect observations and the hard constraints
+they impose on the sampler. Finally, their sampler operates
+in discretized time and moves individual emergence times
+by one unit at a time, which scales poorly with population
+size. We work in continuous time and exploit log-concavity
+to scale to very large populations efficiently.
+Our sampling approach draws on the concept of Markov
+bases and is closely related to samplers for contingency tables (Diaconis & Sturmfels, 1998). Our idea to exploit logconcavity for efficient sampling in very large populations is
+based on ideas from sampling in collective graphical models (Sheldon & Dietterich, 2011).
+
+3. Generative Model
+In this section, we first introduce the underlying probabilistic model for lifespans of individuals in a transient population and describe the model of repeated observations of
+populations size. Then, we describe how to formulate the
+entire process as a generative model with discrete latent
+variables over which we will perform inference.
+The model assumes that N individuals will be born or enter the study area during a fixed time interval (e.g., for insects, N is the total number from a single generatation) and
+that individuals are independent and identically distributed.
+The ith individual is born at time Si and has lifespan Zi .
+Birth times are drawn independently from a distribution
+with density fS (s) and lifespans are drawn independently
+from a distribution with density fZ (z). In our experiments,
+we use the normal density for fS and exponential density
+for fZ to mimic Zonneveld’s setup, though the method can
+work with arbitrary distributions. This model differs very
+slightly from the Mt /G/∞ queue because it assumes a
+fixed number of individuals. However, it becomes iden-
+
+Inference in a Partially Observed Queueing Model
+
+tical if we assume that N ∼ Poisson(λ), in which case the
+birth times follow a Poisson process with intensity function
+λfS (s). Our methods apply to that case with very minor
+modifications, which we describe in Section 4.5.
+Our observation model assumes we cannot directly observe
+the births or lifespans. Instead, we make T measurements
+of abundance (population size) at times {t1 , t2 , . . . , tT }.
+Let nk be the actual abundance at time tk . We assume
+that each individual in the population is observed independently with probability α to yield the noisy count yk ∼
+Binomial(nk , α) for some 0 ≤ α ≤ 1.
+To formulate the latent variable model, it is useful to notice
+that the observation times partition the real line into intervals {I0 , I1 , . . . , IT } (e.g., see Figure 1) and we can use
+these intervals to aggregate lifespan events. The joint probability of an individual being born at some point in interval
+Ii and leaving the population at some point in interval Ij is
+Z
+
+ti+1
+
+p(i, j) :=
+
+Z
+
+full generative model:
+q ∼ Multinomial(N, p),
+n = Aq,
+yk ∼ Binomial(nk , α).
+The full joint probability of latent variables q and noisy
+observations y is then the product of the multinomial prior
+and the binomal likelihood:
+p(q, y) = N !
+
+Q
+
+yk ∼ Binomial(N, αρk )
+
+The count variables q suffice as latent variables to determine the abundance at sampling times. In particular, the
+abundance nk at observation time tk is:
+XX
+
+q(i, j).
+
+− α)nk −yk
+
+ρ = Ap
+
+fZ (z) dz ds.
+
+Similarly, let q(i, j) be a random variable denoting the total number of individuals who are born during interval Ii
+and die during Ij , and let p and q be the vector concatenation of the p(i, j) and q(i, j) values, respectively. (Later,
+we will view p and q as matrices when it is convenient
+to do so.) Since individuals are i.i.d. and each is counted
+in exactly one cell of q, the marginal distribution of q is
+Multinomial(N, p).
+
+nk =
+
+nk !
+yk
+k yk !(nk −yk )! α (1
+
+Q
+
+In contrast to this model, Zonneveld used the following
+tractable approximation:1
+
+tj −s
+
+ti
+
+p(i,j)q(i,j)
+q(i,j)!
+
+In this equation, it is understood that nk is a deterministic
+function of q. Direct computation of the marginal probability p(y) is intractable because it requires summing over
+all possible values of q.
+
+tj+1 −s
+
+fS (s)
+
+i,j
+
+(1)
+
+This model makes two major simplifications. First, the latent random varables q are replaced by the deterministic
+quantities ρ, where ρk is the probability an individual is
+alive at time tk . This model is therefore incapable of performing inference over the latent process. Second, because
+the observation yk now only depends on the deterministic
+quantity ρk , the observations at different times become mutually independent. In the true model, observations are correlated due to the lifespans of individuals that span multiple
+observation times. The primary motivation of our work is
+to develop an inference procedure for the more difficult, but
+correct, model in which q is preserved as a latent variable.
+
+4. Inference
+
+i<k j≥k
+
+This is the number of individuals that were born in an interval prior to tk and die in an interval after tk . Note that
+individuals that are born and die in the same interval, i.e.
+they are counted in a diagonal entry q(i, i), are not included
+in any nk because they were never alive during an observation time. Alternatively, we can write Eq. (1) as nk = aTk q,
+where ak is the vector with entries
+
+ak,(ij)
+
+(
+1 i<k≤j
+=
+.
+0 otherwise
+
+Then we can stack the vectors aTk into the rows of the matrix A to write the abundance values compactly as n = Aq.
+This provides enough information to succinctly write the
+
+In this section our goal will be to draw samples from
+the conditional distribution of q given observations y and
+known density functions fS and fZ (and hence known
+cell probabilities p). Exact calculation of the likelihood
+is intractable because it involves summing over all possible
+configurations of q, but sampling is a tractable alternative.
+4.1. Hard Constraints
+Our method is based on Markov Chain Monte Carlo
+(MCMC) sampling, but a key difficulty arises as α → 1
+due to the presence of hard constraints in the probability
+distribution. To see this, note that a typical approach for
+1
+Zonneveld wrote this using a Poisson likelihood yk ∼
+Poisson(αN ρk ), but we write it as Binomial to make a more direct comparison. This is appropriate when individuals are counted
+only once during a single survey.
+
+Inference in a Partially Observed Queueing Model
+Change in n:
+
+0
+
++!
+
+variate distribution:
+
+-!
+-!
+
+q(1,3)
+
++!
+
+q(0,2)
+I0
+
+I1
+
+I2
+
+I3
+
+Pair move
+
+Figure 1. Illustration of a pair move on timeline. Observation
+times (vertical lines) divide time into intervals I0 , I1 , I2 , I3 . This
+particular move subtracts δ individuals from q(1, 3) and adds
+them to q(0, 2). Note that this move does not preserve the abundances at observation times t1 and t3 .
+
+p(δ) ∝ p(q + δz | y),
+
+δ ∈ {L, . . . , U }.
+
+(2)
+
+The values of p(δ) are proportional to the joint probability
+p(q + δz, y), which can be computed efficiently.
+Designing moves in this way leads to a form of Gibbs sampler (Geman & Geman, 1984): the proposed configuration
+q0 is drawn from the restricted set {q + δz : L ≤ δ ≤ U }
+with probability proportional to p(q0 ). Just as in standard
+Gibbs sampling, the ratio of the proposal density to the true
+density is equal to one and the move is always accepted.
+4.2. Markov Basis
+
+MCMC in a multinomial would be to simultaneously resample the counts in two cells of q, with the effect that
+one increases by δ and the other decreases by δ. Figure 1
+shows an example where q(0, 2) increases by δ and q(1, 3)
+decreases by δ. It is easy to see in this example that n1 and
+n3 also change from their original values (by +δ and −δ
+respectively) so this modification is not possible under the
+constraint on abundance at observation times.
+Overall, there are four constraints we must consider when
+proposing a new value for q. The first two come from
+the multinomial distribution: q must always remain nonnegative and q must sum to N , which we write compactly
+as q ≥ 0 and 1T q = N . The third constraint comes from
+the binomial likelihood: for all k, the observed value yk
+may not exceed the true queue length at time tk , which we
+write as Aq ≥ y. Finally, when α = 1, the observations
+specify the exact abundance values, so the previous constraint becomes an equality constraint: Aq = y.
+Our approach will then be based on “moves” that carefully
+modify more than two entries of q so the constraints are
+always preserved. A move is a vector z of the same size as
+q, with entries in the set {−1, 0, +1}. A new configuration
+q0 = q + δz is obtained by first selecting a move z, and
+then choosing an integer move amount δ.
+We describe below how the moves are designed to always
+preserve the equality constraints. The inequality contraints
+place bounds on the possible value of δ. First, to ensure
+that all entries of q0 remain non-negative, δ must be at least
+L1 = − min{q(i, j) : z(i, j) = +1} and at most U1 =
+min{q(i, j) : z(i, j) = −1}. Second, to ensure that Aq0 ≥
+y, we require δAz ≥ y − Aq, which provides:
+δ ≥ L2 := max{(y − Aq)k /(Az)k : (Az)k > 0},
+δ ≤ U2 := min{(y − Aq)k /(Az)k : (Az)k < 0}.
+The overall constraints are δ ≥ L := max{L1 , L2 } and
+δ ≤ U := min{U1 , U2 }.
+The value of δ is chosen by sampling from the induced uni-
+
+A challenge is to design a set of moves such that the sampler is ergodic. Let Q be the set of configurations that satisfy all hard constraints. We require that, for any two configurations q1 , q2 ∈ Q, there is a valid sequence of moves
+that leads from q1 to q2 . A move set M that satisfies this
+property is called a Markov basis with respect to Q (Diaconis & Sturmfels, 1998). We next describe several patterns of moves that we will use to construct Markov bases.
+When selecting a move z, we first select one of these patterns uniformly at random, then select the indices for the
+move uniformly at random.
+A pair move z ∈ Mpair is of the form illustrated in Figure
+1. It is specified by four indices i ≤ j, k ≤ ` such that
+(i, j) 6= (k, `). It has one positive entry z(i, j) = +1 and
+one negative entry z(k, `) = −1, with the effect of moving
+one individual from cell (k, `) to cell (i, j). Pair moves do
+not in general preserve the abundance values n = Aq.
+A shuffle move is the special case of pair moves that occurs
+when i = j and k = `, so only unobserved individuals are
+“shuffled”. Such a move does preserve abundance values
+n = Aq at observation times. We denote the set of all
+shuffle moves by Mshuffle .
+A cycle move z ∈ Mcycle (Figure 2, top) is specified by
+four indices i ≤ i0 ≤ j ≤ j 0 . It has four non-zero entries
+z(i, j) = z(i0 , j 0 ) = +1 and z(i, j 0 ) = z(i0 , j) = −1 with
+the effect of taking two overlapping lifetimes and swapping their end intervals, e.g.: (i, j), (i0 , j 0 ) ↔ (i, j 0 ), (i0 , j).
+It is straightforward to see that a cycle move preserves
+the abundance values n = Aq at observation times.
+Cycle moves are well-known from the
+j j0
+contingency table literature (Diaconis &
+i + −
+Sturmfels, 1998). When viewed as a mai0 − +
+trix, a cycle move modifies a pair of rows
+and columns of q in the pattern illustrated
+at the right. From this it is clear that, in addition to preserving the abundance values n = Aq, a cycle move also
+preserves the row and column sums of q, i.e., the numbers
+of individuals that are born and die in each interval.
+
+Inference in a Partially Observed Queueing Model
+Change in n:
+
+0
+
+0
+
+(ii) For all j, either
+0,
+
+-!
+
+-!
+
+I1
+
+I2
+
+0
+
+0
+-!
++!
+
+I0
+
+0
+-!
++!
+
+I1
+
+i<j
+
+q(i, j) = 0 or
+
+P
+
+k>j
+
+q(j, k) =
+
+I3
+
+Cycle move
+Change in n:
+
+P
+
+P
+(iii) For all
+P j, we have i<j q(i, j) = max{0, yj − yj+1 }
+and k>j q(j, k) = max{0, yj+1 − yj }.
+
++!
+
++!
+I0
+
+0
+
+I2
+
+I3
+
+Merge/split move
+
+Figure 2. Moves that preserve the constraint Aq = y. Top: cycle.
+Bottom: merge/split.
+
+A merge/split move (Figure 2, bottom) is the special case
+of cycle moves when i0 = j. It has the effect of either
+merging two short lifetimes into a longer one and adding an
+unobserved individual or splitting one longer lifetime into
+two shorter ones and eliminating an unobserved individual.
+Our main result is that the moves above can be combined to
+form a Markov basis for both the cases α < 1 and α = 1.
+Theorem 1. When α < 1, the feasible set (i.e, the support
+of the distribution p(q | y)) is Q = {q : q ≥ 0, 1T q =
+N, Aq ≥ y}. The set of all pair moves is a Markov basis
+with respect to Q. When α = 1, the feasible set is Qy =
+{q : q ≥ 0, 1T q = N, Aq = y}. The set of all cycle and
+shuffle moves is a Markov basis with respect to Qy .
+Although Theorem 1 implies that cycle moves are only
+strictly required when α = 1, we will show empirically
+that they can subtantially improve mixing time even when
+α < 1. Before proving Theorem 1, we first state several
+useful lemmas.
+Lemma
+1. Any configuration
+q such that Aq = y satisfies
+P
+P
+k>j q(j, k) −
+i<j q(i, j) = yj+1 − yj for all j.
+Proof. This simply states that the change in abundance
+yj+1 − yj between the start and end of thePjth interval
+is equal to the number of new individuals k>j q(j, k)
+(those that are born during interval j and make it until the
+end
+P of the interval) minus the number of lost individuals
+i<j q(i, j) (those that were alive at the start of the interval but died during interval j).
+Lemma 2. Suppose Aq = y. The following conditions are
+equivalent:
+(i) No merge moves can be performed on q,
+
+Proof. It is easy to see that if (ii) is not satisifed then some
+merge move can be performed, so (i) implies (ii). If (ii)
+is satisfied, then each interval has either births or deaths,
+but not both. Thus, the total numbers of births and deaths
+are determined by Lemma 1 and the sign of yj+1 − yj :
+the number of deaths is equal to max{0, yj − yj+1 } and
+the number of births is equal to max{0, yj+1 − yj }. This
+shows that condition (ii) implies (iii). Finally, if (iii) is true,
+then it is clear that no merge moves can be performed, so
+(iii) implies (i).
+Lemma 3. Let q and q0 be any two configurations such
+that Aq = Aq0 = y, the diagonal entries of q and q0
+are the same, and no merge moves can be performed in
+either configuration. Then q and q0 have the same row and
+column sums.
+P
+Proof. The ith row sum of q is q(i, i) + j<i q(i, j). We
+have assumed that q(i, i) = q 0 (i, i). By Lemma 2 and the
+assumption that no merge
+in either conP moves are possible
+P
+0
+figuration, we have j>i q(i, j) =
+q
+j>i (i, j), since
+both of these are deterministic functions of y (condition
+(iii) of the Lemma). Therefore the row sums of q and q0
+are the same. The case of column sums is similar.
+M
+
+Proof of Theorem 1. Let q −−→ q0 indicate that there is a
+valid sequence of moves from q to q0 in M. This means
+there are moves z1 , . . . , zM ∈ M such that q0 = q + z1 +
+. . . + zM and q + z1 + . . . + zm ∈ Q for all 0 ≤ m ≤ M .
+It suffices to consider moves with δ = 1 for the purposes of
+M
+this proof. We wish to show that q −−→ q0 for all q, q0 ∈ Q.
+The case α < 1 is easy. Starting from q, execute pair
+moves to move all individuals to cell (0, T ), which guarantees that all individuals are present at each observation
+and hence Aq ≥ y remains satisfied. Then, for each other
+cell (i, j) we execute pair moves to move q 0 (i, j) individuals from cell (0, T ) to cell (i, j).
+For α = 1, it is straightforward to verify that each cycle and
+shuffle move does not change the abundance at observation
+times or the total number of individuals, so the equality
+constraints Aq = y and 1T q = N always remain satisfied.
+We need to demonstrate that the moves can be constructed
+to also preserve the non-negativity constraints.
+We will proceed by first transforming q and q0 into configurations r and r0 that have the same number of births
+and deaths in each interval, and then transforming r into
+
+Inference in a Partially Observed Queueing Model
+
+r0 through another sequence of moves. Put together, this
+M
+M
+M
+will show that q −−→ r, r −−→ r0 , and q0 −−→ r0 . Because
+moves are reversible (M is closed under negation), we can
+M
+M
+also conclude that r0 −−→ q0 and hence q −−→ q0 .
+To transform q into r, first apply merge moves until no
+more are possible, and then perform shuffle moves to move
+all unobserved individuals to cell (0, 0). Do the same to
+transform q0 into r0 . Now, the conditions of Lemma 3 apply, and we can conclude that r and r0 have the same row
+and column sums.
+We will now show that there is a sequence of cycle moves
+leading from r to r0 . The reasoning is very similar to the
+argument that cycle moves form a Markov basis for contingency tables with fixed row and column sums (Diaconis &
+Sturmfels, 1998)—however, we have the additional restriction that q is upper triangular, so our result does not follow
+directly from that result.
+Let ∆ = r0 − r. We wish to create a sequence of moves
+that add up to ∆. It is enough to find one cycle move z
+such that k∆ − zk1 < k∆k1 , which means that applying
+the move z to r moves us strictly closer to r0 . We can then
+apply an inductive argument.
+Since r and r0 have the same row and column sums, we
+know that ∆ has row and column sums that are identically
+zero. Identify a cycle move using ∆ as follows: first, let
+∆(i1 , j1 ) be a negative entry of ∆, which must exist as
+long as r 6= r0 . Since the j1 column-sum of ∆ is zero,
+there must also be a positive entry ∆(i2 , j1 ) in the same
+column. Now, since the i2 row sum is zero, there must be
+negative entry ∆(i2 , j2 ) in the same row. Construct a cycle
+move using these four indices. This gives the following:
+∆(i1 , j1 ) < 0,
+
+z(i1 , j1 ) = −1
+
+∆(i1 , j2 ) > 0,
+
+z(i1 , j2 ) = +1
+
+ter fixing a move z, the number of possible values for δ can
+grow very large as the population size N increases. Thus,
+the running time of a naive sampling method that computes
+p(δ) for all possible values and then samples from this discrete distribution scales poorly with N . To alleviate this issue, we prove that p(δ) is log-concave, which allows us to
+apply the discrete adaptive random sampling (ARS) algorithm (Gilks & Wild, 1992; Sheldon, 2013) to sample from
+p(δ) in time that depends only very mildly on the number
+of possible values, which nearly eliminates the dependence
+of running time on population size and allows us to scale to
+very large populations.
+Theorem 2. The distribution p(δ) is log-concave, i.e.,
+p(δ)2 ≥ p(δ − 1)p(δ + 1) for all δ ∈ Z.
+A proof is provided in the supplementary material.
+4.4. Initialization with Canonical Form
+Before running our sampler, we must initialize the latent
+variables q in a way that satisfies all of the constraints.
+We initialize q to a canonical form that always satisfies the
+equality constraint Aq = y (and thus the inequality constraint Aq ≥ y) by using the reasoning of Lemma 2. In
+particular, we iterate over over observation times tk while
+maintaining a “supply” of individuals that have lived from
+previous intervals; in each interval, we either decrement the
+supply (by ending the lifetime of some individuals) or increase it (by spawning new individuals) to explain the difference between yk and yk−1 . At the end of the process,
+any remaining individuals are created to be “unobserved”
+and distributed uniformly along the diagonal of q.
+4.5. Modifications for Poisson Model
+
+The final thing to check is that the non-negativity constraint
+r+z ≥ 0 remains satisfied. For the (i1 , j1 ) cell, we observe
+that r(i1 , j1 ) > r0 (i1 , j1 ) ≥ 0, so decreasing r(i1 , j1 ) by
+one cannot violate the constraint. The (i2 , j2 ) entry is similar. The (i2 , j1 ) and (i1 , j2 ) entries both increase, which
+cannot violate non-negativity.
+
+We briefly return to the discussion of the Mt /G/∞ queue,
+which is obtained from our model when N ∼ Poisson(λ)
+instead of being a fixed constant. Minor technical differences arise in this case. First, in the generative model,
+the distribution of q is no longer multinomial; instead, by
+standard Poisson thinning arguments, it now has entries
+that are independent Poisson random variables: q(i, j) ∼
+Poisson(λp(i, j)). In the sampler, the hard constraint
+1T q = N that arises from the multinomial distribution becomes unnecessary and invalid. As a result, pair moves
+are no longer necessary, and are replaced in the sampler by
+moves that change only a single entry of q. All other constraints remain valid, and cycle moves, which are designed
+to preserve the hard constraints Aq = y when α = 1, remain valid and necessary.
+
+4.3. Log-Concavity and Efficient Sampling
+
+5. Experiments
+
+As discussed in Section 4, the probability p(δ) for a specific
+move can be calculated efficiently (Eq. (2)). However, af-
+
+We now report several experiments to evaluate the performance of our sampler and demonstrate the advantages
+
+∆(i2 , j2 ) < 0,
+
+z(i1 , j2 ) = −1
+
+∆(i2 , j1 ) = ?,
+
+z(i2 , j1 ) = +1
+
+Since ∆ is integer-valued, it is clear that subtracting z from
+∆ reduces the sum of absolute values of ∆ by three for the
+first three cells, and increases by at most one for the last
+cell. We conclude that k∆ − zk1 < k∆k1 , as desired.
+
+Inference in a Partially Observed Queueing Model
+Effect of move pool on convergence, alpha = 1
+
+280
+
+260
+
+300
+
+Cumulative Mean NLL
+
+Cumulative Mean NLL
+
+pair
+cycle
+pair, cycle
+pair, mergesplit
+
+320
+
+240
+
+220
+
+200
+
+280
+
+260
+
+180
+
+240
+
+160
+
+220
+
+140
+
+Effect of move pool on convergence, alpha = 0.5
+
+340
+
+shuffle
+cycle
+shuffle, cycle
+shuffle, mergesplit
+
+0
+
+0.5
+
+1
+
+1.5
+
+2
+
+2.5
+
+200
+
+0
+
+0.5
+
+1
+
+1.5
+
+Running time
+
+2
+
+2.5
+
+3
+
+Running time
+
+(a)
+
+(b)
+
+Figure 3. Effect of move types on convergence for two values of the observability probability: (a) α = 1, (b) α = 0.5. Plots show
+cumulative mean negative log-likelihood of MCMC iterates vs. number of seconds.
+
+Effect of move types on convergence when α = 1. To
+evaluate the convergence of our Gibbs sampler under the
+hard constraints imposed when α = 1, we generated data
+for a population of size N = 100 from a model with
+emergence density fS (s) ∼ Normal(µ = 8, σ = 4) and
+lifespan density is fZ (z) ∼ Exp(τ = 3) (parameterized by the mean τ ) and computed observations at times
+t = {1, 2, 3, . . . , 20}. We then performed MCMC from the
+intial configuration described in Section 4 using different
+subsets of the full move pool.
+Figure 3(a) shows the convergence of the cumulative mean
+negative log likelihood (NLL) of the first 1500 MCMC iterates. When α = 1, the sampler with only pair moves converges to a mean NLL that is much higher than the other
+samplers: this is evidence that pair moves are insufficient
+for the sampler to reach higher probability configurations.
+Similarly, the sampler with only cycle moves cannot explore the whole space because it cannot adjust the lifespans
+of unobserved individuals (diagonal entries of q). In contrast, the samplers that use both pair and cycle moves are
+able to explore the complete space, and converge to a much
+lower mean NLL. Note that “pair, mergesplit” converges to
+the same mean NLL as “pair, cycle”. It is possible to show
+that merge/split moves can be used to simluate any cycle
+move, so “pair, mergesplit” is also an ergodic sampler.
+
+Runtime of ARS and non-ARS vs. N
+10
+
+3
+
+without ARS
+with ARS
+
+seconds
+
+of having a latent variable model. Our first two experiments empirically confirm the ergodicity result of Theorem 1 and demonstrate the improvement in mixing time
+resulting from adding supplemental moves to the sampler.
+Our third experiment demonstrates the running-time advantages gained by exploiting the log-concavity of the likelihood function within the sampler. We also provide a case
+study that compares the inference capabilities of our latent variable method compared to the previous approach
+of (Zonneveld, 1991).
+
+10
+
+2
+
+10
+
+1
+
+10
+
+0
+
+10
+
+-1
+
+10 1
+
+10 2
+
+10 3
+
+10 4
+
+10 5
+
+N
+
+Figure 4. Running time of 1000 MCMC iterations vs. population
+size for sampler with and without ARS.
+
+Effect of move types on convergence when α < 1. Figure 3(b) shows results of the same experiment for α = 0.5.
+In this case, pair moves alone are sufficient for convergence, so all samplers that include pair moves converge to
+the same mean NLL. In contrast, cycles moves are not sufficient for convergence, because they preserve the initial
+value of Aq (abundance at sampling times), which is not a
+valid constraint when α < 1. Adding cycle moves alone to
+the pair moves does not improve the speed of convergence.
+However, adding merge/split moves, which are a subset
+of cycle moves, does improve convergence speed. This
+demonstrates the fact that our more sophisticated moves are
+valuable even when hard constraints are not present.
+Impact of Log-Concavity on Efficiency of Sampler. To
+evaluate the running-time improvements of ARS over the
+naive sampling method for p(δ) we recorded the running
+time of 1000 MCMC iterations using the entire pool of
+moves with and without ARS. For this experiment, we fixed
+the parameters µ = 8.0, σ = 4.0, τ = 3.0, α = 0.5,
+
+Inference in a Partially Observed Queueing Model
+
+Step function of abundance over time, N = 30
+
+20
+
+20
+
+Step function of abundance over time, 200 draws, N = 30
+
+Posterior sample
+Zonneveld
+Observed counts
+
+Posterior sample
+Zonneveld
+Observed counts
+15
+
+Abundance
+
+Abundance
+
+15
+
+10
+
+5
+
+0
+
+10
+
+5
+
+0
+
+10
+
+20
+
+30
+
+40
+
+50
+
+0
+
+0
+
+10
+
+Days after May 1st
+
+20
+
+30
+
+40
+
+50
+
+Days after May 1st
+
+(a)
+
+(b)
+
+Figure 5. Plots of abundance over time as samples from the posterior on q. In both cases, fS (s) ∼ Normal(µ = 10.5, σ 2 = 7.84) and
+fZ (z) ∼ Exponential(τ = 7) with N = 100 and t = {0, 5, 10, . . . , 50}.
+
+t ∈ {1, 2, . . . , 20}, and varied the population size N to
+study the scalability of the sampler with respect to population size. Figure 4 shows the results, averaged over 10
+trials for each value of N . The naive method scales approximately linearly (note that both axes are log-scale) with N ,
+as expected, while the running time of the ARS-based algorithm grows very slowly with population size. As a result,
+it can scale to very large populations and outperforms the
+naive method by orders of magnitude as N increases.
+Benefits of Latent Variable Model. Our method provides
+a number of unique advantages over Zonneveld’s approximation to the likelihood. In particular, by retaining the latent variables, we can query the posterior distribution of life
+history events given observations. Figure 5(a) illustrates
+this comparison. Given a set of observed counts, Zonneveld’s likelihood approximation can be used to estimate
+model parameters; this then provides a mean abundance
+curve under those parameters (red line).
+Our method allows much finer-grained inference. For example, the blue line shows a sample from the joint posterior over abundance over the entire interval given the observations. This is an integer-valued curve that increases or
+decreases by one at arbitrary points in time when a new individual is born or an existing individual dies. In this case,
+α = 1 so the curve must exactly match the observations.
+To generate this sample, we first use our MCMC sampler
+to generate q from the posterior distribution given observations y. This specifies how many individuals are born
+in Ii and die in Ij for all i, j. We then generate lifespans
+for each individual as follows. For each (i, j), we generate
+q(i, j) lifespans from the conditional distribution of S and
+Z given S ∈ Ii and S + Z ∈ Ij . This is done by a simple
+rejection sampler.
+
+Figure 5(b) illustrates the entire posterior distribution by
+showing 200 semi-transparent samples from the posterior
+as in Figure 5(a). The samples in Figure 5(b) were obtained by running or MCMC sampler over q until convergence, and then thinning to obtain approximately independent samples. Notice that each of the sampled abundance
+curves converges to each of the observations, since α = 1.
+The increased spread of the samples between observation
+times gives a sense of the increased variability in the model
+as it interpolates between points.
+This case study illustrates the advantages of having a true
+latent variable model together with an efficient method to
+draw samples from the posterior distribution.
+
+6. Conclusion
+This paper introduces a novel latent variable model for
+inference in transient populations when only periodic observations of population size are available. The population model arises both in queueing theory as an Mt /G/∞
+queue and in ecological models for insect populations. Previous approaches in the ecology literature have made a
+simplifying assumption to make the likelihood tractable.
+Instead, we present a Gibbs sampler for the correct,
+but intractable, likelihood. The Gibbs sampler employs
+specially-designed moves to preserve the hard constraints
+present in this problem, and we prove that these lead to
+an ergodic sampler. We empirically validate the ergodicity result and show that special moves lead to faster mixing even when hard constraints are not present. Finally, we
+demonsrate the utility of this model over existing work with
+a comparative case study.
+
+Inference in a Partially Observed Queueing Model
+
+Acknowledgments
+This material is based upon work supported by the National Science Foundation under Grant No. 1125228
+and by the National Socio-Environmental Synthesis Center (SESYNC) under funding received from the National
+Science Foundation DBI-1052875.
+
+References
+Blanghaps, Nafna, Nov, Yuval, Weiss, Gideon, and Others.
+Sojourn time estimation in an M/G/∞ queue with partial information. Journal of Applied Probability, 50(4):
+1044–1056, 2013.
+Diaconis, Persi and Sturmfels, Bernd. Algebraic algorithms for sampling from conditional distributions. The
+Annals of Statistics, 26(1):363–397, 1998.
+Eick, Stephen G., Massey, William A., and Whitt, Ward.
+The physics of the Mt /G/∞ queue. Operations Research, 41(4):731–742, 1993.
+Geman, Stuart and Geman, Donald. Stochastic relaxation,
+Gibbs distributions, and the Bayesian restoration of images. IEEE Transactions on Pattern Analysis and Machine Intelligence, (6):721–741, 1984.
+Gilks, W. R. and Wild, P. Adaptive rejection sampling for
+Gibbs sampling. Journal of the Royal Statistical Society,
+41(2):337–348, 1992.
+Gross, Kevin, Kalendra, Eric J., Hudgens, Brian R., and
+Haddad, Nick M. Robustness and uncertainty in estimates of butterfly abundance from transect counts. Population Ecology, 49(3):191–200, 2007.
+Ross, J. V., Taimre, T., and Pollett, P. K. Estimation for
+queues from queue length data. Queueing Systems, 55:
+131–138, 2007.
+Sheldon, Daniel. Discrete adaptive rejection sampling.
+Technical Report UM-CS-2013-012, School of Computer Science, University of Massachusetts, Amherst,
+Massachusetts, May 2013.
+Sheldon, Daniel and Dietterich, Thomas. Collective graphical models. In Advances in Neural Information Processing Systems (NIPS), pp. 1161–1169, 2011.
+Zonneveld, Cor. Estimating death rates from transect
+counts. Ecological Entomology, 16(1):115–121, 1991.
+
+

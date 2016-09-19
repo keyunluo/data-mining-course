@@ -1,0 +1,2190 @@
+Scalable Deep Poisson Factor Analysis for Topic Modeling
+Zhe Gan
+ZHE . GAN @ DUKE . EDU
+Changyou Chen
+CHANGYOU . CHEN @ DUKE . EDU
+Ricardo Henao
+RICARDO . HENAO @ DUKE . EDU
+David Carlson
+DAVID . CARLSON @ DUKE . EDU
+Lawrence Carin
+LCARIN @ DUKE . EDU
+Department of Electrical and Computer Engineering, Duke University, Durham, NC 27708, USA
+
+Abstract
+A new framework for topic modeling is developed, based on deep graphical models, where
+interactions between topics are inferred through
+deep latent binary hierarchies. The proposed
+multi-layer model employs a deep sigmoid belief network or restricted Boltzmann machine,
+the bottom binary layer of which selects topics
+for use in a Poisson factor analysis model. Under
+this setting, topics live on the bottom layer of the
+model, while the deep specification serves as a
+flexible prior for revealing topic structure. Scalable inference algorithms are derived by applying
+Bayesian conditional density filtering algorithm,
+in addition to extending recently proposed work
+on stochastic gradient thermostats. Experimental
+results on several corpora show that the proposed
+approach readily handles very large collections
+of text documents, infers structured topic representations, and obtains superior test perplexities
+when compared with related models.
+
+1. Introduction
+Considerable research effort has been devoted to developing probabilistic models for documents. In the context of
+topic modeling, a popular approach is latent Dirichlet allocation (LDA) (Blei et al., 2003), a directed graphical model
+that aims to discover latent topics (word distributions) in
+collections of documents that are represented in bag-ofwords form. Recent work focuses on linking observed
+word counts in a document to latent nonnegative matrix
+factorization, via a Poisson distribution, termed Poisson
+factor analysis (PFA) (Zhou et al., 2012). Different choices
+of priors on the latent nonnegative matrix factorization can
+Proceedings of the 32 nd International Conference on Machine
+Learning, Lille, France, 2015. JMLR: W&CP volume 37. Copyright 2015 by the author(s).
+
+lead to equivalent marginal distributions to LDA, as well
+as to the Focused Topic Model (FTM) of Williamson et al.
+(2010).
+Additionally, hierarchical (“deep”) tree-structured topic
+models have been developed by using structured Bayesian
+nonparametric priors, including the nested Chinese restaurant process (nCRP) (Blei et al., 2004), and the recently
+proposed nested hierarchical Dirichlet process (nHDP)
+(Paisley et al., 2015). The nCRP is limited because it requires that each document select topics from a single path
+in a tree, while the nHDP allows each document to access
+the entire tree by defining priors over a base tree. However,
+the relationship between two paths in these models is only
+explicitly given on shared parent nodes.
+Another alternative for topic modeling is to develop undirected graphical models, such as the Replicated Softmax Model (RSM) (Salakhutdinov & Hinton, 2009a),
+based on a generalization of the restricted Boltzmann machine (RBM) (Hinton, 2002). Also closely related to the
+RBM is the neural autoregressive density estimator (DocNADE) (Larochelle & Lauly, 2012), a neural-networkbased method, that has been shown to outperform the RSM.
+Deep models, such as the Deep Belief Network (DBN)
+(Hinton et al., 2006), the Deep Boltzmann Machine (DBM)
+(Salakhutdinov & Hinton, 2009b), and layered Bayesian
+networks (Kingma & Welling, 2014; Mnih & Gregor, 2014;
+Danilo et al., 2014; Gan et al., 2015) are becoming popular,
+as they consistently obtain state-of-the-art performances on
+a variety of machine learning tasks. A popular theme in
+this direction of work is to extend shallow topic models to
+deep counterparts. In such a setting, documents arise from
+a cascade of layers of latent variables. For instance, DBNs
+and DBMs have been generalized to model documents by
+utilizing the RBM as a building block (Hinton & Salakhutdinov, 2011; Srivastava et al., 2013).
+Combining ideas from traditional Bayesian topic modeling
+and deep models, we propose a new deep generative model
+
+Scalable Deep Poisson Factor Analysis for Topic Modeling
+
+for topic modeling, in which the Bayesian PFA is employed
+to interact with the data at the bottom layer, while the Sigmoid Belief Network (SBN) (Neal, 1992), a directed graphical model closely related to the RBM, is utilized to buildup
+binary hierarchies. Furthermore, our model is not necessarily restricted to SBN modules, and it is shown how an undirected model such as the RBM can be incorporated into the
+framework as well.
+Compared with the original DBN and DBM, our proposed
+model: (i) tends to infer a more compact representation of
+the data, due to the “explaining away” effect described by
+Hinton et al. (2006); (ii) allows for more direct exploration
+of the effect of a single deep hidden node through ancestral
+sampling; and (iii) can be easily incorporated into larger
+probabilistic models in a modular fashion. Compared with
+the nCRP and nHDP, our proposed model only infers topics at the bottom layer, but defines a flexible prior to capture high-order relationships between topics via a deep binary hierarchical structure. In practice, this translates into
+better perplexities and very interesting topic correlations,
+although not in a tree representation as in nCRP or nHDP.
+Another important contribution we present is to develop
+two scalable Bayesian learning algorithms for our model:
+one based on the recently proposed Bayesian conditional
+density filtering (BCDF) algorithm (Guhaniyogi et al.,
+2014), and the other based on the stochastic gradient
+Nóse-Hoover thermostats (SGNHT) algorithm (Ding et al.,
+2014). We extend the SGNHT by introducing additional
+thermostat variables into the dynamic system, increasing
+the stability and convergence when compared to the original SGNHT algorithm.
+
+2. Model Formulation
+2.1. Poisson Factor Analysis
+×N
+Given a discrete matrix X ∈ ZP
+containing counts from
++
+N documents and P words, Poisson factor analysis (Zhou
+et al., 2012) assumes the entries of X are summations of
+K < ∞ latent counts, each produced by a latent factor (in
+the case of topic modeling, a hidden topic). We represent
+X using the following factor model
+
+X = Pois(Φ(Θ ◦ H(1) )) ,
+
+(1)
+
+where Φ is the factor loading matrix. Each column of Φ,
+φk ∈ 4P , encodes the relative importance of each word in
+topic k, with 4P representing the P -dimensional simplex.
+Θ ∈ RK×N
+is the factor score matrix. Each column, θ n ,
++
+contains relative topic intensities specific to document n.
+H(1) ∈ {0, 1}K×N is a latent binary feature matrix. Each
+column, h(1)
+n , defines a sparse set of topics associated with
+each document. For the single-layer PFA, the use of the
+superscript (1) on h(1)
+n is unnecessary; we introduce this
+
+notation here in preparation for the subsequent deep model,
+for which h(1)
+n will correspond to the associated first-layer
+latent binary units. The symbol ◦ represents the Hadamard,
+or element-wise multiplication of two matrices. The factor
+scores for document n are θ n ◦ h(1)
+n .
+
+A wide variety of algorithms have been developed by constructing PFAs with different prior specifications (Zhou &
+Carin, 2015). If H(1) is an all-ones matrix, LDA is recovered from (1) by employing Dirichlet priors on φk and θ n ,
+for k = 1, . . . , K and n = 1, . . . , N , respectively. This
+version of LDA is referred to as Dir-PFA by Zhou et al.
+(2012). For our proposed model, we construct PFAs by
+placing Dirichlet priors on φk and gamma priors on θ n .
+This is summarized as,
+PK
+(1)
+xpn = k=1 xpnk , xpnk ∼ Pois(φpk θkn hkn ) , (2)
+
+with priors specified as φk ∼ Dir(aφ , . . . , aφ ), θkn ∼
+Gamma(rk , pn /(1 − pn )), rk ∼ Gamma(γ0 , 1/c0 ), and
+γ0 ∼ Gamma(e0 , 1/f0 ).
+
+The novelty in our model comes from the prior for the binary feature matrix H(1) . Previously, Zhou & Carin (2015)
+proposed a beta-Bernoulli process prior on the columns
+N
+{h(1)
+n }n=1 with pn = 0.5. This model was called NBFTM, tightly related with the focused topic model (FTM)
+(Williamson et al., 2010). In the work presented here, we
+construct H(1) from a deep structure based on the SBN (or
+RBM) with binary latent units.
+2.2. Structured Priors on the Latent Binary Matrix
+The second part of our model consists of a deep structure
+for a binary hierarchy. To this end, we employ the SBN
+(or RBM). In the following we start by describing a singlelayer model with SBN (or RBM), and then we generalize it
+to a deep model.
+Modeling with the SBN We assume the latent vector for
+K1
+document n, h(1)
+. This matches most of the
+n ∈ {0, 1}
+RBM and SBN literature, for which typically the observed
+data are binary. In our model, however, these binary variables are not observed; they are hidden and related to the
+data through the PFA in (2).
+To construct a structured prior, we define another hidden
+K2
+set of units h(2)
+placed at a layer “above” h(1)
+n ∈ {0, 1}
+n .
+The layers are related through a set of weights defined by
+(1)
+(1)
+the matrix W(1) = [w1 . . . wK1 ]> ∈ RK1 ×K2 . An
+SBN model has the generative process,
+(2)
+
+(2)
+
+p(hk2 n = 1) = σ(ck2 ) ,
+
+
+(1)
+(1) > (1)
+(1)
+p(hk1 n = 1|h(2)
+,
+n ) = σ (w k1 ) hn + ck1
+(1)
+
+(2)
+
+(3)
+(4)
+
+(2)
+where hk1 n and hk2 n are elements of h(1)
+n and hn , re-
+
+Scalable Deep Poisson Factor Analysis for Topic Modeling
+
+Scalable Deep Poisson Factor Analysis for Topic Modeling
+
+spectively. The function
+1/(1 + ewe−xconsider
+) is theboth
+logistic
+220 σ(x)
+275
+In the ,
+experiments
+the deep SBN and
+h(3)
+n
+(1) 221 (2)
+276
+deep RBM for representation of the latent binary units,
+function, and ck1 and
+c
+are
+bias
+terms.
+The
+global
+paW(2)
+222 kwhich
+277
+2
+are connected to topic usage in a given document.
+223 to characterize the mapping from
+278
+h(2)
+rameters W(1) are used
+n
+224
+279
+(2)
+(1)
+(1)
+Discussion
+An
+important
+benefit
+of
+SBNs
+over
+RBMs
+W
+hn to hn for all documents.
+225
+280
+is that in the former sparsity or shrinkage priors can be
+γ0
+rk
+θ n h(1)
+n
+(1)
+226
+281
+readily imposed on the global parameters W , and fully
+282
+be implemented
+Modeling with the227
+RBMBayesian
+Theinference
+SBN iscanclosely
+relatedastoshown in Gan
+228
+283
+et al. (2015). The RBM relies on an approximation techa
+x
+φ
+φ
+n
+k
+the RBM, which is 229
+a Markov
+random
+field with
+the same
+284
+nique known
+as contrastive
+divergence
+(Hinton, 2002), for
+285
+n=1,...,N
+k=1,...,K
+bipartite structure as230the which
+SBN.prior
+The
+RBM defines
+a distrispecification
+for the model
+parameters is lim286
+ited.
+bution over a binary231
+vector
+that
+is
+proportional
+to
+the
+expo232
+287
+Figure
+1.
+Graphical
+model
+for
+the
+Deep
+Poisson
+Factor
+Analysis
+Figure
+1.
+Graphical
+model
+for
+the
+Deep
+Poisson
+Factor
+Analysis
+nential of its energy,233
+defined
+(using
+the same
+as in
+288
+2.3. Deep
+Architecture
+fornotation
+Topic Modeling
+with
+three
+layers
+of
+hidden
+binary
+hierarchies.
+The
+directed
+binary
+with
+three
+layers
+of
+hidden
+binary
+hierarchies.
+The
+directed
+binary
+(2)
+234
+289
+SBN) as E(h(1)
+hierarchy
+may
+be
+replaced
+by
+a
+deep
+Boltzmann
+machine.
+n , hn ) =Specifying a prior distribution on h(2) as in (3) might hierarchy
+be too
+may be replaced by a deep Boltzmann machine.
+n
+235
+290
+Alternatively,
+236(1) restrictive
+291
+(1) > (1)
+(2)(2)cases. (2)
+>
+(1)in some
+> (2) we can use another
+on
+another
+direction
+for
+scaling
+up
+inference
+by
+stochas−(hn ) c − (h
+Wprior h
+(hfact,
+) can
+c add
+. multiple
+(5) layers as
+fornhn−, in
+n we
+237n )SBN
+292
+tic algorithms, where mini-batches instead of the whole
+in
+Gan
+et
+al.
+(2015)
+to
+obtain
+a
+deep
+architecture,
+238
+293
+dataset are utilized in each iteration of the algorithms.
+In the experiments 239
+we consider
+both
+the deep
+SBN and
+294
+Specifically,
+we develop
+two
+stochastic
+Bayesian
+inference
+(1)
+(L)
+(L) QL
+(`−1) (`) We focus
+on
+learning
+our
+model
+with
+fully
+Bayesian
+alp(h
+,
+.
+.
+.
+,
+h
+)
+=
+p(h
+)
+p(h
+|h
+),
+(6)
+n
+n
+n
+`=2
+240
+295
+algorithms based on Bayesian conditional density filterdeep RBM for representation
+of then latent nbinary
+units,
+gorithms,
+however,
+emerging
+large-scale
+corpora
+prohibit
+241
+296
+ing (Guhaniyogi et al., 2014) and stochastic gradient therwhereusage
+L is the in
+number
+of layers,
+p(h(L)
+which are connected242to topic
+a given
+document.
+n ) is the prior for the
+mostats
+(Ding inference
+et al., 2014), both
+of which have
+standard
+MCMC
+algorithms
+to theoretical
+be applied 297
+di(`−1) (`)
+)
+is
+defined
+in
+(4),
+|h
+top
+layer
+defined
+as
+in
+(3),
+p(h
+n
+n
+243
+298
+guarantees
+in the sense
+of asymptotical
+convergence
+to the
+(`)
+K` ×K`+1
+(`) rectly.
+K`
+For
+example,
+in
+the
+experiments,
+we
+consider
+the
+and
+the
+weights
+W
+∈
+R
+and
+biases
+c
+∈
+R
+244
+299
+true posterior distribution.
+Remark An important
+benefit
+over RBMs
+is to keep
+are
+omitted of
+fromSBNs
+the conditional
+distributions
+no245
+300
+RCV1-v2
+and the Wikipedia corpora, which contain about
+tation
+uncluttered. Apriors
+similar can
+deep be
+architecture
+be dethat in the former sparsity
+or shrinkage
+read- may 800K
+246
+301
+3.1. Bayesian
+conditional density
+filtering
+and
+10M
+documents,
+respectively.
+Therefore,
+fast
+signed for the RBM (Salakhutdinov
+302
+ily imposed on the247global
+parameters W(1) , and& Hinton,
+fully 2009b).
+algorithms
+for big
+Bayesian
+are essential.
+Bayesian
+conditional
+densitylearning
+filtering (BCDF)
+is a re- While
+248
+303
+Instead
+of
+employing
+the
+beta-Bernoulli
+specification
+for
+Bayesian inference 249
+can be(1)implemented as shown in Gan
+cently
+proposedbased
+stochastic
+for Bayesian
+online
+304
+algorithms
+onalgorithm
+distributed
+architectures
+such
+hn as in the NB-FTM, which assumes independentparallel
+topic
+learning (Guhaniyogi et al., 2014), that extends Markov
+250
+305
+et al. (2015). The RBM
+reliesprobabilities,
+on an approximation
+usage
+we propose usingtech(6) instead as
+as the
+the
+parameter
+server
+(Ho
+et
+al.,
+2013;
+Li
+et
+al.,
+2014)
+chain Monte Carlo (MCMC) sampling to streaming data.
+251
+306
+priordivergence
+for h(1)
+nique known as contrastive
+n , thus (Hinton, 2002), for
+Sampling
+in BCDF
+by drawing
+from the
+condiare popular
+choices,
+inproceeds
+the work
+presented
+here,
+we focus
+252
+307
+which prior specification
+for model
+parameters is)p(h
+limited.
+(L)
+(1)
+tionaldirection
+posterior distributions
+of model
+obtained
+253
+308
+p(xn , hn ) = p(xn |h(1)
+another
+for scaling
+upparameters,
+inference
+by stochasn , . . . , hn ) , on(7)
+n
+by propagating surrogate conditional sufficient statistics
+254
+309
+tic algorithms,
+mini-batches
+instead
+the whole
+(SCSS). In where
+practice, we
+repeatedly update
+the SCSSofusing
+(L)
+(1)
+255
+310
+where
+hn , Modeling
+{h(1)
+n , . . . , hn }, and p(xn |hn ) as in (2).
+2.3. Deep Architecture
+for
+Topic
+mini-batch
+and drawiteration
+S samples from
+the condi256
+311
+(L)
+(2)
+dataset the
+arecurrent
+utilized
+in each
+of the
+algorithms.
+The prior p(h(1)
+n |hn . . . , hn ) can be seen as a flexible
+tional densities using, for example, a Gibbs sampler. This
+257
+312
+(2) over binary vectors that encodesSpecifically,
+prior distribution
+highwe
+develop
+two
+stochastic
+Bayesian
+inference
+Specifying a prior distribution
+on hn as in (3) might be (1)
+too
+eliminates the need to load the entire dataset into mem258
+313
+order interactions
+across elements of hn . The graphialgorithms
+based
+oncomputationally
+Bayesian conditional
+density filterory, and
+provides
+cheaper Gibbs updates.
+259
+314
+restrictive in some cases.
+Alternatively,
+we can
+usePoisson
+another
+cal
+model for our model,
+Deep
+Factor Analysis
+More importantly,
+be proved
+BCDF leads
+to an
+260
+315
+ing (Guhaniyogi
+et al.,it can
+2014)
+and that
+stochastic
+gradient
+ther(DPFA)
+iscan
+shown
+in Figure
+1.
+,
+in
+fact,
+we
+add
+multiple
+layers
+as
+SBN prior for h(2)
+n 261
+approximation of the conditional distributions that produce
+316
+mostats
+(Ding
+et
+al.,
+2014),
+both
+of
+which
+have
+theoretical
+samples from the correct target posterior asymptotically,
+in Gan et al. (2015) 262
+to obtain a deep architecture,
+317
+3. Scalable Posterior Inference
+oncein
+thethe
+entire
+datasetof
+is seen
+(Guhaniyogi et
+al., 2014).
+guarantees
+sense
+asymptotical
+convergence
+to 318
+the
+263
+Q
+L
+(L)
+(`−1) (`)
+(L) 264
+319
+),
+(6)
+)
+|h
+)
+=
+p(h
+p(h
+,
+.
+.
+.
+,
+h
+p(h(1)
+true
+posterior
+distribution.
+We
+focus
+on
+learning
+our
+model
+with
+fully
+Bayesian
+alIn
+the
+learning
+phase,
+we
+are
+interested
+in
+learning
+the
+n
+n
+n
+n
+n
+`=2
+265
+320
+gorithms, however, emerging large-scale corpora prohibit
+global parameters Ψg = ({φk }, {rk }, γ0 , {W(`) , c(`) }).
+266
+321
+(L)
+standard MCMC inference algorithms to be applied diDenote local variables as Ψl = (Θ, H(`) ), and let Sg repwhere L is the number
+of
+layers,
+p(h
+)
+is
+the
+prior
+for
+267
+322
+n in the experiments, we consider
+3.1.
+density
+filtering
+rectly. For example,
+theBayesian
+resent theconditional
+SCSS for Ψg , the
+BCDF algorithm
+can be sum268as RCV1-v2
+323
+the top layer defined
+in (3), and
+p(hthe(`−1)
+|h(`)
+) is defined
+Wikipedia
+corpora,
+which contain about
+marized in Algorithm 1. Specifically, we need to obtain the
+n
+n
+269
+324
+(`) 10M documents,
+K` ×K`+1respectively. Therefore,
+Bayesian
+conditional
+density
+filtering
+(BCDF)
+is
+a
+re800K
+and
+fast
+conditional
+densities,
+which
+can
+be
+readily
+derived
+granted
+as in (4), and the weights
+W ∈ R
+and biases
+270
+325
+algorithms
+for
+big
+Bayesian
+learning
+are
+essential.
+While
+the
+full
+local
+conjugacy
+of
+the
+proposed
+model.
+Using
+dot
+(`)
+K`
+cently
+proposed
+stochastic
+algorithm
+for
+Bayesian
+online
+P
+271 from
+326
+c ∈ R are omitted
+conditional
+parallelthe
+algorithms
+based on distributions
+distributed architectures such
+notation to represent marginal sums, e.g., x·nk , p xpnk ,
+272
+327
+al., 2014),
+that
+extends
+as the parameter
+server
+(Ho architecture
+et al., 2013; Li et al., learning
+2014)
+we(Guhaniyogi
+can write the keyet
+conditional
+densities
+for (2)
+as (Zhou Markov
+to keep notation uncluttered.
+A
+similar
+deep
+273
+328
+are popular choices, in the work presented here, wechain
+focus Monte
+& Carin,Carlo
+2015) (MCMC) sampling to streaming data.
+may be designed for
+274the RBM (Salakhutdinov & Hinton,
+329
+
+3. Scalable Posterior Inference
+
+2009b).
+
+Instead of employing the beta-Bernoulli specification for
+h(1)
+n as in the NB-FTM, which assumes independent topic
+usage probabilities, we propose using (6) instead as the
+prior for h(1)
+n , thus
+(1)
+(L)
+p(xn , hn ) = p(xn |h(1)
+n )p(hn , . . . , hn ) ,
+
+(7)
+
+(L)
+(1)
+where hn , {h(1)
+n , . . . , hn }, and p(xn |hn ) as in (2).
+(1) (2)
+(L)
+The prior p(hn |hn . . . , hn ) can be seen as a flexible
+prior distribution over binary vectors that encodes highorder interactions across elements of h(1)
+n . The graphical model for our model, Deep Poisson Factor Analysis
+(DPFA) is shown in Figure 1.
+
+Sampling in BCDF proceeds by drawing from the conditional posterior distributions of model parameters, obtained
+by propagating surrogate conditional sufficient statistics
+(SCSS). In practice, we repeatedly update the SCSS using
+the current mini-batch and draw S samples from the conditional densities using, for example, a Gibbs sampler. This
+eliminates the need to load the entire dataset into memory, and provides computationally cheaper Gibbs updates.
+More importantly, it can be proved that BCDF leads to an
+approximation of the conditional distributions that produce
+samples from the correct target posterior asymptotically,
+once the entire dataset is seen (Guhaniyogi et al., 2014).
+In the learning phase, we are interested in learning the
+global parameters Ψg = ({φk }, {rk }, γ0 , {W(`) , c(`) }).
+
+Scalable Deep Poisson Factor Analysis for Topic Modeling
+\k
+
+Algorithm 1 BCDF algorithm for DPFA.
+
+`
+and ψk`−1
+n =
+
+Input: text documents, i.e., a count matrix X.
+(0)
+(0)
+Initialize Ψg randomly and set Sg all to zero.
+for t = 1 to ∞ do
+Get one mini-batch X(t) .
+(t)
+(t−1)
+(t)
+(t−1)
+Initialize Ψg = Ψg
+, and Sg = Sg
+.
+(t)
+Initialize Ψl randomly.
+for s = 1 to S do
+Gibbs sampling for DPFA on X(t) .
+1:S
+Collect samples Ψ1:S
+and S1:S
+g , Ψl
+g .
+end for
+(t)
+(t)
+1:S
+Set Ψg = mean(Ψ1:S
+g ), and Sg = mean(Sg ).
+end for
+
+(`)
+
+φk |− ∼ Dir(aφ + x1·k , . . . , aφ + xP ·k ) ,
+(1)
+
+θkn |− ∼ Gamma(rk hkn + x·nk , pn ) ,
+
+
+(1)
+π̃kn
+hkn |− ∼ δ(x·nk = 0)Ber π̃kn +(1−π
++ δ(x·nk > 0) ,
+kn )
+
+(1)
+
+where π̃kn = πkn (1−pn )rk , πkn = σ((wk )> h(2)
+n +ck ),
+and ζpnk ∝ φpk θkn . Additional details are provided in
+the Supplementary Material. For the conditional distributions of W(`) and H(`) , we use the same data augmentation technique as in Gan et al. (2015), where Pólya-Gamma
+(`)
+(PG) variables γk` n (Polson et al., 2013) are introduced
+for hidden unit k` in layer ` corresponding to observa(`)
+tion v n . Specifically, each γk` n has conditional posterior
+(`)
+
+PG(1, (wk` )> h(`+1)
++ ck` ). If we place a Gaussian prior
+n
+(`)
+
+N (0, σ 2 I) on wk` , the posterior will still be Gaussian with
+P (`)
+(`)
+covariance matrix Σk` = [ n γk` n h(`+1)
+(h(`+1)
+)> +
+n
+n
+P
+(`)
+(`)
+(`)
+−2 −1
+σ I]
+and mean µk` = Σk` [ n (hk` n − 1/2 −
+(`) (`)
+
+ck` γk` n )hn(`+1) ]. Furthermore, for ` > 1, the conditional
+distribution of
+
+(`)
+hk` n
+
+can be obtained as
+
+1
+
+(`)
+
+hk` n ∼ Bernoulli (σ(dk` n )) ,
+
+(8)
+
+where
+(`−1)
+
+(`)
+
+(`)
+
+dk` n = (w·,k` )> h(`−1)
++ (wk` )> h(`+1)
++ ck`
+n
+n
+
+
+1X
+(`−1)
+(`−1)
+\k`
+(`−1)
+(`−1) 2
+−
+wk`−1 k` + γk`−1 n (2ψk`−1
+w
++
+(w
+)
+)
+,
+n k`−1 k`
+k`−1 k`
+2
+k`−1
+
+1
+
+Here and in the rest of the paper, whenever ` > L,
+defined as a zero vector, for conciseness.
+
+(`)
+
+(`−1)
+
+(`−1)
+
+wk`−1 k0 hk0 n + ck`−1 . Note that
+`
+
+`
+
+3.2. Stochastic gradient thermostats
+
+xpnk |− ∼ Multi(xpn ; ζpn1 , . . . , ζpnK ) ,
+
+(`)
+
+(`)
+
+k`0 6=k`
+
+w·,k`+1 and wk` represents the k`+1 th column and the
+transpose of the k` th row of W(`) , respectively. As can be
+(`)
+seen, the conditional posterior distribution of hk` n is both
+related to hn(`−1) and h(`+1)
+.
+n
+
+Denote local variables as Ψl = (Θ, H(`) ), and let Sg represent the SCSS for Ψg , the BCDF algorithm can be summarized in Algorithm 1. Specifically, we need to obtain the
+conditional densities, which can be readily derived granted
+the full local conjugacy of the proposed model. Using
+dot
+P
+notation to represent marginal sums, e.g., x·nk , p xpnk ,
+we can write the key conditional densities for (2) as (Zhou
+& Carin, 2015)
+
+(1)
+
+P
+
+(`)
+hn
+
+is
+
+Our second learning algorithm adopts the recently proposed SGNHT for large scale Bayesian sampling (Ding
+et al., 2014), which is more scalable and accurate than
+the previous BCDF algorithm. SGNHT generalizes the
+stochastic gradient Langevin dynamics (SGLD) (Welling
+& Teh, 2011) and the stochastic gradient Hamiltonian
+Monte Carlo (SGHMC) (Chen et al., 2014) by introducing
+momentum variables into the system, which is adaptively
+damped using a thermostat. The thermostat exchanges energy with the target system (e.g., a Bayesian model) to
+maintain a constant temperature; this has the potential advantage of making the system jump out of local modes easier and reach the equilibrium state faster (Ding et al., 2014).
+Specifically, let Ψg ∈ RM be model parameters2 which
+corresponds to the location of particles in a physical system, v ∈ RM be the momentum of these particles, which
+are driven by stochastic forces f˜ defined as the negative
+stochastic gradient (evaluated on a subset of data) of a
+Bayesian posterior, e.g., f˜(Ψg ) , −∇Ψg Ũ (Ψg ), where
+Ũ (Ψg ) is the negative log-posterior of a Bayesian model.
+The motion of the particles in the system are then defined
+by the following stochastic differential equations:
+√
+dΨg = vdt ,
+dv = f˜(Ψg )dt − ξvdt + DdW ,
+
+1 T
+dξ = M
+v v − 1 dt ,
+(9)
+
+where t indexes time, W is the standard Wiener process, ξ
+is called the thermostat variable which ensures the system
+temperature to be constant, and D is the variance of the
+total noise injected into the system and is assumed to be
+constant.
+It can be shown that under certain assumptions, the equilibrium distribution of system (9) corresponds to the model
+posterior (Ding et al., 2014). As a result, the SDE (9) can be
+solved by using the Euler-Maruyama scheme (Tuckerman,
+2010), where a mini-batch of the whole data is used to evaluate the stochastic gradient f˜. Note only one thermostat
+variable ξ is used in the SDE system (9); this is not robust
+enough to control the system temperature well because of
+the high dimensionality of Ψg . Based on the techniques in
+(Ding et al., 2014), we extend the SGNHT by introducing
+2
+
+With a little abuse of notation but for conciseness, we use Ψg
+to denote the reparameterized version of the parameters (such that
+Ψg ∈ RM ) if any, required in SGNHT.
+
+Scalable Deep Poisson Factor Analysis for Topic Modeling
+
+multiple thermostat variables (ξ1 , · · · , ξM ) into the system
+such that each ξi controls one degree of the particle momentum. Intuitively, this allows energy to be exchanged
+between particles and thermostats more efficiently, thus
+driving the system to equilibrium states more rapidly. Empirically we have also verified the superiority of the proposed modification over the original SGNHT. Formally, let
+2
+Ξ = diag(ξ1 , ξ2 , · · · , ξM ), q = diag(v12 , · · · , vM
+), we define our proposed SGNHT using the following SDEs
+dΨg = vdt ,
+
+dv = f˜(Ψg )dt − Ξvdt +
+dΞ = (q − I) dt ,
+
+√
+
+DdW ,
+(10)
+
+where I is the identity matrix. Interestingly, we are still
+able to prove that the equilibrium distribution of the above
+system corresponds to the model posterior.
+Theorem 1 The equilibrium distribution of the SDE system in (10) is p(Ψg , v, Ξ)
+
+o
+1
+1 n
+>
+∝ exp − v > v − U (Ψg ) − tr (Ξ − D) (Ξ − D)
+.
+2
+2
+The proof of the theorem is provided in the Supplementary
+Material. By Theorem 1, it is straightforward to see that
+the marginal distribution p(Ψg ) of p(Ψg , v, Ξ) is exactly
+the posterior of our Bayesian model. As a result, again we
+can generate approximate samples from p(Ψg , v, Ξ) using
+the Euler-Maruyama scheme and discard the auxiliary variables v and Ξ.
+Learning for the SBN-based model Our SBN-based
+model is illustrated in Figure 1. In the learning phase we
+are interested in learning the global parameters Ψg , the
+same as in P
+BCDF. The constraints inside the parameters
+{φk }, i.e., p φpk = 1, prevent the SGNHT from being
+applied directly. Although we can overcome this problem by using re-parameterization methods as in Patterson
+& Teh (2013), we find it converges better when considering information geometry for these parameters. As a result,
+we use stochastic gradient Riemannian Langevin dynamics (SGRLD) (Patterson & Teh, 2013) to sample the topicword distributions {φk }, and use the SGNHT to sample
+the remaining parameters. Based on the data augmentation for xpn above, Section 3.1 shows that the posteriors of
+{φk }’s are Dirichlet distributions. This enables us to apply
+the same scheme as the SGRLD for LDA (Patterson & Teh,
+2013) to sample {φk }’s. More details are provided in the
+Supplementary Material.
+The rest of the parameters can be straightforwardly sampled using the SGNHT algorithm. Specifically we need to
+calculate the stochastic gradients of W(`) and c(`) evaluated on a mini-batch of data (denote D as the index set of
+a mini-batch). Based on the model definition in (6), these
+
+can be calculated as
+∂ Ũ
+(`)
+∂wk`
+
+∂ Ũ
+(`)
+
+∂ck`
+
+=
+
+h
+
+i
+N X
+(`)
+(`)
+Eh(`) ,h(`+1) σ̃k` n − hk` n h(`+1)
+,
+n
+n
+n
+|D|
+n∈D
+
+=
+
+h
+i
+N X
+(`)
+(`)
+Eh(`) ,h(`+1) σ̃k` n − hk` n ,
+n
+n
+|D|
+n∈D
+
+(`)
+
+(`)
+
+(`)
+
+where σ̃k` n = σ((wk` )> h(`+1)
++ ck` ), and the expectan
+tion is taken over posteriors. As in the case of LDA (Patterson & Teh, 2013), no closed-form integrations can be
+obtained for the above gradients, we thus use Monte Carlo
+integration to approximate the quantity. Specifically, given
+(`) (`)
+{wk` , ck` }, we are able to collect samples of the local
+variables (h(`)
+n )n∈D by running a few Gibbs steps and then
+using these samples to approximate the intractable integra(`)
+tions. Exact conditional distributions for hk` n exist without variable augmentation, however, we found that this approach does not mix well due to the highly correlated struc(`)
+ture of hidden variables. Instead, we sample hk` n based on
+the same augmentation used in BCDF, given in (8).
+Learning for the RBM-based model As mentioned
+above, our RBM-based model is recovered when replacing the SBN with the RBM in Figure 1. Despite minor changes in the construction, the intractable normalizer
+which consists of model parameters (e.g., W(`) ) prohibits
+exact MCMC sampling from being applied. As a result, we
+develop an approximate learning algorithm that alternates
+between sampling ({φk }, {γk }, γ0 }) and ({W(`) , c(`) }).
+Specifically, we use the same conditional posteriors as in
+the SBN-based model to sample the former, but use the
+contrastive divergence algorithm (CD-1) (Hinton, 2002)
+for the latter. One main difference of our CD-1 algorithm
+w.r.t the original one is that the inputs (i.e., h(1)
+n ) are hidden variables. To make the CD-1 work, conditioned on
+other model parameters, we first sample h(1)
+n using the posterior given in Section 3.1, then conditioned on h(1)
+n , we
+apply the original CD-1 algorithm to calculate the approximate gradients for ({W(`) , c(`) }), which are then used for
+a gradient descent step in SGNHT. In fact, the CD-1 is
+also a stochastic approximate algorithm, discussed in Yuille
+(2005), making it naturally fit into our SGNHT framework.
+3.3. Discussion
+Both the BCDF and SGNHT are stochastic inference algorithms, allowing the models to be applied to large-scale
+data. In terms of ease of implementation, BCDF beats
+SGNHT in most cases, especially when the model is conjugate and the domain of parameters is constrained (e.g., variables on a simplex). However, in general BCDF is more restrictive than SGNHT. For example, BCDF prefers the conditional densities for all the parameters, which is unavail-
+
+Scalable Deep Poisson Factor Analysis for Topic Modeling
+
+able in some cases. Furthermore, BCDF has the limitation
+of being unable to deal with some big models where the
+number of model parameters is large, for instance, when
+the dimension of the hidden variables from the SBN in our
+model is huge. Finally, the conditions for BCDF to converge to the true posterior are more restricted. Altogether,
+these reasons make SGNHT more robust than BCDF.
+
+4. Related Work
+In traditional Bayesian topic models, topic correlations are
+typically modeled with shallow structures, e.g., the correlated topic model (Blei & Lafferty, 2007) with correlation
+between topic proportions imposed via the logistic normal
+distribution. There exist also some work on hierarchical
+(“deep”) correlation modeling, e.g., the hierarchical Dirichlet process (Teh et al., 2006), which models topic proportions hierarchically via a stack of DPs. The nested Chinese restaurant process (Blei et al., 2004) (nCRP) models
+topic hierarchies by defining a tree structure prior based on
+the Chinese restaurant process, and the nested hierarchical
+Dirichlet process (Paisley et al., 2015) extends the nCRP by
+allowing each document to be able to access all the paths
+in the tree. One major difference between these models
+and ours is that they focus on discovering topic hierarchies
+instead of modeling general topic correlations.
+In the deep learning community, topic models are mostly
+built using the RBM as a building block. For example,
+Hinton & Salakhutdinov (2011) and Maaloe et al. (2015)
+extended the DBN for topic modeling, while a deep version
+of the RSM was proposed by Srivastava et al. (2013). More
+recent work focuses on employing deep directed generative
+models for topic modeling, e.g., deep exponential families
+(Ranganath et al., 2015), a class of latent variable models
+extending the DBN by defining the distribution of hidden
+variables in each layer using the exponential family, instead
+of the restricted Bernoulli distribution.
+In terms of learning and inference algorithms, most of existing Bayesian topic models rely on MCMC methods or
+variational Bayes algorithms, which are impractical when
+dealing with large scale data. Therefore, stochastic variational inference algorithms have been developed (Hoffman
+et al., 2010; Mimno et al., 2012; Wang & Blei, 2012; Hoffman et al., 2013). Although scalable and usually fast converging, one unfavorable shortcoming of stochastic variational inference algorithms is the mean-field assumption on
+the approximate posterior.
+Another direction for scalable Bayesian learning relies on
+the theory from stochastic differential equations (SDE).
+Specifically, Welling & Teh (2011) proposed the first
+stochastic MCMC algorithm, called stochastic gradient
+Langevin dynamics (SGLD), for large scale Bayesian learn-
+
+ing. In order to make the learning faster, Patterson &
+Teh (2013) generalized SGLD by considering information
+geometry (Girolami & Calderhead, 2011; Byrne & Girolami, 2013) of model posteriors. Furthermore, Chen et al.
+(2014) generalized the SGLD by a second-order Langevin
+dynamic, called stochastic gradient Hamiltonian Monte
+Carlo (SGHMC). This is the stochastic version of the well
+known Hamiltonian MCMC sampler. One problem with
+SGHMC is that the unknown stochastic noise needs to be
+estimated to make the sampler correct, which is impractical. Stochastic gradient thermostats algorithms (SGNHT)
+overcome this problem by introducing the thermostat into
+the algorithm, such that the unknown stochastic noise could
+be adaptively absorbed into the thermostat, making the
+sampler asymptotically exact. Given the advantages of the
+SGNHT, in this paper we extend it to a multiple thermostats
+setting, where each thermostat exchanges energy with a degree of freedom of the system. Empirically we show that
+our extension improves on the original algorithm.
+
+5. Experiments
+We present experimental results on three publicly available
+corpora: a relatively small, 20 Newsgroups, a moderately
+large, Reuters Corpus Volume I (RCV1-v2), and a large
+one, Wikipedia. The first two corpora are the same as those
+used in Srivastava et al. (2013). Specifically, the 20 Newsgroups corpus contains 18,845 documents with a total of
+0.7M words and a vocabulary size of 2K. The data was
+partitioned chronologically into 11,314 training and 7,531
+test documents. The RCV1-v2 corpus contains 804,414
+newswire articles. There are 103 topics that form a tree
+hierarchy. After preprocessing, we are left with about 75M
+words, with a vocabulary size of 10K. We randomly select 794,414 documents for training and 10,000 for testing. Finally, we downloaded 10M random documents from
+Wikipedia using scripts provided in Hoffman et al. (2010)
+and randomly selected 1K documents for testing. As in
+Hoffman et al. (2010); Patterson & Teh (2013), a vocabulary size of 7,702 was taken from the top 10K words in
+Project Gutenberg texts.
+The DPFA model consisting of SBN is denoted as DPFASBN, while its RBM counterpart is denoted DPFA-RBM.
+The performance of DPFA is compared to that of the following models: LDA (Blei et al., 2003), NB-FTM (Zhou
+& Carin, 2015), nHDP (Paisley et al., 2015) and RSM
+(Salakhutdinov & Hinton, 2009a).
+For all the models considered, we calculate the predictive
+perplexities on the test set as follows: holding the global
+model parameters fixed, for each test document we randomly partition the words into a 80/20% split. We learn
+document-specific “local” parameters using the 80% portion, and then calculate the predictive perplexities on the
+
+Scalable Deep Poisson Factor Analysis for Topic Modeling
+1000
+
+940
+920
+900
+
+1600
+
+1200
+
+1500
+
+1150
+
+1400
+
+1200
+1100
+
+880
+
+1000
+
+860
+
+900
+
+840
+0
+
+800
+200K
+
+300
+
+600
+900
+Iteration Number
+
+1200
+
+1500
+
+1100
+
+1300
+
+Perplexity
+
+Perplexity
+
+960
+
+Perplexity
+
+LDA
+NB−FTM
+DPFA−SBN (Gibbs)
+DPFA−SBN (BCDF)
+DPFA−SBN (SGNHT)
+DPFA−RBM (SGNHT)
+
+980
+
+1050
+1000
+950
+900
+
+230K
+
+260K
+290K
+#Documents Seen
+
+320K
+
+350K
+
+850
+350K
+
+380K
+
+410K
+440K
+#Documents Seen
+
+470K
+
+500K
+
+Figure 2. Predictive perplexities on a held-out test set as a function of training documents seen. The number of hidden units in each layer
+is 128, 64, 32, respectively. (Left) 20 Newsgroups. (Middle) RCV1-v2. (Right) Wikipedia.
+
+remaining 20% subset. Evaluation details are provided in
+the Supplementary Material.
+For 20 Newsgroups and RCV1-v2 corpora, we use 2,000
+mini-batches for burn-in followed by 1,500 collection samples to calculate test perplexities; while for the Wikipedia
+dataset, 3,500 mini-batches are used for burn-in. The minibatch size for all stochastic algorithms is set to 100. To
+choose good parameters for SGNHT, e.g., the step size
+and the variance of the injected noise, we randomly choose
+about 10% documents from the training data as validation
+set. For BCDF, 100 MCMC iterations are evaluated for
+each mini-batch, with the first 60 samples discarded. We
+set the hyperparameters of DPFA as aφ = 1.01, c0 = e0 =
+1, f0 = 0.01, and pn = 0.5. The RSM is trained using
+convergence-divergence with step size 5 and a maximum
+of 10,000 iterations. For nHDP, we use the publicly available code from Paisley et al. (2015), in which stochastic
+variational Bayes (sVB) inference is implemented.
+20 Newsgroups The results for the 20 Newsgroups corpus are shown in Table 1. Perplexities are reported for our
+implementation of Gibbs sampling, BCDF and SGNHT,
+and the four considered competing methods. First, we examine the performance of different inference algorithms.
+As can be seen, for the same size model, e.g., 128-64-32
+(128 topics and 32 binary nodes on the top of the threelayer model), SGNHT can achieve essentially the same performance as Gibbs sampling, while BCDF is more likely to
+get trapped in a local mode. Next, we explore the advantage of employing deep models. Using three layers instead
+of two gives performance improvements in almost all the
+algorithms. In Gibbs sampling, there is an improvement of
+36 units for the DPFA-SBN model, when a second layer is
+learned (NB-FTM is the one-hidden-layer DPFA). Adding
+the third hidden layer further improves the test perplexity.
+Adding a sparsity-encouraging prior on W(`) acts as
+a more stringent regularization that prevents overfitting,
+when compared with the commonly used L2 norm (Gaussian prior). Furthermore, shrinkage priors have the effect of
+being able to effectively switch off the elements of W(`) ,
+which benefits interpretability and helps to infer the num-
+
+ber of units needed to represent the data. In our experiment,
+we observe that the DPFA-SBN model with the Student’s t
+prior on W(`) achieves a better test perplexity when compared with its counterpart without shrinkage.
+RCV1-v2 & Wiki We present results for the RCV1-v2
+and Wikipedia corpora in Table 3. Direct Gibbs sampling in
+such a (big-data) setting is prohibitive, and is thus not discussed. First, we explore the effect of utilizing a larger deep
+network. For our DPFA-SBN model using the SGNHT algorithm, we observe that making the network 8 time larger
+in each hidden layer decreases the test perplexities by 155
+and 84 units on RCV1-v2 and Wikipedia, respectively. This
+demonstrates the ability of our stochastic inference algorithm to scale up both in terms of model and corpus size.
+Both SBN and RBM can be utilized as the building block
+in our deep specification. For the RCV1-v2 corpus, our best
+result is obtained by utilizing a three-layer deep Boltzmann
+machine. However, for the 20 Newsgroups and Wikipedia
+corpora, with the same size model, we found empirically
+that the deep SBN achieves better performance.
+Compared with nHDP, our DPFA models define a more
+flexible prior on topic interactions, and therefore in practice we also consistently achieve better perplexity results.
+Table 1. Test perplexities for 20 Newsgroups. “Dim” represents
+the number of hidden units in each layer, starting from the bottom.
+DPFA-SBN-t represents the DPFA-SBN model with Student’s t
+prior on W(`) . () represents the base tree size in nHDP.
+M ODEL
+DPFA-SBN-t
+DPFA-SBN
+DPFA-SBN
+DPFA-RBM
+DPFA-SBN
+DPFA-SBN
+DPFA-SBN
+DPFA-RBM
+DPFA-SBN
+LDA
+NB-FTM
+RSM
+N HDP
+
+M ETHOD
+G IBBS
+G IBBS
+SGNHT
+SGNHT
+BCDF
+G IBBS
+SGNHT
+SGNHT
+BCDF
+G IBBS
+G IBBS
+CD5
+S VB
+
+D IM
+128-64-32
+128-64-32
+128-64-32
+128-64-32
+128-64-32
+128-64
+128-64
+128-64
+128-64
+128
+128
+128
+(10,10,5)
+
+P ERP.
+827
+846
+846
+896
+905
+851
+850
+893
+896
+893
+887
+877
+889
+
+Scalable Deep Poisson Factor Analysis for Topic Modeling
+Table 2. Top words from the 30 topics corresponding to the graph in Figure 3, learned by DPFA-SBN from the 20Newsgroup corpus.
+T1
+year
+hit
+runs
+good
+season
+T25
+god
+existence
+exist
+human
+atheism
+T65
+truth
+true
+point
+fact
+body
+
+T3
+people
+real
+simply
+world
+things
+T26
+fire
+fbi
+koresh
+children
+batf
+T69
+window
+server
+display
+manager
+client
+
+T8
+group
+groups
+reading
+newsgroup
+pro
+T29
+people
+life
+death
+kill
+killing
+T78
+drive
+disk
+scsi
+hard
+drives
+
+T9
+world
+country
+countries
+germany
+nazi
+T40
+wrong
+doesn
+jim
+agree
+quote
+T81
+makes
+power
+make
+doesn
+part
+
+T10
+evidence
+claim
+people
+argument
+agree
+T41
+image
+program
+application
+widget
+color
+T91
+question
+answer
+means
+true
+people
+
+We further show test perplexities as a function of documents processed during model learning in Figure 2. As can
+be seen, performance smoothly improves as the amount of
+data processed increases.
+Table 3. Test perplexities on RCV1-v2 and Wikipedia. “Dim” represents the number of hidden units in each layer, starting from the
+bottom. () represents the base tree size in nHDP.
+M ODEL
+DPFA-SBN
+DPFA-SBN
+DPFA-SBN
+DPFA-RBM
+DPFA-SBN
+LDA
+NB-FTM
+RSM
+N HDP
+
+M ETHOD
+SGNHT
+SGNHT
+SGNHT
+SGNHT
+BCDF
+BCDF
+BCDF
+CD5
+S VB
+
+D IM
+1024-512-256
+512-256-128
+128-64-32
+128-64-32
+128-64-32
+128
+128
+128
+(10,5,5)
+
+RCV
+964
+1073
+1143
+920
+1149
+1179
+1155
+1171
+1041
+
+W IKI
+770
+799
+876
+942
+986
+1059
+991
+1001
+932
+
+Sensitivity analysis We examined the sensitivity of the
+model performance with respect to batch sizes in SGNHT
+on the three corpora considered. We found that overall
+performance, both convergence speed and test perplexity,
+suffer considerably when the batch size is smaller than 10
+documents. However, for batch sizes larger than 50 (100
+for RCV1-v2) we obtain performances comparable to those
+shown in Tables 1 and 3. Additional details including test
+perplexity traces as a function of documents seen by the
+model are presented in the Supplementary Material.
+Visualization We can obtain a visual representation of
+the topic structure implied by the deep component of our
+DPFA model by computing correlations between topics using the weight matrices, W(`) , learned by DPFA-SBN, i.e,
+we evaluate the covariance W(1) W(2) (W(1) W(2) )> , then
+scale it accordingly. Figure 3 shows a graph for a subset
+of 30 topics (nodes), where edge thickness encodes correlation coefficients and we have chosen, to ease visualization, to show only coefficients larger than 0.85. In addi-
+
+T14
+game
+games
+win
+cup
+hockey
+T43
+boston
+toronto
+montreal
+chicago
+pittsburgh
+T94
+code
+mit
+comp
+unix
+source
+
+T15
+israel
+israeli
+jews
+arab
+jewish
+T50
+problem
+work
+problems
+system
+fine
+T112
+children
+father
+child
+mother
+son
+
+T19
+software
+modem
+port
+mac
+serial
+T54
+card
+video
+memory
+mhz
+bit
+T118
+people
+make
+person
+things
+feel
+
+T21
+files
+file
+ftp
+program
+format
+T55
+windows
+dos
+file
+win
+ms
+T120
+men
+women
+man
+hand
+world
+
+T24
+team
+players
+player
+play
+teams
+T64
+turkish
+armenian
+armenians
+turks
+armenia
+T126
+sex
+sexual
+cramer
+gay
+homosexual
+
+tion, Table 2 shows the top words for each topic depicted
+in Figure 3. We see three very interesting subgraphs repre54 54
+senting different 19categories,
+namely, sports, computers and
+19
+78 78
+politics/law. Complete
+tables
+of the most probable words
+55 55
+50
+in the learned topics, 50and
+graphs for the three corpora considered are presented
+21 21 in the Supplementary Material.
+69 69
+41 41
+94 94
+
+26 26
+54
+
+19
+
+78
+
+64 64
+29 29
+
+55
+1 1
+
+14 14
+69
+
+24 24
+
+43 43
+
+50
+
+3 3
+
+40 40
+
+112112
+15 15
+
+81 81
+120120118118
+10 10
+91 91
+65 65
+126126
+
+9 9
+
+21
+41
+
+94
+
+8 8
+
+26
+
+25 25
+
+Figure 3. Graphs induced by the correlation structure learned by
+64
+DPFA-SBN for the 20 Newsgroups.
+Each29node represents a topic
+3
+40
+with top words shown in Table 2.
+112
+81
+1
+
+15
+
+14
+
+9
+
+120
+
+118
+10
+
+24
+6. Conclusion
+43
+
+91
+
+65
+8
+
+126
+25
+
+We have presented the Deep Poisson Factor Analysis
+model, an extension of PFA, that models the high-order interactions between topics, via a deep binary hierarchical
+structure, employing SBNs and RBMs. To address largescale datasets, two stochastic Bayesian learning algorithms
+were developed. Experimental results on several corpora
+show that the proposed approach obtains superior test perplexities and reveals interesting topic structures.
+While this work has focused on unsupervised topic modeling, one can extend the model into a supervised version by
+joint modeling of the text with associated labels via latent
+binary features as in Zhang & Carin (2012). Furthermore,
+as mentioned in Section 5, global-local shrinkage priors
+(Polson & Scott, 2012) will encourage a large proportion
+of the elements of W(`) to be shrunk close to zero. By setting the number of hidden units to a reasonably large value,
+this provides a natural way to let the model select automatically the number of features actually needed.
+
+Scalable Deep Poisson Factor Analysis for Topic Modeling
+
+Acknowledgements
+This research was supported in part by ARO, DARPA,
+DOE, NGA and ONR.
+
+References
+Blei, D. M. and Lafferty, J. D. A correlated topic model of
+science. The Annals of Applied Statistics, 2007.
+Blei, D. M., Ng, A. Y., and Jordan, M. I. Latent Dirichlet
+allocation. JMLR, 2003.
+Blei, D. M., Griffiths, T., Jordan, M. I., and Tenenbaum,
+J. B. Hierarchical topic models and the nested Chinese
+restaurant process. NIPS, 2004.
+
+Hoffman, M. D., Blei, D. M., Wang, C., and Paisley, J.
+Stochastic variational inference. JMLR, 2013.
+Kingma, D. P. and Welling, M. Auto-encoding variational
+Bayes. ICLR, 2014.
+Larochelle, H. and Lauly, S. A neural autoregressive topic
+model. NIPS, 2012.
+Li, M., Andersen, D., Smola, A., and Yu, K. Communication efficient distributed machine learning with the
+parameter server. NIPS, 2014.
+Maaloe, L., Arngren, M., and Winther, O. Deep belief nets
+for topic modeling. arXiv:1501.04325, 2015.
+
+Byrne, S. and Girolami, M. Geodesic Monte Carlo on embedded manifolds. Scandinavian J. Statist, 2013.
+
+Mimno, D., Hoffman, M. D., and Blei, D. M. Sparse
+stochastic inference for latent Dirichlet allocation.
+ICML, 2012.
+
+Chen, T., Fox, E., and Guestrin, C. Stochastic gradient
+Hamiltonian Monte Carlo. ICML, 2014.
+
+Mnih, A. and Gregor, K. Neural variational inference and
+learning in belief networks. ICML, 2014.
+
+Danilo, J. R., Shakir, M., and Daan, W. Stochastic backpropagation and approximate inference in deep generative models. ICML, 2014.
+
+Neal, R. M. Connectionist learning of belief networks. Artificial Intelligence, 1992.
+
+Ding, N., Fang, Y., Babbush, R., Chen, C., Skeel, R. D., and
+Neven, H. Bayesian sampling using stochastic gradient
+thermostats. NIPS, 2014.
+Gan, Z., Henao, R., Carlson, D., and Carin, L. Learning
+deep sigmoid belief networks with data augmentation.
+AISTATS, 2015.
+Girolami, M. and Calderhead, B. Riemann manifold
+Langevin and Hamiltonian Monte Carlo methods. J. R.
+Statist. Soc. B, 2011.
+
+Paisley, J., Wang, C., Blei, D. M., and Jordan, M. I. Nested
+hierarchical Dirichlet processes. PAMI, 2015.
+Patterson, S. and Teh, Y. W. Stochastic gradient Riemannian Langevin dynamics on the probability simplex.
+NIPS, 2013.
+Polson, N. G. and Scott, J. G. Local shrinkage rules, Lévy
+processes and regularized regression. J. R. Statist. Soc.
+B, 2012.
+
+Guhaniyogi, R., Qamar, S., and Dunson, D. B. Bayesian
+conditional density filtering. arXiv:1401.3632, 2014.
+
+Polson, N. G., Scott, J. G., and Windle, J. Bayesian inference for logistic models using Pólya-Gamma latent
+variables. JASA, 2013.
+
+Hinton, G. E. Training products of experts by minimizing
+contrastive divergence. Neural computation, 2002.
+
+Ranganath, R., Tang, L., Charlin, L., and Blei, D. M. Deep
+exponential families. AISTATS, 2015.
+
+Hinton, G. E. and Salakhutdinov, R. Discovering binary
+codes for documents by learning deep generative models. Topics in Cognitive Science, 2011.
+
+Salakhutdinov, R. and Hinton, G. E. Replicated softmax:
+an undirected topic model. NIPS, 2009a.
+
+Hinton, G. E., Osindero, S., and Teh, Y. W. A fast learning algorithm for deep belief nets. Neural computation,
+2006.
+Ho, Q., Cipar, J., Cui, H., Kim, J. K., Lee, S., Gibbons,
+P. B., Gibbons, G. A., Ganger, G. R., and Xing, E. P.
+More effective distributed ml via a stale synchronous
+parallel parameter server. NIPS, 2013.
+Hoffman, M. D., Blei, D. M., and Bach, F. Online learning
+for latent Dirichlet allocation. NIPS, 2010.
+
+Salakhutdinov, R. and Hinton, G. E. Deep Boltzmann machines. AISTATS, 2009b.
+Srivastava, N., Salakhutdinov, R., and Hinton, G. E. Modeling documents with deep Boltzmann machines. UAI,
+2013.
+Teh, Y. W., Jordan, M. I., Beal, M. J., and Blei, D. M. Hierarchical Dirichlet processes. JASA, 2006.
+Tuckerman, M. E. Statistical Mechanics: Theory and
+Molecular Simulation. Oxford University Press, 2010.
+
+Scalable Deep Poisson Factor Analysis for Topic Modeling
+
+Wang, C. and Blei, D. M. Truncation-free stochastic variational inference for Bayesian nonparametric models.
+NIPS, 2012.
+Welling, M. and Teh, Y. W. Bayesian learning via stochastic gradient Langevin dynamics. ICML, 2011.
+Williamson, S., Wang, C., Heller, K., and Blei, D. M. The
+IBP compound Dirichlet process and its application to
+focused topic modeling. ICML, 2010.
+Yuille, A. The convergence of contrastive divergences.
+NIPS, 2005.
+Zhang, X. and Carin, L. Joint modeling of a matrix with
+associated text via latent binary features. NIPS, 2012.
+Zhou, M. and Carin, L. Negative binomial process count
+and mixture modeling. PAMI, 2015.
+Zhou, M., Hannah, L., Dunson, D., and Carin, L. Betanegative binomial process and Poisson factor analysis.
+AISTATS, 2012.
+
+

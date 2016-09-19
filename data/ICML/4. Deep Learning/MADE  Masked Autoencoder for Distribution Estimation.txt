@@ -1,0 +1,1171 @@
+MADE: Masked Autoencoder for Distribution Estimation
+Mathieu Germain
+Université de Sherbrooke, Canada
+Karol Gregor
+Google DeepMind
+
+MATHIEU . GERMAIN 2@ USHERBROOKE . CA
+
+KAROL . GREGOR @ GMAIL . COM
+
+Iain Murray
+University of Edinburgh, United Kingdom
+Hugo Larochelle
+Université de Sherbrooke, Canada
+
+Abstract
+There has been a lot of recent interest in designing
+neural network models to estimate a distribution
+from a set of examples. We introduce a simple
+modification for autoencoder neural networks that
+yields powerful generative models. Our method
+masks the autoencoder’s parameters to respect
+autoregressive constraints: each input is reconstructed only from previous inputs in a given ordering. Constrained this way, the autoencoder
+outputs can be interpreted as a set of conditional
+probabilities, and their product, the full joint probability. We can also train a single network that
+can decompose the joint probability in multiple
+different orderings. Our simple framework can be
+applied to multiple architectures, including deep
+ones. Vectorized implementations, such as on
+GPUs, are simple and fast. Experiments demonstrate that this approach is competitive with stateof-the-art tractable distribution estimators. At test
+time, the method is significantly faster and scales
+better than other autoregressive estimators.
+
+1. Introduction
+Distribution estimation is the task of estimating a joint distribution p(x) from a set of examples {x(t) }Tt=1 , which is by
+definition a general problem. Many tasks in machine learning can be formulated as learning only specific properties of
+a joint distribution. Thus a good distribution estimator can
+be used in many scenarios, including classification (Schmah
+Proceedings of the 32 nd International Conference on Machine
+Learning, Lille, France, 2015. JMLR: W&CP volume 37. Copyright 2015 by the author(s).
+
+I . MURRAY @ ED . AC . UK
+
+HUGO . LAROCHELLE @ USHERBROOKE . CA
+
+et al., 2009), denoising or missing input imputation (Poon
+& Domingos, 2011; Dinh et al., 2014), data (e.g. speech)
+synthesis (Uria et al., 2015) and many others. The very
+nature of distribution estimation also makes it a particular
+challenge for machine learning. In essence, the curse of
+dimensionality has a distinct impact because, as the number
+of dimensions of the input space of x grows, the volume of
+space in which the model must provide a good answer for
+p(x) exponentially increases.
+Fortunately, recent research has made substantial progress
+on this task. Specifically, learning algorithms for a variety of neural network models have been proposed (Bengio
+& Bengio, 2000; Larochelle & Murray, 2011; Gregor &
+LeCun, 2011; Uria et al., 2013; 2014; Kingma & Welling,
+2014; Rezende et al., 2014; Bengio et al., 2014; Gregor
+et al., 2014; Goodfellow et al., 2014; Dinh et al., 2014).
+These algorithms are showing great potential in scaling to
+high-dimensional distribution estimation problems. In this
+work, we focus our attention on autoregressive models (Section 3). Computing p(x) exactly for a test example x is
+tractable with these models. However, the computational
+cost of this operation is still larger than typical neural network predictions for a D-dimensional input. For previous
+deep autoregressive models, evaluating p(x) costs O(D)
+times more than a simple neural network point predictor.
+This paper’s contribution is to describe and explore a simple
+way of adapting autoencoder neural networks that makes
+them competitive tractable distribution estimators that are
+faster than existing alternatives. We show how to mask the
+weighted connections of a standard autoencoder to convert it
+into a distribution estimator. The key is to use masks that are
+designed in such a way that the output is autoregressive for a
+given ordering of the inputs, i.e. that each input dimension is
+reconstructed solely from the dimensions preceding it in the
+
+MADE: Masked Autoencoder for Distribution Estimation
+
+ordering. The resulting Masked Autoencoder Distribution
+Estimator (MADE) preserves the efficiency of a single pass
+through a regular autoencoder. Implementation on a GPU is
+straightforward, making the method scalable.
+The single hidden layer version of MADE corresponds to the
+previously proposed autoregressive neural network of Bengio & Bengio (2000). Here, we go further by exploring
+deep variants of the model. We also explore training MADE
+to work simultaneously with multiple orderings of the input observations and hidden layer connectivity structures.
+We test these extensions across a range of binary datasets
+with hundreds of dimensions, and compare its statistical
+performance and scaling to comparable methods.
+
+2. Autoencoders
+A brief description of the basic autoencoder, on which this
+work builds upon, is required to clearly grasp what follows.
+In this paper, we assume that we are given a training set of
+examples {x(t) }Tt=1 . We concentrate on the case of binary
+observations, where for every D-dimensional input x, each
+input dimension xd belongs in {0, 1}. The motivation is
+to learn hidden representations of the inputs that reveal the
+statistical structure of the distribution that generated them.
+An autoencoder attempts to learn a feed-forward, hidden
+representation h(x) of its input x such that, from it, we can
+b which is as close as possible to x.
+obtain a reconstruction x
+Specifically, we have
+h(x) = g(b + Wx)
+b = sigm(c + Vh(x)) ,
+x
+
+(1)
+
+(2)
+
+where W and V are matrices, b and c are vectors, g is a nonlinear activation function and sigm(a) = 1/(1 + exp(−a)).
+Thus, W represents the connections from the input to the
+hidden layer, and V represents the connections from the
+hidden to the output layer.
+
+and output layers. Its main disadvantage is that the representation it learns can be trivial. For instance, if the hidden
+layer is at least as large as the input, hidden units can each
+learn to “copy” a single input dimension, so as to reconstruct all inputs perfectly at the output layer. One obvious
+consequence of this observation is that the loss function
+of Equation 3 isn’t in fact a proper log-likelihood function. Indeed, since perfect reconstruction
+be achieved,
+Q could
+the implied data ‘distribution’ q(x) = d x
+bxd d (1−b
+xd )1−xd
+could be learned
+P to be 1 for any x and thus not be properly
+normalized ( x q(x) =
+6 1).
+
+3. Distribution Estimation as Autoregression
+
+An interesting question is what property we could impose
+on the autoencoder, such that its output can be used to obtain
+valid probabilities. Specifically, we’d like to be able to write
+p(x) in such a way that it could be computed based on the
+output of a properly corrected autoencoder.
+First, we can use the fact that, for any distribution, the probability product rule implies that we can always decompose
+it into the product of its nested conditionals
+
+p(x) =
+
+d=1
+
+`(x) =
+
+D
+X
+d=1
+
+−xd log x
+bd − (1−xd ) log(1−b
+xd ) .
+
+(3)
+
+By treating x
+bd as the model’s probability that xd is 1, the
+cross-entropy can be understood as taking the form of a
+negative log-likelihood function. Training the autoencoder
+corresponds to optimizing the parameters {W, V, b, c} to
+reduce the average loss on the training examples, usually
+with (mini-batch) stochastic gradient descent.
+One advantage of the autoencoder paradigm is its flexibility.
+In particular, it is straightforward to obtain a deep autoencoder by inserting more hidden layers between the input
+
+p(xd | x<d ),
+
+(4)
+
+where x<d = [x1 , . . . , xd−1 ]> .
+By defining p(xd = 1 | x<d ) = x̂d , and thus p(xd =
+0 | x<d ) = 1− x̂d , the loss of Equation 3 becomes a valid
+negative log-likelihood:
+− log p(x) =
+=
+
+D
+X
+d=1
+
+D
+X
+d=1
+
+To train the autoencoder, we must first specify a training
+loss function. For binary observations, a natural choice is
+the cross-entropy loss:
+
+D
+Y
+
+− log p(xd | x<d )
+−xd log p(xd = 1 | x<d )
+
+(5)
+
+− (1−xd ) log p(xd = 0 | x<d )
+
+= `(x) .
+
+This connection provides a way to define autoencoders
+that can be used for distribution estimation. Each output
+x
+bd = p(xd | x<d ) must be a function taking as input x<d
+only and outputting the probability of observing value xd
+at the dth dimension. In particular, the autoencoder forms
+a proper distribution if each output unit x̂d only depends
+on the previous input units x<d , and not the other units
+x≥d = [xd , . . . , xD ]> .
+We refer to this property as the autoregressive property,
+because computing the negative log-likelihood (5) is equivalent to sequentially predicting (regressing) each dimension
+of input x.
+
+MADE: Masked Autoencoder for Distribution Estimation
+
+4. Masked Autoencoders
+The question now is how to modify the autoencoder so as
+to satisfy the autoregressive property. Since output x̂d must
+depend only on the preceding inputs x<d , it means that
+there must be no computational path between output unit
+x̂d and any of the input units xd , . . . , xD . In other words,
+for each of these paths, at least one connection (in matrix
+W or V) must be 0.
+A convenient way of zeroing connections is to elementwisemultiply each matrix by a binary mask matrix, whose entries
+that are set to 0 correspond to the connections we wish to
+remove. For a single hidden layer autoencoder, we write
+W
+
+h(x) = g(b + (W  M )x)
+x̂
+
+=
+
+V
+
+sigm(c + (V  M )h(x))
+
+(6)
+(7)
+
+where MW and MV are the masks for W and V respectively. It is thus left to the masks MW and MV to satisfy
+the autoregressive property.
+To impose the autoregressive property we first assign each
+unit in the hidden layer an integer m between 1 and D−1
+inclusively. The k th hidden unit’s number m(k) gives the
+maximum number of input units to which it can be connected. We disallow m(k) = D since this hidden unit would
+depend on all inputs and could not be used in modelling
+any of the conditionals p(xd | x<d ). Similarly, we exclude
+m(k) = 0, as it would create constant hidden units.
+The constraints on the maximum number of inputs to each
+hidden unit are encoded in the matrix masking the connections between the input and hidden units:
+
+1 if m(k) ≥ d
+W
+Mk,d = 1m(k)≥d =
+(8)
+0 otherwise,
+for d ∈ {1, . . . , D} and k ∈ {1, . . . , K}. Overall, we need
+to encode the constraint that the dth output unit is only
+connected to x<d (and thus not to x≥d ). Therefore the
+output weights can only connect the dth output to hidden
+units with m(k) < d, i.e. units that are connected to at most
+d−1 input units. These constraints are encoded in the output
+mask matrix:
+
+1 if d > m(k)
+V
+Md,k = 1d>m(k) =
+(9)
+0 otherwise,
+again for d ∈ {1, . . . , D} and k ∈ {1, . . . , K}. Notice that,
+from this rule, no hidden units will be connected to the first
+output unit x̂1 , as desired.
+From these mask constructions, we can easily demonstrate
+that the corresponding masked autoencoder satisfies the autoregressive property. First, we note that, since the masks
+MV and MW represent the network’s connectivity, their
+matrix product MV,W = MV MW represents the connectivity between the input and the output layer. Specifically,
+
+MdV,W
+is the number of network paths between output unit
+0 ,d
+x̂d0 and input unit xd . Thus, to demonstrate the autoregressive property, we need to show that MV,W is strictly lower
+diagonal, i.e. MdV,W
+is 0 if d0 ≤ d. By definition of the
+0 ,d
+matrix product, we have:
+MdV,W
+=
+0 ,d
+
+K
+X
+
+W
+MdV0 ,k Mk,d
+=
+
+k=1
+
+K
+X
+
+1d0 >m(k) 1m(k)≥d . (10)
+
+k=1
+
+If d0 ≤ d, then there are no values for m(k) such that it is
+both strictly less than d0 and greater or equal to d. Thus
+MdV,W
+is indeed 0.
+0 ,d
+Constructing the masks MV and MW only requires an assignment of the m(k) values to each hidden unit. One could
+imagine trying to assign an (approximately) equal number
+of units to each legal value of m(k). In our experiments, we
+instead set m(k) by sampling from a uniform discrete distribution defined on integers from 1 to D−1, independently
+for each of the K hidden units.
+Previous work on autoregressive neural networks have also
+found it advantageous to use direct connections between the
+input and output layers (Bengio & Bengio, 2000). In this
+context, the reconstruction becomes:
+x̂ = sigm(c + (V  MV )h(x) + (A  MA )x) , (11)
+where A is the parameter connection matrix and MA is its
+mask matrix. To satisfy the autoregressive property, MA
+simply needs to be a strictly lower diagonal matrix, filled
+otherwise with ones. We used such direct connections in
+our experiments as well.
+4.1. Deep MADE
+One advantage of the masked autoencoder framework described in the previous section is that it naturally generalizes
+to deep architectures. Indeed, as we’ll see, by assigning a
+maximum number of connected inputs to all units across
+the deep network, masks can be similarly constructed so as
+to satisfy the autoregressive property.
+For networks with L > 1 hidden layers, we use superscripts
+to index the layers. The first hidden layer matrix (previously
+W) will be denoted W1 , the second hidden layer matrix will
+be W2 , and so on. The number of hidden units (previously
+K) in each hidden layer will be similarly indexed as K l ,
+where l is the hidden layer index. We will also generalize
+the notation for the maximum number of connected inputs
+of the k th unit in the lth layer to ml (k).
+We’ve already discussed how to define the first layer’s mask
+matrix such that it ensures that its k th unit is connected to
+at most m(k) (now m1 (k)) inputs. To impose the same
+property on the second hidden layer, we must simply make
+sure that each unit k 0 is only connected to first layer units
+
+MADE: Masked Autoencoder for Distribution Estimation
+
+x
+!1
+
+x
+!2
+
+p(x1 |x2 , x3 )
+
+x
+!3
+
+3
+
+2
+
+=M
+
+W1
+x2
+
+x3
+
+Autoencoder
+
+x
+
+Masks
+
+to be greater than or equal to the minimum connectivity at
+the previous layer, i.e. mink0 ml−1 (k 0 ).
+
+2
+
+4.2. Order-agnostic training
+1
+
+2
+
+2
+
+1
+
+2
+
+1
+
+2
+
+2
+
+W2
+
+= MW
+x1
+
+1
+
+= MV
+
+V
+
+W
+
+p(x3 |x2 )
+
+p(x2 )
+
+1
+
+3
+
+1
+
+2
+
+x1
+
+x2
+
+x3
+
+MADE
+
+Figure 1. Left: Conventional three hidden layer autoencoder.
+Input in the bottom is passed through fully connected layers and
+point-wise nonlinearities. In the final top layer, a reconstruction
+specified as a probability distribution over inputs is produced.
+As this distribution depends on the input itself, a standard autoencoder cannot predict or sample new data. Right: MADE.
+The network has the same structure as the autoencoder, but a set
+of connections is removed such that each input unit is only predicted from the previous ones, using multiplicative binary masks
+1
+2
+(MW , MW , MV ). In this example, the ordering of the input
+is changed from 1,2,3 to 3,1,2. This change is explained in section 4.2, but is not necessary for understanding the basic principle.
+The numbers in the hidden units indicate the maximum number
+of inputs on which the kth unit of layer l depends. The masks are
+constructed based on these numbers (see Equations 12 and 13).
+These masks ensure that MADE satisfies the autoregressive property, allowing it to form a probabilistic model, in this example
+p(x) = p(x2 ) p(x3 |x2 ) p(x1 |x2 , x3 ). Connections in light gray
+correspond to paths that depend only on 1 input, while the dark
+gray connections depend on 2 inputs.
+
+connected to at most m2 (k 0 ) inputs, i.e. the first layer units
+such that m1 (k) ≤ m2 (k 0 ).
+One can generalize this rule to any layer l, as follows:
+
+1 if ml (k 0 ) ≥ ml−1 (k)
+Wl
+Mk0 ,k = 1ml (k0 )≥ml−1 (k) =
+0 otherwise.
+(12)
+Also, taking l = 0 to mean the input layer and defining
+m0 (d) = d (which is intuitive, since the dth input unit indeed takes its values from the d first inputs), this definition
+also applies for the first hidden layer weights. As for the
+output mask, we simply need to adapt its definition by using
+the connectivity constraints of the last hidden layer mL (k)
+instead of the first:
+
+1 if d > mL (k)
+V
+Md,k = 1d>mL (k) =
+(13)
+0 otherwise.
+Like for the single hidden layer case, the values for ml (k)
+for each hidden layer l ∈ {1, . . . , L} are sampled uniformly.
+To avoid unconnected units, the value for ml (k) is sampled
+
+So far, we’ve assumed that the conditionals modelled by
+MADE were consistent with the natural ordering of the
+dimensions of x. However, we might be interested in modelling the conditionals associated with an arbitrary ordering
+of the input’s dimensions.
+Specifically, Uria et al. (2014) have shown that training
+an autoregressive model on all orderings can be beneficial.
+We refer to this approach as order-agnostic training. It can
+be achieved by sampling an ordering before each stochastic/minibatch gradient update of the model. There are two
+advantages of this approach. Firstly, missing values in partially observed input vectors can be imputed efficiently: we
+invoke an ordering where observed dimensions are all before unobserved ones, making inference straightforward.
+Secondly, an ensemble of autoregressive models can be constructed on the fly, by exploiting the fact that the conditionals
+for two different orderings are not guaranteed to be exactly
+consistent (and thus technically correspond to slightly different models). An ensemble is then easily obtained by
+sampling a set of orderings, computing the probability of x
+under each ordering and averaging.
+Conveniently, in MADE, the ordering is simply represented
+by the vector m0 = [m0 (1), . . . , m0 (D)]. Specifically,
+m0 (d) corresponds to the position of the original dth dimension of x in the product of conditionals. Thus, a random
+ordering can be obtained by randomly permuting the ordered vector [1, . . . , D]. From these values of each m0 , the
+first hidden layer mask matrix can then be created. During
+order-agnostic training, randomly permuting the last value
+of m0 again is sufficient to obtain a new random ordering.
+4.3. Connectivity-agnostic training
+One advantage of order-agnostic training is that it effectively
+allows us to train as many models as there are orderings,
+using a common set of parameters. This can be exploited
+by creating ensembles of models at test time.
+In MADE, in addition to choosing an ordering, we also have
+to choose each hidden unit’s connectivity constraint ml (k).
+Thus, we could imaging training MADE to also be agnostic
+of the connectivity pattern generated by these constraints. To
+achieve this, instead of sampling the values of ml (k) for all
+units and layers once and for all before training, we actually
+resample them for each training example or minibatch. This
+is still practical, since the operation of creating the masks is
+easy to parallelize. Denoting ml = [ml (1), . . . , ml (K l )],
+and assuming an element-wise and parallel implementation
+of the operation 1a≥b for vectors, such that 1a≥b is a matrix
+
+MADE: Masked Autoencoder for Distribution Estimation
+
+Algorithm 1 Computation of p(x) and learning gradients
+for MADE with order and connectivity sampling. D is the
+size of the input, L the number of hidden layers and K the
+number of hidden units.
+Input: training observation vector x
+Output: p(x) and gradients of − log p(x) on parameters
+l
+
+# Sampling m vectors
+m0 ← shuffle([1, . . . , D])
+for l from 1 to L do
+for k from 1 to K l do
+ml (k) ← Uniform([mink0 ml−1 (k 0 ), . . . , D−1])
+end for
+end for
+# Constructing masks for each layer
+for l from 1 to L do
+l
+MW ← 1ml ≥ml−1
+end for
+MV ← 1m0 >mL
+# Computing p(x)
+h0 (x) ← x
+for l from 1 to L do
+l
+hl (x) ← g(bl + (Wl  MW )hl−1 (x))
+end for
+b ← sigm(c + (V  MV )hL (x))
+x
+
+PD
+x
+log
+x
+b
++
+(1−x
+)
+log(1−b
+x
+)
+p(x) ← exp
+d
+d
+d
+d
+d=1
+
+# Computing gradients of − log p(x)
+b−x
+tmp ← x
+δc ← tmp
+
+δV ← tmp hL (x)>  MV
+tmp ← (tmp> (V  MV ))>
+for l from L to 1 do
+l
+tmp ← tmp  g0 (bl + (Wl  MW )hl−1 (x))
+δbl ← tmp
+
+l
+δWl ← tmp hl−1 (x)>  MW
+l
+tmp ← (tmp> (Wl  MW ))>
+end for
+return p(x), δb1 , . . . , δbL , δW1 , . . . , δWL , δc, δV
+
+whose i, j element is 1ai ≥bj , then the hidden layer masks
+l
+are simply MW = 1ml ≥ml−1 .
+By resampling the connectivity of hidden units for every
+update, each hidden unit will have a constantly changing
+number of incoming inputs during training. However, the
+absence of a connection is indistinguishable from an instantiated connection to a zero-valued unit, which could confuse
+the neural network during training. In a similar situation,
+Uria et al. (2014) informed each hidden unit which units
+
+were providing input with binary indicator variables, connected with additional learnable weights. We considered
+applying a similar strategy, using companion weight matril
+ces Ul , that are also masked by MW but connected to a
+constant one-valued vector:
+l
+
+l
+
+hl (x) = g(bl + (Wl  MW )hl−1 (x) + (Ul  MW )1)
+(14)
+An analogous parametrization of the output layer was also
+employed. These connectivity conditioning weights were
+only sometimes useful. In our experiments, we treated the
+choice of using them as a hyperparameter.
+Moreover, we’ve found in our experiments that sampling
+masks for every example could sometimes over-regularize
+MADE and provoke underfitting. To fix this issue, we also
+considered sampling from only a finite list of masks. During
+training, MADE cycles through this list, using one for every
+update. At test time, we then average probabilities obtained
+for all masks in the list.
+Algorithm 1 details how p(x) is computed by MADE, as
+well as how to obtain the gradient of `(x) for stochastic
+gradient descent training. For simplicity, the pseudocode
+assumes order-agnostic and connectivity-agnostic training,
+doesn’t assume the use of conditioning weight matrices or
+of direct input/output connections. Figure 1 also illustrates
+an example of such a two-layer MADE network, along with
+its ml (k) values and its masks.
+
+5. Related Work
+There has been a lot of recent work on exploring the use
+of feed-forward, autoencoder-like neural networks as probabilistic generative models. Part of the motivation behind
+this research is to test the common assumption that the
+use of models with probabilistic latent variables and intractable partition functions (such as the restricted Boltzmann machine (Salakhutdinov & Murray, 2008)), is a necessary evil in designing powerful generative models for
+high-dimensional data.
+The work on the neural autoregressive distribution estimator
+or NADE (Larochelle & Murray, 2011) has illustrated that
+feed-forward architectures can in fact be used to form stateof-the-art and even tractable distribution estimators.
+Recently, a deep extension of NADE was proposed, improving even further the state-of-the-art in distribution estimation (Uria et al., 2014). This work introduced a randomized
+training procedure, which (like MADE) has nearly the same
+cost per iteration as a standard autoencoder. Unfortunately,
+deep NADE models still require D feed-forward passes
+through the network to evaluate the probability p(x) of a
+D-dimensional test vector. The computation of the first
+hidden layer’s activations can be shared across these passes,
+
+MADE: Masked Autoencoder for Distribution Estimation
+Table 1. Complexity of the different models in Table 6, to compute
+an exact test negative log-likelihood. R is the number of orderings
+used, D is the input size, and K is the hidden layer size (assuming
+equally sized hidden layers).
+Model
+
+ONLL
+
+RBM 25 CD steps
+DARN
+NADE (fixed order)
+EoNADE 1hl, R ord.
+EoNADE 2hl, R ord.
+
+O(min(2D K, D2K ))
+O(2K D)
+O(DK)
+O(RDK)
+O(RDK 2 )
+
+MADE 1hl, 1 ord.
+MADE 2hl, 1 ord.
+MADE 1hl, R ord.
+MADE 2hl, R ord.
+
+O(DK +D2 )
+O(DK +K 2 +D2 )
+O(R(DK +D2 ))
+O(R(DK +K 2 +D2 ))
+
+although is slower in practice than evaluating a single pass
+in a standard autoencoder. In deep networks with K hidden
+units per layer, it costs O(DK 2 ) to evaluate a test vector.
+Deep AutoRegressive Networks (DARN, Gregor et al.,
+2014), also provide probabilistic models with roughly the
+same training costs as standard autoencoders. DARN’s latent representation consist of binary, stochastic hidden units.
+While simulating from these models is fast, evaluation of
+exact test probabilities requires summing over all configurations of the latent representation, which is exponential
+in computation. Monte Carlo approximation is thus recommended.
+The main advantage of MADE is that evaluating probabilities retains the efficiency of autoencoders, with minor
+additional cost for simple masking operations. Table 1 lists
+the computational complexity for exact computation of probabilities for various models. DARN and RBMs are exponential in dimensionality of the hiddens or data, whereas
+NADE and MADE are polynomial. MADE only requires
+one pass through the autoencoder rather than the D passes
+required by NADE. In practice, we also observe that the
+single-layer MADE is an order of magnitude faster than a
+one-layer NADE, for the same hidden layer size, despite
+NADE sharing computation to get the same asymptotic
+scaling. NADE’s computations cannot be vectorized as
+efficiently. The deep versions of MADE also have better
+scaling than NADE at test time. The training costs for
+MADE, DARN, and deep NADE will all be similar.
+Before the work on NADE, Bengio & Bengio (2000) proposed a neural network architecture that corresponds to the
+special case of a single hidden layer MADE model, without
+randomization of input ordering and connectivity. A contribution of our work is to go beyond this special case, exploring deep variants and order/connectivity-agnostic training.
+
+Table 2. Number of input dimensions and numbers of examples in
+the train, validation, and test splits.
+Name
+
+# Inputs
+
+Train
+
+Valid.
+
+Test
+
+123
+126
+180
+112
+500
+128
+150
+300
+
+5000
+16000
+1400
+2000
+400
+32152
+40000
+14000
+
+1414
+4000
+600
+500
+100
+10000
+10000
+3188
+
+26147
+47557
+1186
+5624
+1240
+10000
+150000
+32561
+
+Adult
+Connect4
+DNA
+Mushrooms
+NIPS-0-12
+OCR-letters
+RCV1
+Web
+
+An interesting interpretation of the autoregressive mask sampling is as a structured form of dropout regularization (Srivastava et al., 2014). Specifically, it bears similarity with
+the masking in dropconnect networks (Wan et al., 2013).
+The exception is that the masks generated here must guaranty the autoregressive property of the autoencoder, while
+in Wan et al. (2013), each element in the mask is generated
+independently.
+
+6. Experiments
+To test the performance of our model we considered
+two different benchmarks: a suite of UCI binary
+datasets, and the binarized MNIST dataset. The code to
+reproduce the experiments of this paper is available at
+https://github.com/mgermain/MADE/releases/tag/ICML2015.
+The results reported here are the average negative loglikelihood on the test set of each respective dataset. All
+experiments were made using stochastic gradient descent
+(SGD) with mini-batches of size 100 and a lookahead of 30
+for early stopping.
+6.1. UCI evaluation suite
+We use the binary UCI evaluation suite that was first put
+together in Larochelle & Murray (2011). It’s a collection
+of 7 relatively small datasets from the University of California, Irvine machine learning repository and the OCR-letters
+dataset from the Stanford AI Lab. Table 2 gives an overview
+of the scale of those datasets and the way they were split.
+The experiments were run with networks of 500 units per
+hidden layer, using the adadelta learning update (Zeiler,
+2012) with a decay of 0.95. The other hyperparameters
+were varied as Table 3 indicates. We note as # of masks the
+number of different masks through which MADE cycles
+during training. In the no limit case, masks are sampled
+on the fly and never explicitly reused unless re-sampled by
+chance. In this situation, at validation and test time, 300 and
+1000 sampled masks are used for averaging probabilities.
+
+MADE: Masked Autoencoder for Distribution Estimation
+Table 3. UCI Grid Search
+
+Table 5. Binarized MNIST Grid Search
+
+Hyperparameter
+
+Values tried
+
+Hyperparameter
+
+Values tried
+
+# Hidden Layer
+Activation function
+Adadelta epsilon
+Conditioning Weights
+# of orderings
+
+1, 2
+ReLU, Softplus
+10−5 , 10−7 , 10−9
+True, False
+1, 8, 16, 32, No Limit
+
+# Hidden Layer
+Learning Rate
+# of masks
+
+1, 2
+0.1, 0.05, 0.01, 0.005
+1, 2, 4, 8, 16, 32, 64
+
+97.0
+
+Test error
+96.5
+96.0
+95.5
+NLL
+
+The results are reported in Table 4. We see that MADE is
+among the best performing models on half of the datasets
+and is competitive otherwise. To reduce clutter, we have not
+reported standard deviations, which were fairly small and
+consistent across models. However, for completeness we
+report standard deviations in a separate table in the supplementary materials.
+
+95.0
+94.5
+
+An analysis of the hyperparameters selected for each dataset
+reveals no clear winner. However, we do see from Table 4
+that when the mask sampling helps, it helps quite a bit and
+when it does not, the impact is negligible on all but OCRletters. Another interesting note is that the conditioning
+weights had almost no influence except on NIPS-0-12 where
+it helped.
+6.2. Binarized MNIST evaluation
+The version of MNIST we used is the one binarized by
+Salakhutdinov & Murray (2008). MNIST is a set of 70,000
+hand written digits of 28×28 pixels. We use the same split
+as in Larochelle & Murray (2011), consisting of 50,000 for
+the training set, 10,000 for the validation set and 10,000 for
+the test set.
+Experiments were run using the adagrad learning update (Duchi et al., 2010), with an epsilon of 10−6 . Since
+MADE is much more efficient than NADE, we considered
+varying the hidden layer size from 500 to 8000 units. Seeing
+that increasing the number of units tended to always help,
+we used 8000. Even with such a large hidden layer, our
+GPU implementation of MADE was quite efficient. Using
+a single mask, one training epoch requires about 14 and 44
+seconds, for one hidden layer and two hidden layer MADE
+respectively. Using 32 sampled masks, training time increases to 33 and 100 respectively. These timings are all
+less than our GPU implementation of the 500 hidden units
+NADE model, which requires about 130 seconds per epoch.
+These timings were obtained on a K20 NVIDIA GPU.
+Building on what we learned on the UCI experiments, we
+set the activation function to be ReLU and the conditioning
+weights were not used. The hyperparameters that were
+varied are in Table 5.
+The results are reported in Table 6, alongside other results
+
+94.0
+93.5
+93.0
+0
+
+10
+
+20
+
+30
+40
+50
+# Masks used during training
+
+60
+
+70
+
+Figure 2. Impact of the number of masks used with a single hidden
+layer, 500 hidden units network, on binarized MNIST.
+
+taken from the literature. Again, despite its tractability,
+MADE is competitive with other models. Of note is the
+fact that the best MADE model outperforms the single layer
+NADE network, which was otherwise the best model among
+those requiring only a single feed-forward pass to compute
+log probabilities.
+In these experiments, we clearly observed the overregularization phenomenon from using too many masks.
+When more than four orderings were used, the deeper variant of MADE always yielded better results. For the two
+layer model, adding masks during training helped up to 64,
+at which point the negative log-likelihood started to increase.
+We observed a similar pattern for the single layer model, but
+in this case the dip was around 8 masks. Figure 2 illustrates
+this behaviour more precisely for a single layer MADE with
+500 hidden units, trained by only varying the number of
+masks used and the size of the mini-batches (83, 100, 128).
+We randomly sampled 100 digits from our best performing
+model from Table 6 and compared them with their nearest
+neighbor in the training set (Figure 3), to ensure that the
+generated samples are not simple memorization. Each row
+of digits uses a different mask that was seen at training time
+by the network.
+
+MADE: Masked Autoencoder for Distribution Estimation
+Table 4. Negative log-likelihood test results of different models on multiple datasets. The best result as well as any other result with an
+overlapping confidence interval is shown in bold. Note that since the variance of DARN was not available, we considered it to be zero.
+Model
+
+Adult
+
+Connect4
+
+DNA
+
+Mushrooms
+
+NIPS-0-12
+
+OCR-letters
+
+RCV1
+
+Web
+
+MoBernoullis
+RBM
+FVSBN
+NADE (fixed order)
+EoNADE 1hl (16 ord.)
+DARN
+
+20.44
+16.26
+13.17
+13.19
+13.19
+13.19
+
+23.41
+22.66
+12.39
+11.99
+12.58
+11.91
+
+98.19
+96.74
+83.64
+84.81
+82.31
+81.04
+
+14.46
+15.15
+10.27
+9.81
+9.69
+9.55
+
+290.02
+277.37
+276.88
+273.08
+272.39
+274.68
+
+40.56
+43.05
+39.30
+27.22
+27.32
+≈28.17
+
+47.59
+48.88
+49.84
+46.66
+46.12
+≈46.10
+
+30.16
+29.38
+29.35
+28.39
+27.87
+≈28.83
+
+MADE
+MADE mask sampling
+
+13.12
+13.13
+
+11.90
+11.90
+
+83.63
+79.66
+
+9.68
+9.69
+
+280.25
+277.28
+
+28.34
+30.04
+
+47.10
+46.74
+
+28.53
+28.25
+
+Figure 3. Left: Samples from a 2 hidden layer MADE. Right: Nearest neighbour in binarized MNIST.
+
+7. Conclusion
+− log p
+
+RBM (500 h, 25 CD steps)
+DBM 2hl
+DBN 2hl
+DARN nh =500
+DARN nh =500, adaNoise
+
+≈ 86.34
+≈ 84.62
+≈ 84.55
+≈ 84.71
+≈ 84.13
+
+MoBernoullis K=10
+MoBernoullis K=500
+NADE 1hl (fixed order)
+EoNADE 1hl (128 orderings)
+EoNADE 2hl (128 orderings)
+
+168.95
+137.64
+88.33
+87.71
+85.10
+
+MADE 1hl (1 mask)
+MADE 2hl (1 mask)
+MADE 1hl (32 masks)
+MADE 2hl (32 masks)
+
+88.40
+89.59
+88.04
+86.64
+
+Intractable
+
+Model
+
+We proposed MADE, a simple modification of autoencoders
+allowing them to be used as distribution estimators. MADE
+demonstrates that it is possible to get direct, cheap estimates
+of high-dimensional joint probabilities, from a single pass
+through an autoencoder. Like standard autoencoders, our extension is easy to vectorize and implement on GPUs. MADE
+can evaluate high-dimensional probably distributions with
+better scaling than before, while maintaining state-of-the-art
+statistical performance.
+
+Tractable
+
+Table 6. Negative log-likelihood test results of different models on
+the binarized MNIST dataset.
+
+Acknowledgments
+We thank Marc-Alexandre Côté for helping to implement
+NADE in Theano and the whole Theano (Bastien et al.,
+2012; Bergstra et al., 2010) team of contributors. We also
+thank NSERC, Calcul Québec and Compute Canada.
+
+MADE: Masked Autoencoder for Distribution Estimation
+
+References
+Bastien, Frédéric, Lamblin, Pascal, Pascanu, Razvan,
+Bergstra, James, Goodfellow, Ian J., Bergeron, Arnaud,
+Bouchard, Nicolas, and Bengio, Yoshua. Theano: new
+features and speed improvements. Deep Learning and
+Unsupervised Feature Learning NIPS 2012 Workshop,
+2012.
+Bengio, Yoshua and Bengio, Samy. Modeling highdimensional discrete data with multi-layer neural networks. In Advances in Neural Information Processing
+Systems 12 (NIPS 1999), pp. 400–406. MIT Press, 2000.
+Bengio, Yoshua, Laufer, Eric, Alain, Guillaume, and Yosinski, Jason. Deep generative stochastic networks trainable
+by backprop. In Proceedings of the 31th Annual International Conference on Machine Learning (ICML 2014),
+pp. 226–234. JMLR.org, 2014.
+Bergstra, James, Breuleux, Olivier, Bastien, Frédéric, Lamblin, Pascal, Pascanu, Razvan, Desjardins, Guillaume,
+Turian, Joseph, Warde-Farley, David, and Bengio, Yoshua.
+Theano: a CPU and GPU math expression compiler. In
+Proceedings of the Python for Scientific Computing Conference (SciPy), June 2010. Oral Presentation.
+Dinh, Laurent, Krueger, David, and Bengio, Yoshua. NICE:
+non-linear independent components estimation, 2014.
+arXiv:1410.8516v2.
+Duchi, John, Hazan, Elad, and Singer, Yoram. Adaptive
+subgradient methods for online learning and stochastic
+optimization. Technical report, EECS Department, University of California, Berkeley, Mar 2010.
+Goodfellow, Ian, Pouget-Abadie, Jean, Mirza, Mehdi, Xu,
+Bing, Warde-Farley, David, Ozair, Sherjil, Courville,
+Aaron, and Bengio, Yoshua. Generative adversarial nets.
+In Advances in Neural Information Processing Systems
+27 (NIPS 2014), pp. 2672–2680. Curran Associates, Inc.,
+2014.
+Gregor, Karol and LeCun, Yann. Learning representations
+by maximizing compression, 2011. arXiv:1108.1169v1.
+Gregor, Karol, Danihelka, Ivo, Mnih, Andriy, Blundell,
+Charles, and Wierstra, Daan. Deep AutoRegressive Networks. In Proceedings of the 31th Annual International
+Conference on Machine Learning (ICML 2014), pp. 1242–
+1250. JMLR.org, 2014.
+Kingma, Diederik P. and Welling, Max. Auto-encoding
+variational bayes. In Proceedings of the 2nd International
+Conference on Learning Representations (ICLR 2014),
+2014.
+
+Larochelle, Hugo and Murray, Iain. The neural autoregressive distribution estimator. In Proceedings of the
+14th International Conference on Artificial Intelligence
+and Statistics (AISTATS 2011), volume 15, pp. 29–37, Ft.
+Lauderdale, USA, 2011. JMLR W&CP.
+Poon, Hoifung and Domingos, Pedro. Sum-product networks: A new deep architecture. In Proceedings of the
+20th Conference on Uncertainty in Artificial Intelligence
+(UAI 2011), pp. 337–346, 2011.
+Rezende, Danilo Jimenez, Mohamed, Shakir, and Wierstra,
+Daan. Stochastic backpropagation and approximate inference in deep generative models. In Proceedings of
+the 31th International Conference on Machine Learning
+(ICML 2014), pp. 1278–1286, 2014.
+Salakhutdinov, Ruslan and Murray, Iain. On the quantitative analysis of deep belief networks. In Proceedings of
+the 25th Annual International Conference on Machine
+Learning (ICML 2008), pp. 872–879. Omnipress, 2008.
+Schmah, Tanya, Hinton, Geoffrey E., Zemel, Richard S.,
+Small, Steven L., and Strother, Stephen C. Generative
+versus discriminative training of RBMs for classification
+of fMRI images. In Advances in Neural Information Processing Systems 21 (NIPS 2008), pp. 1409–1416, 2009.
+Srivastava, Nitish, Hinton, Geoffrey, Krizhevsky, Alex,
+Sutskever, Ilya, and Salakhutdinov, Ruslan. Dropout:
+A simple way to prevent neural networks from overfitting.
+Journal of Machine Learning Research, 15:1929–1958,
+2014.
+Uria, Benigno, Murray, Iain, and Larochelle, Hugo.
+RNADE: The real-valued neural autoregressive densityestimator. In Advances in Neural Information Processing
+Systems 26 (NIPS 2013), pp. 2175–2183, 2013.
+Uria, Benigno, Murray, Iain, and Larochelle, Hugo. A deep
+and tractable density estimator. In Proceedings of the 31th
+International Conference on Machine Learning, (ICML
+2014), pp. 467–475, 2014.
+Uria, Benigno, Murray, Iain, Renals, Steve, and ValentiniBotinhao, Cassia. Modelling acoustic feature dependencies with artificial neural networks: Trajectory-RNADE.
+In Proceedings of the 40th IEEE International Conference
+on Acoustics, Speech and Signal Processing (ICASSP
+2015). IEEE Signal Processing Society, 2015.
+Wan, Li, Zeiler, Matthew D., Zhang, Sixin, LeCun, Yann,
+and Fergus, Rob. Regularization of neural networks using dropconnect. In Proceedings of the 30th International Conference on Machine Learning, (ICML 2013),
+pp. 1058–1066, 2013.
+Zeiler, Matthew D. ADADELTA: an adaptive learning rate
+method, 2012. arXiv:1212.5701v1.
+
+
