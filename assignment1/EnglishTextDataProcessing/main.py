@@ -7,8 +7,9 @@
 
 import os
 from assignment1.EnglishTextDataProcessing import preprocess
-from projectfile import project_dir
-from projectfile import corpus_files
+from projectutil import project_dir
+
+from assignment1.EnglishTextDataProcessing import dataset
 
 def process(directory = " "):
     '''
@@ -32,9 +33,12 @@ def process(directory = " "):
 
 
 def main():
+    """
     tokenizing = preprocess.token(project_dir + "/data/ICML/1. Active Learning/Diagnosis determination.txt")
     stemming = preprocess.stemming(tokenizing)
     stopwords = preprocess.filter_stopwords(stemming)
     print(stopwords)
+    """
+    dataset.make_dataset()
 
 

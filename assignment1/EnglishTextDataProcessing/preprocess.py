@@ -9,22 +9,42 @@
 
 
 import nltk
+import re
 from nltk.stem import WordNetLemmatizer
+from nltk.tokenize import sent_tokenize
 from nltk.stem.lancaster import LancasterStemmer
 from nltk.stem.porter import PorterStemmer
 from nltk.stem import SnowballStemmer
 from nltk.corpus import wordnet as wn
 import string
 import itertools
-from projectfile import get_stopwords_file
+from projectutil import get_stopwords_file
+
+
+class RepeatReplacer(object):
+    """ 移除重复字母，如pp,zz"""
+    def __init__(self):
+        self.repeat_regexp = re.compile(r'(\w*)(\w)\2(\w*)')
+        self.repl = r'\1\2\3'
+
+    def replace(self, word):
+        if wn.synsets(word):
+            return word
+
+        repl_word = self.repeat_regexp.sub(self.repl, word)
+
+        if repl_word != word:
+            return self.replace(repl_word)
+        else:
+            return repl_word
 
 
 def token(file):
-    '''
+    """
     分词，去除乱码，统一转换成小写
     :param file: 文件路径
     :return: 单词列表
-    '''
+    """
 
     pattern = r"""(?x)               # set flag to allow verbose regexps
               (?:[a-z]\.)+           # abbreviations, e.g. u.s.a.
@@ -36,7 +56,8 @@ def token(file):
 
     words = []
 
-    if not file: return  words
+    if not file:
+        return words
 
     with open(file, "r") as f:
         raw = f.read()
@@ -78,18 +99,21 @@ def stemming(words):
 
 
     ret = []
-    lemmatizer = WordNetLemmatizer()
+    stemmer = LancasterStemmer()
+    # lemmatizer = WordNetLemmatizer()
+    stemmer = SnowballStemmer("english")
+    replacer = RepeatReplacer()
     for word in words:
+        word = replacer.replace(word)
         wordn = wn.morphy(word)
         wordn = wordn if wordn else word
-        ret.append(lemmatizer.lemmatize(wordn))
-
-
+        wordn = stemmer.stem(wordn)
+        ret.append(wordn)
 
     # 使用 SnowballStemmer 词干提取算法
     #stemmer = SnowballStemmer("english")
     #stemmer = LancasterStemmer()
-    #stemmer = PorterStemmer()
+
     #ret = [stemmer.stem(word) for word in ret]
 
     return ret
@@ -114,11 +138,21 @@ def load_stopwords(file = " "):
 
     return data
 
-def filter_stopwords(words):
-    stopwords = load_stopwords()
-    return [word for word in words if word not in stopwords and len(word) >= 2]
 
-if __name__ == '_main__':
-    tokenizing = token("data/ICML/1. Active Learning/Diagnosis determination.txt")
-    #print(tokenizing)
-    print(stemming(tokenizing))
+def filter_stopwords(words):
+    """过滤掉停用词"""
+    stopwords = load_stopwords()
+    return [word for word in words if word not in stopwords]
+
+
+def get_words(file):
+    """
+    获取清理后的单词列表
+    :param file: 文件路径
+    :return: 单词列表
+    """
+    tokenizing = token(file)
+    stemmed = stemming(tokenizing)
+    words = filter_stopwords(stemmed)
+    return words
+

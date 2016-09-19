@@ -6,7 +6,7 @@
 # @Software: PyCharm
 
 
-from projectfile import project_dir
+from projectutil import project_dir
 from assignment1.EnglishTextDataProcessing import preprocess
 
 
