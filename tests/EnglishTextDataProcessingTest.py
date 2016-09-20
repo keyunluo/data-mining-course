@@ -8,6 +8,7 @@
 
 from projectutil import project_dir
 from assignment1.EnglishTextDataProcessing import preprocess
+from assignment1.EnglishTextDataProcessing import dataset
 
 
 def test_preprocess():
@@ -16,5 +17,10 @@ def test_preprocess():
     stopwords = preprocess.filter_stopwords(stemming)
     print(stopwords)
 
+def test_dataset():
+    dataset.make_dataset()
+
 if __name__ == '__main__':
-    test_preprocess()
+    #test_preprocess()
+    test_dataset()
+
