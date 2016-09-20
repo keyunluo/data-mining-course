@@ -101,25 +101,20 @@ def stemming(words):
     ret = []
     stemmer = LancasterStemmer()
     # lemmatizer = WordNetLemmatizer()
-    stemmer = SnowballStemmer("english")
+    # stemmer = SnowballStemmer("english")
     replacer = RepeatReplacer()
     for word in words:
         word = replacer.replace(word)
         wordn = wn.morphy(word)
         wordn = wordn if wordn else word
         wordn = stemmer.stem(wordn)
-        ret.append(wordn)
-
-    # 使用 SnowballStemmer 词干提取算法
-    #stemmer = SnowballStemmer("english")
-    #stemmer = LancasterStemmer()
-
-    #ret = [stemmer.stem(word) for word in ret]
+        if len(wordn) > 1:
+            ret.append(wordn)
 
     return ret
 
 
-def load_stopwords(file = " "):
+def load_stopwords(file=" "):
     '''
     载入停用词，可指定停用词文件，否则使用默认文件
     :param file: 停用词文件

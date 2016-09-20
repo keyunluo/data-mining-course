@@ -11,5 +11,5 @@ def make_dataset():
     """生成数据集"""
     tfidf = TFIDF()
     tfidf.add_doc_all()
-    tfidfdictall = tfidf.tfidf_all()
+    tfidf.save_words_tofile()
     tfidf.generate_dataset_all()

@@ -11,6 +11,7 @@ from assignment1.EnglishTextDataProcessing.preprocess import get_words
 from projectutil import get_full_path
 from projectutil import corpus_filenames
 from projectutil import get_corpus_classfiles
+from projectutil import project_dir
 
 
 class TFIDF:
@@ -23,6 +24,7 @@ class TFIDF:
         self.document = {}
         self.wordfile = defaultdict(set)
         self.cangeneratedataset = False
+        self.sortedwords = []
 
     def add_doc(self, file):
         """添加文件，指定文件名"""
@@ -63,7 +65,7 @@ class TFIDF:
         tfidfdict = {}
         for word in worddict:
             tf = worddict.get(word)
-            idf = log(numdoc/len(wordfile.get(word)))
+            idf = 1.0 + log(numdoc/len(wordfile.get(word)))
             tfidfdict[word] = tf*idf
 
         return tfidfdict
@@ -86,23 +88,54 @@ class TFIDF:
         return tfidfdictall
 
     def generate_dataset(self, file):
-        """产生数据集"""
+        """产生数据集:文件"""
+        result = []
         if not self.cangeneratedataset:
             print("还没有分析文档，无法产生数据集")
-            return False
+            return result
 
-        docs = [doc for doc in self.document]
-        docs.sort()
-        print(docs)
-        print("文档数为：%d"%len(docs))
-        words = [word for word in self.wordfile]
-        print(len(words))
+        tfidfdict = self.tf_idf(file)
+
+        filewords = self.document.get(file)
+        words = self.sortedwords
+
+        for index, word in enumerate(words):
+            if word in filewords:
+                record = (index, tfidfdict.get(word))
+                result.append(record)
+
+        return result
 
     def generate_dataset_class(self, classname):
+        """产生数据集:类"""
+        datasets = []
         classfiles = get_corpus_classfiles(classname)
         for classfile in classfiles:
-            self.generate_dataset(classfile)
+            datasets.append(self.generate_dataset(classfile))
+        self.save_tofile_class(classname, datasets)
 
     def generate_dataset_all(self):
+        """产生数据集:所有文件"""
         for classname in corpus_filenames:
             self.generate_dataset_class(classname)
+
+    def save_words_tofile(self, file=project_dir + "/assignment1/result/word_list.txt"):
+        """保存单词列表到文件中"""
+        self.sortedwords = [word for word in self.wordfile]
+        self.sortedwords.sort()
+        length = len(self.sortedwords)
+        print("语料库集合单词个数：%d" % length)
+        with open(file, "wt") as f:
+            for index in range(length):
+                print(index, ":", self.sortedwords[index], file=f)
+
+    def save_tofile_class(self, classname, datasets, directory=project_dir + "/assignment1/result/"):
+        """按类名保存TF-IDF特征向量"""
+        with open(directory+classname, "wt") as f:
+            for data in datasets:
+                f.write("[")
+                for item in data:
+                    if item == data[-1]:
+                        print(item[0], ":", item[1], end=']\n', file=f)
+                    else:
+                        print(item[0], ":", item[1], end=',', file=f)

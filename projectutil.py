@@ -6,11 +6,12 @@
 # @Software: PyCharm
 
 import os
+from collections import OrderedDict
 
 
 def get_corpus_filepaths():
     """
-    获取语料库的类别名称及文件列表
+    获取语料库的类别名称及文件列表,并且排过序
     :return: 类名-文件路径字典
     """
 
@@ -26,7 +27,9 @@ def get_corpus_filepaths():
         if len(value) > 0:
             corpusfiles[key] = value
 
-    return corpusfiles
+    # 排序：使用类别前面的数字
+
+    return OrderedDict(sorted(corpusfiles.items(), key=lambda x: int(x[0].split(".")[0])))
 
 
 def get_corpus_filenames():
@@ -48,7 +51,7 @@ def get_corpus_classfiles(classname):
     :param classname:类名
     :return: 文件列表
     """
-    return corpus_filenames.get(classname, None)
+    return sorted(corpus_filenames.get(classname, None))
 
 
 def get_full_paths():
@@ -78,6 +81,7 @@ def get_stopwords_file():
     :return: 停用词文件路径
     """
     return project_dir+os.sep+"data"+os.sep+"StopWords"+os.sep+"english"
+
 
 project_dir = os.path.dirname(os.path.abspath(__file__)) # 项目路径
 corpus_filepaths = get_corpus_filepaths() # 字典：类名-文件路径
