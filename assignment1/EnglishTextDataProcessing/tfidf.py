@@ -28,7 +28,7 @@ class TFIDF:
 
     def add_doc(self, file):
         """添加文件，指定文件名"""
-        words = get_words(get_full_path(file))  #文本预处理
+        words = get_words(get_full_path(file)) 
         self.numdoc += 1
         worddict = {}
 

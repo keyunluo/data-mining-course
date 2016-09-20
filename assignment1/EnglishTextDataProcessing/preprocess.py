@@ -59,7 +59,7 @@ def token(file):
     if not file:
         return words
 
-    with open(file, "r") as f:
+    with open(file, "r", encoding="utf-8") as f:
         raw = f.read()
 
         # 分割句子,并小写化
