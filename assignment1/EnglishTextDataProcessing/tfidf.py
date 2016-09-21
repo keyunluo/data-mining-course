@@ -6,12 +6,9 @@
 # @Software: PyCharm
 
 from collections import defaultdict
-from math import log
+from math import log, fabs
 from assignment1.EnglishTextDataProcessing.preprocess import get_words
-from projectutil import get_full_path
-from projectutil import corpus_filenames
-from projectutil import get_corpus_classfiles
-from projectutil import project_dir
+from projectutil import get_full_path, corpus_filenames, get_corpus_classfiles, project_dir
 
 
 class TFIDF:
@@ -20,7 +17,6 @@ class TFIDF:
     """
 
     def __init__(self):
-        self.numdoc = 0
         self.document = {}
         self.wordfile = defaultdict(set)
         self.cangeneratedataset = False
@@ -28,8 +24,7 @@ class TFIDF:
 
     def add_doc(self, file):
         """添加文件，指定文件名"""
-        words = get_words(get_full_path(file)) 
-        self.numdoc += 1
+        words = get_words(get_full_path(file))
         worddict = {}
 
         for word in words:
@@ -61,12 +56,12 @@ class TFIDF:
         """TF-IDF算法:单个文件"""
         worddict = self.document[file]
         wordfile = self.wordfile
-        numdoc = self.numdoc
+        numdoc = len(self.document)
         tfidfdict = {}
         for word in worddict:
             tf = worddict.get(word)
             idf = log(numdoc/len(wordfile.get(word)))
-            tfidfdict[word] = tf*idf
+            tfidfdict[word] = float('%0.10f' % (tf*idf))
 
         return tfidfdict
 
@@ -95,13 +90,12 @@ class TFIDF:
             return result
 
         tfidfdict = self.tf_idf(file)
-
-        filewords = self.document.get(file)
         words = self.sortedwords
 
         for index, word in enumerate(words):
-            if word in filewords:
-                record = (index, tfidfdict.get(word))
+            tfidfvalue = tfidfdict.get(word, 0.0)
+            if fabs(tfidfvalue) > 0.00000000001:
+                record = (index, tfidfvalue)
                 result.append(record)
 
         return result
