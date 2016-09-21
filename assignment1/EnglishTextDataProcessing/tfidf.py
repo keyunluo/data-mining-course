@@ -58,7 +58,7 @@ class TFIDF:
                 self.add_doc(file)
 
     def tf_idf(self, file):
-        """TF-IDF算法:单个文件:保留8位小数"""
+        """TF-IDF算法:单个文件"""
         worddict = self.document[file]
         wordfile = self.wordfile
         numdoc = self.numdoc
@@ -66,7 +66,7 @@ class TFIDF:
         for word in worddict:
             tf = worddict.get(word)
             idf = log(numdoc/len(wordfile.get(word)))
-            tfidfdict[word] = tf*idf*10000
+            tfidfdict[word] = tf*idf
 
         return tfidfdict
 

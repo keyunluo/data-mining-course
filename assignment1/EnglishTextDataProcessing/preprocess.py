@@ -13,30 +13,13 @@ import re
 from nltk.stem import WordNetLemmatizer
 from nltk.tokenize import sent_tokenize
 from nltk.stem.lancaster import LancasterStemmer
-from nltk.stem.porter import PorterStemmer
-from nltk.stem import SnowballStemmer
+#from nltk.stem.porter import PorterStemmer
+#from nltk.stem import SnowballStemmer
 from nltk.corpus import wordnet as wn
 import string
 import itertools
 from projectutil import get_stopwords_file
 
-
-class RepeatReplacer(object):
-    """ 移除重复字母，如pp,zz"""
-    def __init__(self):
-        self.repeat_regexp = re.compile(r'(\w*)(\w)\2(\w*)')
-        self.repl = r'\1\2\3'
-
-    def replace(self, word):
-        if wn.synsets(word):
-            return word
-
-        repl_word = self.repeat_regexp.sub(self.repl, word)
-
-        if repl_word != word:
-            return self.replace(repl_word)
-        else:
-            return repl_word
 
 
 def token(file):
@@ -47,11 +30,11 @@ def token(file):
     """
 
     pattern = r"""(?x)               # set flag to allow verbose regexps
-              (?:[a-z]\.)+           # abbreviations, e.g. u.s.a.
-              |\d+(?:\.\d+)?%?       # numbers, incl. currency and percentages
-              |\w+(?:[-']\w+)*       # words with optional internal hyphens/apostrophe
-              |\.\.\.                # ellipsis
-              |(?:[.,;"'?():-_`])    # special characters with meanings
+              (?:[a-z]\.)+               # abbreviations, e.g. u.s.a.
+              |\d+(?:\.\d+)?%?      # numbers, incl. currency and percentages
+              |\w+(?:[-']\w+)*        # words with optional internal hyphens/apostrophe
+              |\.\.\.                         # ellipsis
+              |(?:[.,;"'?():-_`])        # special characters with meanings
               """
 
     words = []
@@ -100,15 +83,14 @@ def stemming(words):
 
     ret = []
     stemmer = LancasterStemmer()
-    # lemmatizer = WordNetLemmatizer()
+    lemmatizer = WordNetLemmatizer()
     # stemmer = SnowballStemmer("english")
-    replacer = RepeatReplacer()
     for word in words:
-        word = replacer.replace(word)
+        word = lemmatizer.lemmatize(word)
         wordn = wn.morphy(word)
         wordn = wordn if wordn else word
         wordn = stemmer.stem(wordn)
-        if len(wordn) > 1:
+        if len(set(wordn))  > 1:
             ret.append(wordn)
 
     return ret
