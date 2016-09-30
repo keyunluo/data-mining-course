@@ -9,6 +9,8 @@ import os
 from collections import OrderedDict
 
 
+### 作业1 工具方法
+
 def get_corpus_filepaths():
     """
     获取语料库的类别名称及文件列表,并且排过序
@@ -86,3 +88,33 @@ def get_stopwords_file():
 project_dir = os.path.dirname(os.path.abspath(__file__)) # 项目路径
 corpus_filepaths = get_corpus_filepaths() # 字典：类名-文件路径
 corpus_filenames = get_corpus_filenames() #字典：类名-文件名
+
+
+### 作业2 工具方法
+
+def get_dataset_dir():
+    """获得数据文件所在的文件夹"""
+    return project_dir + os.sep + "data" + os.sep + "BinaryDatasets" + os.sep
+
+
+def get_reduction_dataset(name="sonar", types="train"):
+    """
+    获取数据集
+    :param name: 数据名称：sonar/splice
+    :param types:数据类型：train/test
+    :return: 数据，标签
+    """
+    file_train = get_dataset_dir() + name + "-train.txt"
+    file_test = get_dataset_dir() + name + "-test.txt"
+    file = file_train if types == "train" else file_test
+
+    data = []
+    label = []
+
+    with open(file, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.split(",")
+            data.append(line[:-2])
+            label.append(line[-1].strip("\n"))
+
+    return data, label
