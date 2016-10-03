@@ -51,6 +51,7 @@ def onenn(projections, labels, name, algorithm):
     projection_trains, projection_tests = projections
     train_label, test_label = labels
 
+    # 分三种情况(k=10,20,30)计算正确率
     for i in range(3):
 
         row_test, _ = projection_tests[i].shape
@@ -59,13 +60,15 @@ def onenn(projections, labels, name, algorithm):
         for row_index in range(row_test):
             dist_row = []
             for rowtrain in range(row_train):
+                # 欧式距离
                 dist_row.append(np.linalg.norm(projection_tests[i][row_index] - projection_trains[i][rowtrain]))
-
+            # 取距离最短的点的标签
             result = train_label[dist_row.index(min(dist_row))]
 
             if result == test_label[row_index]:
                 count += 1
 
+        # 输出结果
         if i == 0:
             print("k=10,正确率：{0}/{1}={2}%".format(count, row_test, 1.0 * count / row_test * 100))
 

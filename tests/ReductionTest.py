@@ -17,6 +17,9 @@ def test_reduction(name="sonar"):
     reduction.isomap_solver(k_nn=8)
     reduction.isomap_solver(k_nn=10)
 
-if __name__ == '__main__':
+def run():
     for file in ["sonar", "splice"]:
         test_reduction(file)
+
+if __name__ == '__main__':
+    run()
