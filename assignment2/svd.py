@@ -65,7 +65,7 @@ class SVD:
 
     def run(self):
         projections = self.projection()
-        labels = (self.train_label,self.test_label)
+        labels = (self.train_label, self.test_label)
         onenn(projections, labels, self.name, "SVD")
 
     def onenn(self):

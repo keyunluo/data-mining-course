@@ -37,7 +37,7 @@ def knn(train_data, train_label, test_data, k=1):
     return labels
 
 
-def onenn(projections, labels, name , algorithm):
+def onenn(projections, labels, name, algorithm):
     """
     最近邻计算
     :param projections: projection_trains, projection_tests元组

@@ -27,9 +27,9 @@ class ISOMAP:
 
     def distance_matrix(self):
         """计算原始点之间的距离矩阵"""
-        dis_points = np.zeros((self.length,self.length))
-        for i,line_i in enumerate(self.data):
-            for j,line_j in enumerate(self.data):
+        dis_points = np.zeros((self.length, self.length))
+        for i, line_i in enumerate(self.data):
+            for j, line_j in enumerate(self.data):
                 dis_points[i,j] = np.linalg.norm(line_i-line_j) if i != j else 0
         return dis_points
 
@@ -46,7 +46,7 @@ class ISOMAP:
         for i in range(N):
             index_sort = np.argsort(dis_matrix[i])
             for j in index_sort[:k]:
-                graph_matrix[i,j] = dis_matrix[i,j]
+                graph_matrix[i, j] = dis_matrix[i, j]
 
         return np.minimum(graph_matrix, graph_matrix.T)
 
@@ -58,7 +58,7 @@ class ISOMAP:
         graph_matrix = self.build_graph()
 
         for i in range(self.length):
-            graph_matrix = np.minimum(graph_matrix, np.add.outer(graph_matrix[:, i],graph_matrix[i, :]))
+            graph_matrix = np.minimum(graph_matrix, np.add.outer(graph_matrix[:, i], graph_matrix[i, :]))
         # Floyd算法
         """
         for k in range(self.length):
@@ -90,9 +90,9 @@ class ISOMAP:
                 MAX = [len(conn), i]
         connected_index = connected[MAX[1]]
         # 非联通量
-        erase_value = [index for index,_  in enumerate(connected_index) if index not in connected_index]
-        # 全联通距离矩阵
-        conn_graph_matrix = np.take(np.take(graph_matrix,connected_index,0), connected_index, 1)
+        erase_value = [index for index, _ in enumerate(connected_index) if index not in connected_index]
+        # 全连通距离矩阵
+        conn_graph_matrix = np.take(np.take(graph_matrix, connected_index, 0), connected_index, 1)
 
         #print(graph_matrix[0])
         N = len(conn_graph_matrix)#self.length
@@ -121,7 +121,7 @@ class ISOMAP:
         if len(indexes) < 30:
             print("!!!正的特征值不足三十个，无法进行纵向比较!!!")
             return -1, -1
-        # 判断非联通量，即孤立噪声点所在的数据集
+        # 判断连联通量，即孤立噪声点所在的数据集
         train_len = len(self.train)
         erase_train = []
         erase_test = []
@@ -133,9 +133,9 @@ class ISOMAP:
                     erase_test.append(train_len-i)
             train_len -= len(erase_train)
             print("===ISOMAP 文件:%s:出现孤立点===" % self.name)
-            print("训练集位置:%s,测试集位置:%s" % (str(erase_train),str(erase_test)))
+            print("训练集位置:%s,测试集位置:%s" % (str(erase_train), str(erase_test)))
 
-        for k in [10,20,30]:
+        for k in [10, 20, 30]:
             U = eig_vectors[:, indexes[:k]]
             delta = np.diag(np.sqrt(eig_values[indexes[:k]]))
             Y = U.dot(delta)
@@ -149,7 +149,7 @@ class ISOMAP:
         projections = project[:2]
         erase_train, erase_test = project[2:]
         if projections[0] != -1:
-            train_label = np.delete(self.train_label,erase_train)
-            test_label = np.delete(self.test_label,erase_test)
+            train_label = np.delete(self.train_label, erase_train)
+            test_label = np.delete(self.test_label, erase_test)
             labels = (train_label, test_label)
             onenn(projections, labels, self.name, "ISOMAP-k"+str(self.k_nn))

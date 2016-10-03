@@ -12,23 +12,23 @@ from assignment2.isomap import ISOMAP
 
 def run():
 
-    for file in ["sonar","splice"]: # ,"splice"
+    for file in ["sonar", "splice"]:
         pca = PCA(file)
         pca.run()
 
         svd = SVD(file)
         svd.run()
 
-        isomap = ISOMAP(file)
+        isomap = ISOMAP(file, 4)
         isomap.run()
 
         isomap = ISOMAP(file, 6)
         isomap.run()
 
-        isomap = ISOMAP(file,8)
+        isomap = ISOMAP(file, 8)
         isomap.run()
 
-        isomap = ISOMAP(file,10)
+        isomap = ISOMAP(file, 10)
         isomap.run()
 
 
