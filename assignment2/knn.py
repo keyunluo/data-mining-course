@@ -35,3 +35,42 @@ def knn(train_data, train_label, test_data, k=1):
         label_sort = sorted(label.items(), key=lambda d: d[1])[-1]
         labels.append(label_sort[0])
     return labels
+
+
+def onenn(projections, labels, name , algorithm):
+    """
+    最近邻计算
+    :param projections: projection_trains, projection_tests元组
+    :param labels: train_label, test_label
+    :param name: 文件名
+    :param algorithm: 使用的算法
+    :return: 无
+    """
+
+    print("====算法：%s ==== \n%s文件测试结果：" % (algorithm, name))
+    projection_trains, projection_tests = projections
+    train_label, test_label = labels
+
+    for i in range(3):
+
+        row_test, _ = projection_tests[i].shape
+        row_train, _ = projection_trains[i].shape
+        count = 0
+        for row_index in range(row_test):
+            dist_row = []
+            for rowtrain in range(row_train):
+                dist_row.append(np.linalg.norm(projection_tests[i][row_index] - projection_trains[i][rowtrain]))
+
+            result = train_label[dist_row.index(min(dist_row))]
+
+            if result == test_label[row_index]:
+                count += 1
+
+        if i == 0:
+            print("k=10,正确率：{0}/{1}={2}%".format(count, row_test, 1.0 * count / row_test * 100))
+
+        if i == 1:
+            print("k=20,正确率：{0}/{1}={2}%".format(count, row_test, 1.0 * count / row_test * 100))
+
+        if i == 2:
+            print("k=30,正确率：{0}/{1}={2}%".format(count, row_test, 1.0 * count / row_test * 100))

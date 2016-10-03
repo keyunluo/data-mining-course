@@ -7,7 +7,7 @@
 
 from projectutil import get_reduction_dataset
 import numpy as np
-
+from .knn import onenn
 
 class SVD:
     """
@@ -22,7 +22,6 @@ class SVD:
         self.train_label = np.array(label_train).astype(int)
         self.test = np.array(data_test).astype(float)
         self.test_label = np.array(label_test).astype(int)
-        self.meanVal = np.empty(self.train.shape[1])
 
     def svd(self):
         """
@@ -63,6 +62,11 @@ class SVD:
             projection_tests.append(np.dot(U.T, self.test.T).T)
 
         return projection_trains, projection_tests
+
+    def run(self):
+        projections = self.projection()
+        labels = (self.train_label,self.test_label)
+        onenn(projections, labels, self.name, "SVD")
 
     def onenn(self):
         """计算1-NN,预测"""

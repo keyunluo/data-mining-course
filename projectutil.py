@@ -114,7 +114,7 @@ def get_reduction_dataset(name="sonar", types="train"):
     with open(file, "r", encoding="utf-8") as f:
         for line in f:
             line = line.split(",")
-            data.append(line[:-2])
+            data.append(line[:-1])
             label.append(line[-1].strip("\n"))
 
     return data, label

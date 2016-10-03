@@ -6,7 +6,7 @@
 # @Software: PyCharm
 
 from projectutil import get_reduction_dataset
-from .knn import knn
+from .knn import knn, onenn
 import numpy as np
 
 
@@ -58,8 +58,13 @@ class PCA:
             projection_tests.append(self.test.dot(matrix))
         return projection_trains, projection_tests
 
+    def run(self):
+        projections = self.projection()
+        labels = (self.train_label,self.test_label)
+        onenn(projections, labels, self.name, "PCA")
+
     def onenn(self):
-        """计算1-NN,预测"""
+        """计算1-NN,二分类"""
         print("====算法：PCA ==== \n%s文件测试结果：" % self.name)
         projection_trains, projection_tests = self.projection()
 
@@ -88,7 +93,7 @@ class PCA:
                 print("k=30,正确率：{0}/{1}={2}%".format(count, row_test, 1.0*count/row_test*100))
 
     def onenn_use_knn(self):
-        """使用knn模块计算1-nn"""
+        """使用knn模块计算1-nn，二分类"""
         print("====算法：PCA ==== \n%s文件测试结果：" % self.name)
         projection_trains, projection_tests = self.projection()
         for i in range(3):

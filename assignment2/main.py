@@ -7,28 +7,30 @@
 
 from assignment2.pca import PCA
 from assignment2.svd import SVD
+from assignment2.isomap import ISOMAP
 
 
 def run():
-    """
-    # sonar文件
-    print("sonar文件测试结果：")
-    print("PCA算法：")
-    pca = PCA("sonar")
-    pca.onenn()
 
-    # splice文件
-    print("splice文件测试结果：")
-    print("PCA算法：")
-    pca = PCA("splice")
-    pca.onenn()
-    """
-    pca = PCA("sonar")
-    pca.onenn()
-    pca.onenn_use_knn()
-    #svd = SVD("sonar")
+    for file in ["sonar","splice"]: # ,"splice"
+        pca = PCA(file)
+        pca.run()
 
-    #svd.onenn()
-    #svd = SVD("splice")
-    #svd.onenn()
+        svd = SVD(file)
+        svd.run()
+
+        isomap = ISOMAP(file)
+        isomap.run()
+
+        isomap = ISOMAP(file, 6)
+        isomap.run()
+
+        isomap = ISOMAP(file,8)
+        isomap.run()
+
+        isomap = ISOMAP(file,10)
+        isomap.run()
+
+
+
 
