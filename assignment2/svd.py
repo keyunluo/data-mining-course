@@ -67,30 +67,3 @@ class SVD:
         projections = self.projection()
         labels = (self.train_label, self.test_label)
         onenn(projections, labels, self.name, "SVD")
-
-    def onenn(self):
-        """计算1-NN,预测"""
-        print("====算法：SVD ==== \n%s文件测试结果：" % self.name)
-        projection_trains, projection_tests = self.projection()
-        for i in range(3):
-            row_test, _ = projection_tests[i].shape
-            row_train, _ = projection_trains[i].shape
-            count = 0
-            for row_index in range(row_test):
-                dist_row = []
-                for rowtrain in range(row_train):
-                    dist_row.append(np.linalg.norm(projection_tests[i][row_index]-projection_trains[i][rowtrain]))
-
-                result = self.train_label[dist_row.index(min(dist_row))]
-
-                if result == self.test_label[row_index]:
-                    count += 1
-
-            if i == 0:
-                print("k=10,正确率：{0}/{1}={2}%".format(count, row_test, 1.0*count/row_test*100))
-
-            if i == 1:
-                print("k=20,正确率：{0}/{1}={2}%".format(count, row_test, 1.0*count/row_test*100))
-
-            if i == 2:
-                print("k=30,正确率：{0}/{1}={2}%".format(count, row_test, 1.0*count/row_test*100))

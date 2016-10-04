@@ -30,7 +30,7 @@ class ISOMAP:
         dis_points = np.zeros((self.length, self.length))
         for i, line_i in enumerate(self.data):
             for j, line_j in enumerate(self.data):
-                dis_points[i,j] = np.linalg.norm(line_i-line_j) if i != j else 0
+                dis_points[i, j] = np.linalg.norm(line_i-line_j) if i != j else 0
         return dis_points
 
     def build_graph(self):
@@ -89,7 +89,7 @@ class ISOMAP:
             if MAX[0] < len(conn):
                 MAX = [len(conn), i]
         connected_index = connected[MAX[1]]
-        # 非联通量
+        # 非连通量
         erase_value = [index for index, _ in enumerate(connected_index) if index not in connected_index]
         # 全连通距离矩阵
         conn_graph_matrix = np.take(np.take(graph_matrix, connected_index, 0), connected_index, 1)
@@ -99,9 +99,9 @@ class ISOMAP:
 
         D = -0.5 * conn_graph_matrix**2
         # 中心矩阵
-        H = np.eye(N) - np.ones((N,N)) / N
+        H = np.eye(N) - np.ones((N, N)) / N
         S = H.dot(D).dot(H)
-        # 正交分解
+        # 对称矩阵特征值分解分解
         eig_values, eig_vectors = np.linalg.eigh(S)
         # 对特征值，特征向量排序
         indexes = np.argsort(- eig_values)
@@ -121,7 +121,7 @@ class ISOMAP:
         if len(indexes) < 30:
             print("!!!正的特征值不足三十个，无法进行纵向比较!!!")
             return -1, -1
-        # 判断连联通量，即孤立噪声点所在的数据集
+        # 判断非连通量，即孤立噪声点所在的数据集
         train_len = len(self.train)
         erase_train = []
         erase_test = []
