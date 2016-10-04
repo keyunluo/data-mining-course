@@ -9,7 +9,7 @@
 2. 运行
 
    1): 进入到code根目录,可看到项目文件
-   2): 在终端中运行：python3 runAssignment2.py,等待一段时间左右后(ISOMAP比较耗时，测试了k=4,6,8,10四种情况)，待运行结束后便可以在终端上下看到结果。
+   2): 在终端中运行：python3 runAssignment2.py,等待一段时间左右后(ISOMAP比较耗时，测试了k=4,6,8,10四种情况)，待运行结束后便可以在终端上看到结果。
    3): 可选，作为对比，运行Scikit-learn：python3 -c "from tests import ReductionTest;ReductionTest.run()"
    3): 结果类似如下：
 		====算法：PCA ====

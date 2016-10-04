@@ -41,7 +41,7 @@ class Reduction:
         trains = []
         tests = []
         for k in [10, 20, 30]:
-            svd = TruncatedSVD(n_components=k)
+            svd = TruncatedSVD(n_components=k, n_iter=20)
             trains.append(svd.fit_transform(self.train))
             tests.append(svd.transform(self.test))
         labels = (self.train_label, self.test_label)
