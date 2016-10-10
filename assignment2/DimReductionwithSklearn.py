@@ -25,7 +25,7 @@ class Reduction:
         self.test_label = np.array(label_test).astype(int)
 
     def pca_solver(self):
-        """PCA降维"""
+        """PCA降维-实际使用了SVD分解"""
         trains = []
         tests = []
         for k in [10, 20, 30]:
@@ -34,10 +34,10 @@ class Reduction:
             tests.append(pca.transform(self.test))
         labels = (self.train_label, self.test_label)
         projections = (trains, tests)
-        onenn(projections, labels, self.name, "PCA-Scikit-learn")
+        onenn(projections, labels, self.name, "PCA(SVD)-Scikit-learn")
 
     def svd_solver(self):
-        """SVD降维"""
+        """截断SVD降维"""
         trains = []
         tests = []
         for k in [10, 20, 30]:
@@ -46,7 +46,7 @@ class Reduction:
             tests.append(svd.transform(self.test))
         labels = (self.train_label, self.test_label)
         projections = (trains, tests)
-        onenn(projections, labels, self.name, "SVD-Scikit-learn")
+        onenn(projections, labels, self.name, "TruncatedSVD-Scikit-learn")
 
     def isomap_solver(self, k_nn=4):
         """isomap流式学习降维"""
