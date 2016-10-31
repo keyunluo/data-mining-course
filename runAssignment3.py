@@ -4,3 +4,8 @@
 # @Author  : 骆克云
 # @File    : runAssignment3.py.py
 # @Software: PyCharm
+
+from assignment3.run import run
+
+if __name__ == "__main__":
+    run()

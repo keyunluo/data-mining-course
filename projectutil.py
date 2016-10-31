@@ -7,6 +7,7 @@
 
 import os
 from collections import OrderedDict
+import pandas as pd
 
 
 ### 作业1 工具方法
@@ -118,3 +119,13 @@ def get_reduction_dataset(name="sonar", types="train"):
             label.append(line[-1].strip("\n"))
 
     return data, label
+
+
+def get_handwritten_digits(filename):
+    file_path = project_dir + os.sep + "data/Clustering/" + filename + ".txt"
+    handwritten_digits = pd.read_csv(file_path, header=None)
+    label_column = handwritten_digits.columns[-1]
+    label = handwritten_digits[label_column]
+    handwritten_digits = handwritten_digits.drop(label_column, axis=1)
+    return handwritten_digits, label
+
