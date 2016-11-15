@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 # @Time    : 16-10-26 下午5:05
 # @Author  : 骆克云
-# @File    : run.py
+# @File    : main.py
 # @Software: PyCharm
 
 

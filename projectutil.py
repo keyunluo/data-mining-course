@@ -120,6 +120,7 @@ def get_reduction_dataset(name="sonar", types="train"):
 
     return data, label
 
+### 作业3 获取数据
 
 def get_handwritten_digits(filename):
     file_path = project_dir + os.sep + "data/Clustering/" + filename + ".txt"
@@ -128,4 +129,29 @@ def get_handwritten_digits(filename):
     label = handwritten_digits[label_column]
     handwritten_digits = handwritten_digits.drop(label_column, axis=1)
     return handwritten_digits, label
+
+## 作业4 获取数据
+
+
+def get_sgd_data(name="dataset1-a9a", types="train"):
+    """
+    获取数据集
+    :param name:数据名称：dataset1-a9a/covtype
+    :param type:数据类型：train/test
+    :return:数据，标签
+    """
+    file_train = project_dir + os.sep + "data/SGD/" + name + "-training.txt"
+    file_test = project_dir + os.sep + "data/SGD/" + name + "-testing.txt"
+    file = file_train if types == "train" else file_test
+
+    data = []
+    label = []
+
+    with open(file, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.split(",")
+            data.append(line[:-1])
+            label.append(line[-1].strip("\n"))
+
+    return data, label
 
