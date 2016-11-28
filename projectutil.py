@@ -155,3 +155,33 @@ def get_sgd_data(name="dataset1-a9a", types="train"):
 
     return data, label
 
+
+## 作业5 获取数据
+
+
+def get_ensemble_data(name="breast-cancer"):
+    """
+    获取数据集
+    :param name:数据名称：dataset1-a9a/covtype
+    :param type:数据类型：train/test
+    :return:数据，标签
+    """
+    file = project_dir + os.sep + "data/EnsembleLearning/" + name + "-assignment5.txt"
+
+    feature_types = None
+    data = []
+    label = []
+    first_row = True
+    with open(file, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.split(",")
+            if first_row:
+                feature_types = line
+                first_row = False
+                continue
+            data.append(line[:-1])
+            label.append(line[-1].strip("\n"))
+
+    return data, label, feature_types
+
+

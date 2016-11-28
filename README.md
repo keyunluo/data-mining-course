@@ -7,3 +7,5 @@
 ### [任务3：实现K-Medoids/Spectral Clustering聚类算法](assignment3/Assignment3.pdf)
 
 ### [任务4：实现损失函数为Logistic Regression/Ridge Regression的SGD二分类算法](assignment4/Assignment4.pdf)
+
+### [任务5：集成学习：Adaboost使用Naive Bayes分类器](assignment5/Assignment5.pdf)
