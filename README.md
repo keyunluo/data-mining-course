@@ -9,3 +9,5 @@
 ### [任务4：实现损失函数为Logistic Regression/Ridge Regression的SGD二分类算法](assignment4/Assignment4.pdf)
 
 ### [任务5：集成学习：Adaboost使用Naive Bayes分类器](assignment5/Assignment5.pdf)
+
+### [任务6：Real-World Data Mining Competition：Santander Product Recommendation](assignment6/Assignment6.pdf)
